@@ -16,16 +16,40 @@ import {
   PBRMetallicRoughnessMaterial
 } from '@zephyr3d/scene';
 import { imGuiInit, imGuiInjectEvent } from '@zephyr3d/imgui';
-import * as common from '../common';
 import { WoodMaterial } from './materials/wood';
 import { FurMaterial } from './materials/fur';
-import type { Texture2D } from '@zephyr3d/device';
+import type { DeviceBackend, Texture2D } from '@zephyr3d/device';
 import { ParallaxMapMaterial } from './materials/parallax';
 import { UI } from './ui';
 import { ToonMaterial } from './materials/toon';
+import { backendWebGPU } from '@zephyr3d/backend-webgpu';
+import { backendWebGL1, backendWebGL2 } from '@zephyr3d/backend-webgl';
+
+function getQueryString(name: string) {
+  return new URL(window.location.toString()).searchParams.get(name) || null;
+}
+
+function getBackend(): DeviceBackend {
+  const type = getQueryString('dev') || 'webgl';
+  if (type === 'webgpu') {
+    if (backendWebGPU.supported()) {
+      return backendWebGPU;
+    } else {
+      console.warn('No WebGPU support, fall back to WebGL2');
+    }
+  }
+  if (type === 'webgl2') {
+    if (backendWebGL2.supported()) {
+      return backendWebGL2;
+    } else {
+      console.warn('No WebGL2 support, fall back to WebGL1');
+    }
+  }
+  return backendWebGL1;
+}
 
 const myApp = new Application({
-  backend: common.getBackend(),
+  backend: getBackend(),
   canvas: document.querySelector('#canvas')
 });
 
@@ -33,7 +57,7 @@ myApp.ready().then(async function () {
   await imGuiInit(myApp.device);
 
   const scene = new Scene();
-  scene.env.sky.drawGround = true;
+
   let dlight: DirectionalLight = null;
   // Create directional light
   dlight = new DirectionalLight(scene);
