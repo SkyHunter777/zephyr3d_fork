@@ -1,7 +1,7 @@
 {
-  "name": "@zephyr3d/test",
+  "name": "@zephyr3d/buildertest",
   "version": "0.0.1",
-  "description": "zephyr3d test cases",
+  "description": "zephyr3d builder test",
   "homepage": "https://github.com/gavinyork/zephyr3d#readme",
   "private": "true",
   "files": [
@@ -17,7 +17,7 @@
     "build": "cross-env NODE_OPTIONS=--max_old_space_size=8192 rollup -c --silent",
     "lint": "cross-env NODE_OPTIONS=--max_old_space_size=8192 eslint \"src/**/*.ts\" -f compact",
     "lint-fix": "cross-env NODE_OPTIONS=--max_old_space_size=8192 eslint --fix \"src/**/*.ts\" -f compact",
-    "test": "npm run build && jest"
+    "serve": "web-dev-server --no-cache --watch --open dist/index.html"
   },
   "engines": {
     "node": ">=16.18.0"
@@ -58,17 +58,10 @@
   },
   "dependencies": {
     "@webgpu/types": "^0.1.65",
-    "@zip.js/zip.js": "^2.7.54",
     "@zephyr3d/base": "workspace:^0.2.0",
     "@zephyr3d/device": "workspace:^0.2.5",
-    "@zephyr3d/scene": "workspace:^0.7.0",
-    "@zephyr3d/imgui": "workspace:^0.2.0",
     "@zephyr3d/backend-webgl": "workspace:^0.1.9",
     "@zephyr3d/backend-webgpu": "workspace:^0.1.8",
-    "jest": "^30.2.0",
-    "ts-jest": "^29.4.6",
-    "@types/jest": "^30.0.0",
-    "@types/node": "^22.12.0",
     "@rollup/plugin-commonjs": "~28.0.2"
   }
 }

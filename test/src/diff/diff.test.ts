@@ -72,8 +72,16 @@ function stringifyCanonical(v: DiffValue, opt?: CanonOptions): string {
 }
 
 function assertEqualJSON(a: any, b: any, msg?: string) {
-  const sa = stringifyCanonical(a, { floatEpsilon: 1e-9, floatDigits: 6, normalizeNewline: true });
-  const sb = stringifyCanonical(b, { floatEpsilon: 1e-9, floatDigits: 6, normalizeNewline: true });
+  const sa = stringifyCanonical(a, {
+    floatEpsilon: 1e-9,
+    floatDigits: 6,
+    normalizeNewline: true
+  });
+  const sb = stringifyCanonical(b, {
+    floatEpsilon: 1e-9,
+    floatDigits: 6,
+    normalizeNewline: true
+  });
   if (sa !== sb) {
     throw new Error((msg ?? 'JSON not equal') + `\nA=${sa}\nB=${sb}`);
   }
@@ -86,96 +94,107 @@ function roundTrip(base: any, target: any) {
   return p;
 }
 
-function runTests() {
-  roundTrip(42, 42);
-  roundTrip('abc', 'abc');
-  roundTrip(true, true);
-  roundTrip(null, null);
-  roundTrip(1, 2);
-  roundTrip('a', 'b');
-  roundTrip(false, true);
-  roundTrip(null, 0);
-  roundTrip(1, { a: 1 });
-  roundTrip('x', [1, 2, 3]);
-  roundTrip(null, 'now string');
-  roundTrip({}, { a: 1 });
-  roundTrip({ x: 1 }, { x: 1, y: 2 });
-  roundTrip({ a: 1 }, {});
-  roundTrip({ x: 1, y: 2 }, { x: 1 });
-  roundTrip({ a: 1 }, { a: 2 });
-  roundTrip({ s: 'a', n: 1, b: false }, { s: 'b', n: 2, b: true });
-  roundTrip({ a: { b: { c: 1 } } }, { a: { b: { c: 2, d: 'new' } } });
-  roundTrip(
-    { user: { name: 'Tom', age: 20 }, cfg: { theme: 'light' } },
-    { user: { name: 'Tom', age: 21 }, cfg: {} }
-  );
-  roundTrip([], []);
-  roundTrip([], [1, 2, 3]);
-  roundTrip([1, 2], []);
-  roundTrip([1, 2], [1, 2, 3, 4]);
-  roundTrip([1, 2, 3, 4], [1, 2]);
-  roundTrip([1, 2, 3], [1, 9, 3]); // index 1 替换
-  roundTrip(['a', 'b', 'c'], ['a', 'B', 'c']);
-  roundTrip(
-    [
-      { id: 1, v: 10 },
-      { id: 2, v: 20 }
-    ],
-    [
-      { id: 1, v: 10 },
-      { id: 2, v: 21 }
-    ]
-  );
-  roundTrip([{ o: { x: 1 } }, { o: { x: 2 } }], [{ o: { x: 1 } }, { o: { x: 3, y: 1 } }]);
-  roundTrip(
-    [
-      [1, 2],
-      [3, 4]
-    ],
-    [
-      [1, 2],
-      [3, 5]
-    ]
-  );
-  roundTrip([[{ a: 1 }]], [[{ a: 2, b: 1 }]]);
-  roundTrip({ name: 'car', wheels: [1, 2, 3, 4] }, { name: 'car', wheels: [1, 9, 3] });
-  roundTrip({ items: [{ a: 1 }, { b: 2 }] }, { items: [{ a: 1 }, { b: 3 }, { c: 9 }] });
-  roundTrip({ a: { b: [1, { c: 2 }] } }, { a: { b: { notArray: true } } });
-  roundTrip({ cfg: { x: 1, y: 2 }, data: [1, 2, 3] }, { cfg: 'RESET', data: [1, 2, 3] });
-  roundTrip(
-    { cfg: { theme: 'light', layout: { col: 2, gap: 8 } } },
-    { cfg: { theme: 'dark', layout: { col: 3, gap: 8, pad: 4 } } }
-  );
-  roundTrip({ a: null }, { a: undefined as any });
-  roundTrip({ a: 1 }, {});
-  roundTrip({}, { a: null });
-  roundTrip({ a: {} }, { a: { b: [] } });
-  roundTrip({ a: { b: [] } }, { a: {} });
-  {
+describe('diff/applyPatch round-trip tests', () => {
+  test('primitive roundTrip cases', () => {
+    roundTrip(42, 42);
+    roundTrip('abc', 'abc');
+    roundTrip(true, true);
+    roundTrip(null, null);
+    roundTrip(1, 2);
+    roundTrip('a', 'b');
+    roundTrip(false, true);
+    roundTrip(null, 0);
+    roundTrip(1, { a: 1 });
+    roundTrip('x', [1, 2, 3]);
+    roundTrip(null, 'now string');
+  });
+
+  test('object roundTrip cases', () => {
+    roundTrip({}, { a: 1 });
+    roundTrip({ x: 1 }, { x: 1, y: 2 });
+    roundTrip({ a: 1 }, {});
+    roundTrip({ x: 1, y: 2 }, { x: 1 });
+    roundTrip({ a: 1 }, { a: 2 });
+    roundTrip({ s: 'a', n: 1, b: false }, { s: 'b', n: 2, b: true });
+    roundTrip({ a: { b: { c: 1 } } }, { a: { b: { c: 2, d: 'new' } } });
+    roundTrip(
+      { user: { name: 'Tom', age: 20 }, cfg: { theme: 'light' } },
+      { user: { name: 'Tom', age: 21 }, cfg: {} }
+    );
+  });
+
+  test('array roundTrip cases', () => {
+    roundTrip([], []);
+    roundTrip([], [1, 2, 3]);
+    roundTrip([1, 2], []);
+    roundTrip([1, 2], [1, 2, 3, 4]);
+    roundTrip([1, 2, 3, 4], [1, 2]);
+    roundTrip([1, 2, 3], [1, 9, 3]); // index 1 替换
+    roundTrip(['a', 'b', 'c'], ['a', 'B', 'c']);
+    roundTrip(
+      [
+        { id: 1, v: 10 },
+        { id: 2, v: 20 }
+      ],
+      [
+        { id: 1, v: 10 },
+        { id: 2, v: 21 }
+      ]
+    );
+    roundTrip([{ o: { x: 1 } }, { o: { x: 2 } }], [{ o: { x: 1 } }, { o: { x: 3, y: 1 } }]);
+    roundTrip(
+      [
+        [1, 2],
+        [3, 4]
+      ],
+      [
+        [1, 2],
+        [3, 5]
+      ]
+    );
+    roundTrip([[{ a: 1 }]], [[{ a: 2, b: 1 }]]);
+    roundTrip({ name: 'car', wheels: [1, 2, 3, 4] }, { name: 'car', wheels: [1, 9, 3] });
+    roundTrip({ items: [{ a: 1 }, { b: 2 }] }, { items: [{ a: 1 }, { b: 3 }, { c: 9 }] });
+    roundTrip(
+      [1, 2, 3, 4],
+      [1, 99, 3] // index 1 set，尾部 del
+    );
+    roundTrip([{ v: 1 }, { v: 2 }, { v: 3 }], [{ v: 1 }, { v: 2, extra: true }, { v: 3 }, { v: 4 }]);
+  });
+
+  test('object / array structure changes', () => {
+    roundTrip({ a: { b: [1, { c: 2 }] } }, { a: { b: { notArray: true } } });
+    roundTrip({ cfg: { x: 1, y: 2 }, data: [1, 2, 3] }, { cfg: 'RESET', data: [1, 2, 3] });
+    roundTrip(
+      { cfg: { theme: 'light', layout: { col: 2, gap: 8 } } },
+      { cfg: { theme: 'dark', layout: { col: 3, gap: 8, pad: 4 } } }
+    );
+    roundTrip({ a: null }, { a: undefined as any });
+    roundTrip({ a: 1 }, {});
+    roundTrip({}, { a: null });
+    roundTrip({ a: {} }, { a: { b: [] } });
+    roundTrip({ a: { b: [] } }, { a: {} });
+  });
+
+  test('idempotence and empty patch behavior', () => {
     const base = { a: [1, 2, 3], b: { x: 1 } };
     const target = { a: [1, 9], b: { x: 2, y: 1 } };
     const p = diff(base, target);
     const once = applyPatch(base, p);
     const twice = applyPatch(once, p);
+
+    // apply twice should be idempotent
     assertEqualJSON(once, twice, 'apply twice should be idempotent');
+
     const o = { a: 1, b: [1, 2], c: { d: 'x' } };
     const p0 = diff(o, o);
-    if (p0.length !== 0) {
-      throw new Error('diff with same object must be empty');
-    }
-    const applied = applyPatch(o, p0);
-    assertEqualJSON(applied, o, 'empty patch should keep object unchanged');
-  }
-  roundTrip(
-    [1, 2, 3, 4],
-    [1, 99, 3] // index 1 set，尾部 del
-  );
+    expect(Array.isArray(p0) ? p0.length : 0).toBe(0);
 
-  roundTrip(
-    [{ v: 1 }, { v: 2 }, { v: 3 }],
-    [{ v: 1 }, { v: 2, extra: true }, { v: 3 }, { v: 4 }] // 第二项递归变更 + 尾部 ins
-  );
-  {
+    const applied = applyPatch(o, p0 as any);
+    assertEqualJSON(applied, o, 'empty patch should keep object unchanged');
+  });
+
+  test('manual array patch construction', () => {
     const base = { a: {} };
     const patch = [
       {
@@ -189,15 +208,17 @@ function runTests() {
     ] as const;
     const applied = applyPatch(base, patch as any);
     assertEqualJSON(applied, { a: { list: [1, 2] } });
-  }
-  {
+  });
+
+  test('key order changes should not matter', () => {
     const base = { a: 1, b: 2 };
     const target = { b: 2, a: 1 };
     const p = diff(base, target);
     const applied = applyPatch(base, p);
     assertEqualJSON(applied, target);
-  }
-  {
+  });
+
+  test('random fuzzing (200 round-trips)', () => {
     function randPrim(): any {
       const t = Math.floor(Math.random() * 4);
       if (t === 0) {
@@ -211,6 +232,7 @@ function runTests() {
       }
       return Math.random().toString(36).slice(2, 7);
     }
+
     function randJSON(depth = 0): any {
       if (depth > 3) {
         return randPrim();
@@ -242,8 +264,9 @@ function runTests() {
       const target = randJSON();
       roundTrip(base, target);
     }
-  }
-  {
+  });
+
+  test('complex car example', () => {
     const base = {
       name: 'Car',
       transform: { pos: [0, 0, 0], rot: [0, 0, 0, 1], scl: [1, 1, 1] },
@@ -269,12 +292,5 @@ function runTests() {
     };
 
     roundTrip(base, target);
-  }
-
-  console.log('done');
-}
-
-const btn = document.querySelector('#start');
-btn.addEventListener('click', function () {
-  runTests();
+  });
 });
