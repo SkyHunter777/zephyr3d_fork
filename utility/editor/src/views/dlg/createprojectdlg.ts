@@ -1,6 +1,7 @@
 import { ImGui, imGuiCalcTextSize } from '@zephyr3d/imgui';
 import { DialogRenderer } from '../../components/modal';
 import { getDesktopAPI } from '../../core/services/desktop';
+import { customTextInput } from '../../components/textinput';
 
 export type CreateProjectResult = {
   name: string;
@@ -37,17 +38,12 @@ export class DlgCreateProject extends DialogRenderer<CreateProjectResult | null>
     }
 
     ImGui.PushItemWidth(ImGui.GetContentRegionAvail().x);
-    ImGui.InputTextWithHint('##ProjectName', 'Enter project name', this._name, undefined);
+    customTextInput('##ProjectName', this._name, 'Enter project name');
     ImGui.PopItemWidth();
 
     const btnWidth = imGuiCalcTextSize('...').x + ImGui.GetStyle().FramePadding.x * 2;
     ImGui.PushItemWidth(ImGui.GetContentRegionAvail().x - btnWidth - ImGui.GetStyle().ItemSpacing.x);
-    ImGui.InputTextWithHint(
-      '##ProjectDirectory',
-      'Select or enter a project directory',
-      this._directory,
-      undefined
-    );
+    customTextInput('##ProjectDirectory', this._directory, 'Select or enter a project directory');
     ImGui.PopItemWidth();
     ImGui.SameLine();
     if (ImGui.Button('...', new ImGui.ImVec2(btnWidth, 0))) {

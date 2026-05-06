@@ -28,15 +28,6 @@ export class DlgPromptName extends DialogRenderer<string> {
       this._hint,
       CustomInputTextFlags.AutoSelectAll | CustomInputTextFlags.EnterReturnsTrue
     );
-    /*
-    const textEntered = ImGui.InputTextWithHint(
-      this._label,
-      this._hint,
-      this._name,
-      undefined,
-      ImGui.InputTextFlags.AutoSelectAll | ImGui.InputTextFlags.EnterReturnsTrue
-    );
-    */
     ImGui.Button('Ok');
     if (this._name[0] && (textEntered || (ImGui.IsItemHovered() && ImGui.IsMouseReleased(0)))) {
       this.close(this._name[0]);

@@ -3,6 +3,7 @@ import { DialogRenderer } from '../../components/modal';
 import type { DirectoryInfo, FileInfo } from '../../components/vfsrenderer';
 import { VFSRenderer } from '../../components/vfsrenderer';
 import { PathUtils, type VFS } from '@zephyr3d/base';
+import { CustomInputTextFlags, customTextInput } from '../../components/textinput';
 
 export class DlgSaveFile extends DialogRenderer<string> {
   private readonly _renderer: VFSRenderer;
@@ -78,12 +79,11 @@ export class DlgSaveFile extends DialogRenderer<string> {
     ) {
       ImGui.SetKeyboardFocusHere();
     }
-    const textEntered = ImGui.InputTextWithHint(
+    const textEntered = customTextInput(
       '',
-      'Enter file name',
       this._name,
-      undefined,
-      ImGui.InputTextFlags.AutoSelectAll | ImGui.InputTextFlags.EnterReturnsTrue
+      'Enter file name',
+      CustomInputTextFlags.AutoSelectAll | CustomInputTextFlags.EnterReturnsTrue
     );
     ImGui.SameLine();
     if (ImGui.Combo('##FileTypeCombo', this._selected, this._filterLabels)) {

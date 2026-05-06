@@ -6,6 +6,7 @@ import type { Nullable } from '@zephyr3d/base';
 import { ASSERT, Observable } from '@zephyr3d/base';
 import type { IGraphNode, GraphStructure, NodeConnection } from '@zephyr3d/scene';
 import { getEngine } from '@zephyr3d/scene';
+import { customTextInput } from '../textinput';
 
 const SLOT_RADIUS = 6;
 
@@ -1229,7 +1230,7 @@ export class NodeEditor extends Observable<{
       const maxHeight = 500;
       if (ImGui.BeginChild('##CanvasContextMenuSearch', new ImGui.ImVec2(300, maxHeight), false)) {
         ImGui.SetNextItemWidth(-1);
-        if (ImGui.InputTextWithHint('##CanvasContextMenuSearch', 'Search', this.nodeSearchBuf, undefined)) {
+        if (customTextInput('##CanvasContextMenuSearch', this.nodeSearchBuf, 'Search')) {
           if (this.nodeSearchBuf[0]) {
             this.filteredCategory = this.filterCategory(this.nodeSearchBuf[0], this.nodeCategory);
           } else {
