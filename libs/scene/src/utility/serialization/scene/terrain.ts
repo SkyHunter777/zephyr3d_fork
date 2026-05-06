@@ -165,6 +165,7 @@ export function getTerrainClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'Debug',
+          description: 'Debug visualization mode for the terrain material',
           type: 'string',
           options: {
             enum: {
@@ -185,6 +186,7 @@ export function getTerrainClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'GrassMaps',
+          description: 'Serialized grass texture layers and blade settings',
           type: 'object',
           default: null,
           options: { objectTypes: [JSONArray] },
@@ -240,6 +242,7 @@ export function getTerrainClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'DetailMaps',
+          description: 'Serialized terrain detail texture layers',
           type: 'object',
           default: null,
           options: { objectTypes: [JSONArray] },
@@ -318,6 +321,7 @@ export function getTerrainClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'SplatMap',
+          description: 'Serialized splat-map texture data for terrain layers',
           type: 'embedded',
           default: null,
           isHidden() {
@@ -354,6 +358,7 @@ export function getTerrainClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'Grass',
+          description: 'Serialized grass instance data for the terrain',
           type: 'embedded',
           default: null,
           phase: 1,
@@ -404,6 +409,7 @@ export function getTerrainClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'HeightMap',
+          description: 'Serialized terrain height map data',
           type: 'embedded',
           default: null,
           isHidden() {

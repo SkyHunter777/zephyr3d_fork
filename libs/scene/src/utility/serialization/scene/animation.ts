@@ -251,6 +251,7 @@ export function getFixedGeometryCacheTrackClass(): SerializableClass {
         },
         {
           name: 'Times',
+          description: 'Keyframe timestamps for this geometry cache track',
           type: 'string',
           isHidden() {
             return true;
@@ -264,6 +265,7 @@ export function getFixedGeometryCacheTrackClass(): SerializableClass {
         },
         {
           name: 'Frames',
+          description: 'Serialized geometry cache frames for this track',
           type: 'object',
           isHidden() {
             return true;
@@ -312,6 +314,7 @@ export function getPCAGeometryCacheTrackClass(): SerializableClass {
       return defineProps([
         {
           name: 'TrackName',
+          description: 'The track name',
           type: 'string',
           options: {
             label: 'Name'
@@ -325,6 +328,7 @@ export function getPCAGeometryCacheTrackClass(): SerializableClass {
         },
         {
           name: 'TrackTarget',
+          description: 'Target object this track applys to',
           type: 'string',
           isHidden() {
             return true;
@@ -338,6 +342,7 @@ export function getPCAGeometryCacheTrackClass(): SerializableClass {
         },
         {
           name: 'Times',
+          description: 'Keyframe timestamps for this PCA geometry cache track',
           type: 'string',
           isHidden() {
             return true;
@@ -351,6 +356,7 @@ export function getPCAGeometryCacheTrackClass(): SerializableClass {
         },
         {
           name: 'Bounds',
+          description: 'Per-frame bounding boxes for the PCA geometry cache',
           type: 'object',
           isHidden() {
             return true;
@@ -364,6 +370,7 @@ export function getPCAGeometryCacheTrackClass(): SerializableClass {
         },
         {
           name: 'PositionReference',
+          description: 'Reference position data for the PCA geometry cache',
           type: 'string',
           isHidden() {
             return true;
@@ -377,6 +384,7 @@ export function getPCAGeometryCacheTrackClass(): SerializableClass {
         },
         {
           name: 'PositionMean',
+          description: 'Mean position data for the PCA geometry cache',
           type: 'string',
           isHidden() {
             return true;
@@ -390,6 +398,7 @@ export function getPCAGeometryCacheTrackClass(): SerializableClass {
         },
         {
           name: 'PositionBases',
+          description: 'Principal position basis vectors for the PCA geometry cache',
           type: 'object',
           isHidden() {
             return true;
@@ -405,6 +414,7 @@ export function getPCAGeometryCacheTrackClass(): SerializableClass {
         },
         {
           name: 'PositionCoefficients',
+          description: 'Per-frame position coefficient data for the PCA geometry cache',
           type: 'object',
           isHidden() {
             return true;
@@ -420,6 +430,7 @@ export function getPCAGeometryCacheTrackClass(): SerializableClass {
         },
         {
           name: 'NormalMean',
+          description: 'Mean normal data for the PCA geometry cache',
           type: 'string',
           isHidden() {
             return true;
@@ -433,6 +444,7 @@ export function getPCAGeometryCacheTrackClass(): SerializableClass {
         },
         {
           name: 'NormalBases',
+          description: 'Principal normal basis vectors for the PCA geometry cache',
           type: 'object',
           isHidden() {
             return true;
@@ -447,6 +459,7 @@ export function getPCAGeometryCacheTrackClass(): SerializableClass {
         },
         {
           name: 'NormalCoefficients',
+          description: 'Per-frame normal coefficient data for the PCA geometry cache',
           type: 'object',
           isHidden() {
             return true;
@@ -743,6 +756,7 @@ export function getPropTrackClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'TrackData',
+          description: 'Interpolator data used by this property track',
           type: 'object_array',
           options: {
             objectTypes: [Interpolator]
@@ -913,6 +927,7 @@ export function getAnimationClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'Skeletons',
+          description: 'Skeleton references used by this animation clip',
           type: 'object',
           isHidden() {
             return true;

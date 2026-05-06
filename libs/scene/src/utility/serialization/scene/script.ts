@@ -14,6 +14,7 @@ export function getScriptAttachmentClass(): SerializableClass {
       return defineProps([
         {
           name: 'Script',
+          description: 'TypeScript file attached to this object',
           type: 'string',
           options: {
             mimeTypes: ['text/x-typescript'],
@@ -31,6 +32,7 @@ export function getScriptAttachmentClass(): SerializableClass {
         },
         {
           name: 'Config',
+          description: 'JSON configuration passed to the attached script',
           type: 'object',
           options: { objectTypes: [JSONData, JSONArray] },
           isHidden(this: ScriptAttachment) {

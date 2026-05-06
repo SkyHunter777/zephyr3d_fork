@@ -18,6 +18,7 @@ export function getFBMWaveGeneratorClass(): SerializableClass {
       return defineProps([
         {
           name: 'NumOctaves',
+          description: 'Number of FBM noise octaves used to build the wave pattern',
           type: 'int',
           options: { minValue: 1, maxValue: 8 },
           default: 4,
@@ -30,6 +31,7 @@ export function getFBMWaveGeneratorClass(): SerializableClass {
         },
         {
           name: 'Wind',
+          description: 'Wind direction and speed that drive the FBM waves',
           type: 'vec2',
           default: [0.1, 0],
           options: {
@@ -45,6 +47,7 @@ export function getFBMWaveGeneratorClass(): SerializableClass {
         },
         {
           name: 'Amplitude',
+          description: 'Wave height amplitude for the FBM wave generator',
           type: 'float',
           options: { animatable: true, minValue: 0, maxValue: 5 },
           default: 0.3,
@@ -57,6 +60,7 @@ export function getFBMWaveGeneratorClass(): SerializableClass {
         },
         {
           name: 'Frequency',
+          description: 'Wave frequency for the FBM wave generator',
           type: 'float',
           options: { animatable: true, minValue: 0, maxValue: 16 },
           default: 3,
@@ -81,6 +85,7 @@ export function getFFTWaveGeneratorClass(): SerializableClass {
       return defineProps([
         {
           name: 'Alignment',
+          description: 'How strongly FFT waves align with the wind direction',
           type: 'float',
           options: { animatable: true, minValue: 0, maxValue: 1 },
           get(this: FFTWaveGenerator, value) {
@@ -92,6 +97,7 @@ export function getFFTWaveGeneratorClass(): SerializableClass {
         },
         {
           name: 'Wind',
+          description: 'Wind direction and speed that drive the FFT waves',
           type: 'vec2',
           options: {
             animatable: true
@@ -106,6 +112,7 @@ export function getFFTWaveGeneratorClass(): SerializableClass {
         },
         {
           name: 'FoamWidth',
+          description: 'Width of foam bands generated on the wave crests',
           type: 'float',
           default: 1.2,
           options: { animatable: true, minValue: 0, maxValue: 10 },
@@ -118,6 +125,7 @@ export function getFFTWaveGeneratorClass(): SerializableClass {
         },
         {
           name: 'FoamContrast',
+          description: 'Contrast of the foam pattern on FFT waves',
           type: 'float',
           default: 7.2,
           options: { animatable: true, minValue: 0, maxValue: 10 },
@@ -130,6 +138,7 @@ export function getFFTWaveGeneratorClass(): SerializableClass {
         },
         {
           name: 'WaveLengthCascades',
+          description: 'Wavelength values for the three FFT wave cascades',
           type: 'vec3',
           default: [400, 100, 15],
           options: { animatable: true, minValue: 0, maxValue: 1000 },
@@ -146,6 +155,7 @@ export function getFFTWaveGeneratorClass(): SerializableClass {
         },
         {
           name: 'WaveStrengthCascades',
+          description: 'Strength values for the three FFT wave cascades',
           type: 'vec3',
           default: [0.4, 0.4, 0.2],
           options: { animatable: true, minValue: 0, maxValue: 1 },
@@ -162,6 +172,7 @@ export function getFFTWaveGeneratorClass(): SerializableClass {
         },
         {
           name: 'WaveCroppinessCascades',
+          description: 'Croppiness values for the three FFT wave cascades',
           type: 'vec3',
           default: [-1.5, -1.2, -0.5],
           options: { animatable: true, minValue: -4, maxValue: 0 },
@@ -196,6 +207,7 @@ export function getWaterClass(manager: ResourceManager): SerializableClass {
       return defineProps([
         {
           name: 'WaveGenerator',
+          description: 'Wave generator used to drive the water surface',
           type: 'object',
           default: null,
           options: {
@@ -217,6 +229,7 @@ export function getWaterClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'GridScale',
+          description: 'Scale of the water simulation grid',
           type: 'float',
           default: 1,
           options: { minValue: 0, maxValue: 1 },
@@ -229,6 +242,7 @@ export function getWaterClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'Wireframe',
+          description: 'If true, renders the water surface as wireframe',
           type: 'bool',
           default: false,
           get(this: Water, value) {
@@ -240,6 +254,7 @@ export function getWaterClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'AnimationSpeed',
+          description: 'Playback speed of wave animation',
           type: 'float',
           default: 1,
           options: { animatable: true, minValue: 0, maxValue: 100 },
@@ -252,6 +267,7 @@ export function getWaterClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'DepthScale',
+          description: 'Depth attenuation scale for the water material',
           type: 'float',
           default: 10,
           options: { animatable: true, minValue: 0, maxValue: 100 },
@@ -264,6 +280,7 @@ export function getWaterClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'RefractionStrength',
+          description: 'Strength of underwater refraction',
           type: 'float',
           default: 0,
           options: { animatable: true, minValue: 0, maxValue: 1 },
@@ -276,6 +293,7 @@ export function getWaterClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'Displace',
+          description: 'Vertex displacement scale for water waves',
           type: 'float',
           default: 16,
           options: { minValue: 1, maxValue: 256 },
@@ -288,6 +306,7 @@ export function getWaterClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'TAAStrength',
+          description: 'Temporal anti-aliasing strength for the water surface',
           type: 'float',
           default: 0.4,
           options: { minValue: 0, maxValue: 1 },
@@ -300,6 +319,7 @@ export function getWaterClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'ScatterRampTexture',
+          description: 'Ramp texture used for water scatter lighting',
           type: 'object',
           default: null,
           isNullable() {
@@ -332,6 +352,7 @@ export function getWaterClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'AbsorptionRampTexture',
+          description: 'Ramp texture used for water absorption',
           type: 'object',
           default: null,
           isNullable() {

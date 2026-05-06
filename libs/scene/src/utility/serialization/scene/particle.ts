@@ -67,6 +67,7 @@ export function getParticleNodeClass(): SerializableClass {
         },
         {
           name: 'Gravity',
+          description: 'Gravity acceleration applied to particles',
           type: 'vec3',
           default: [0, 0, 0],
           options: {
@@ -84,6 +85,7 @@ export function getParticleNodeClass(): SerializableClass {
         },
         {
           name: 'Wind',
+          description: 'Wind velocity applied to particles',
           type: 'vec3',
           default: [0, 0, 0],
           options: {
@@ -131,6 +133,7 @@ export function getParticleNodeClass(): SerializableClass {
         },
         {
           name: 'AirResistence',
+          description: 'If true, particles are slowed by air resistance',
           type: 'bool',
           default: false,
           get(this: ParticleSystem, value) {
@@ -142,6 +145,7 @@ export function getParticleNodeClass(): SerializableClass {
         },
         {
           name: 'JitterSpeed',
+          description: 'Speed of random particle jitter',
           type: 'float',
           default: 1,
           options: {
@@ -156,6 +160,7 @@ export function getParticleNodeClass(): SerializableClass {
         },
         {
           name: 'JitterPower',
+          description: 'Strength of random particle jitter',
           type: 'float',
           default: 0,
           options: {
@@ -170,6 +175,7 @@ export function getParticleNodeClass(): SerializableClass {
         },
         {
           name: 'EmitterShape',
+          description: 'Shape of the particle emission volume',
           type: 'string',
           options: {
             enum: {
@@ -187,6 +193,7 @@ export function getParticleNodeClass(): SerializableClass {
         },
         {
           name: 'EmitterBehavior',
+          description: 'Whether particles spawn on the surface or throughout the volume',
           type: 'string',
           options: {
             enum: {
@@ -204,6 +211,7 @@ export function getParticleNodeClass(): SerializableClass {
         },
         {
           name: 'Directional',
+          description: 'If true, emitted particles follow the emitter direction',
           type: 'bool',
           default: false,
           get(this: ParticleSystem, value) {

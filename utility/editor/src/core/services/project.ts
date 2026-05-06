@@ -67,7 +67,10 @@ type EditorManifest = {
 };
 
 function isAbsoluteProjectId(value: string): boolean {
-  return typeof value === 'string' && (/^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\') || value.startsWith('/'));
+  return (
+    typeof value === 'string' &&
+    (/^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\') || value.startsWith('/'))
+  );
 }
 
 function normalizeProjectInfo(info: ProjectInfo | null | undefined): ProjectInfo | null {
@@ -167,7 +170,9 @@ export class ProjectService {
     }
     const desktop = getDesktopAPI();
     if (desktop && directory && !isAbsoluteProjectId(directory)) {
-      throw new Error(`Create project failed: Project directory must be an absolute path, got <${directory}>`);
+      throw new Error(
+        `Create project failed: Project directory must be an absolute path, got <${directory}>`
+      );
     }
     const uuid = desktop
       ? directory ||
@@ -340,7 +345,9 @@ export class ProjectService {
       }
       const entries = await vfs.readDirectory('/', { recursive: false });
       if (entries.length > 0) {
-        throw new Error(`Create project failed: Project directory <${storageId}> already exists and is not empty`);
+        throw new Error(
+          `Create project failed: Project directory <${storageId}> already exists and is not empty`
+        );
       }
     } finally {
       await vfs.close();

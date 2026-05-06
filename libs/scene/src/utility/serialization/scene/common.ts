@@ -12,6 +12,13 @@ import { Matrix4x4, Vector2, Vector3, Vector4 } from '@zephyr3d/base';
 import type { ResourceManager } from '../manager';
 import { getDevice, getEngine } from '../../../app/api';
 
+function getTextureLabel(name: string): string {
+  return name
+    .replace(/Texture$/, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase();
+}
+
 /** @internal */
 export const meshInstanceClsMap: Map<
   {
@@ -51,6 +58,7 @@ export function getMeshMaterialInstanceUniformsClass(cls: {
           PropertyAccessor<any, 'DUMMY'>
         >((u) => ({
           name: u.name,
+          description: `Per-instance override value for ${u.name}`,
           type: u.type,
           get(this: C, value) {
             const prop = u.prop as keyof MeshMaterial;
@@ -110,9 +118,11 @@ export function getTextureProps<T extends Material>(
   phase: number,
   isValid?: (this: T) => boolean
 ): PropertyAccessor<T>[] {
+  const textureLabel = getTextureLabel(name);
   return defineProps([
     {
       name: name[0].toUpperCase() + name.slice(1),
+      description: `Texture asset ID or file path for the ${textureLabel} texture`,
       type: 'object',
       default: '',
       phase: phase,
@@ -161,6 +171,7 @@ export function getTextureProps<T extends Material>(
     },
     {
       name: name[0].toUpperCase() + name.slice(1, name.length - 7) + 'TexCoordScale',
+      description: `UV scale applied to the ${textureLabel} texture`,
       type: 'vec2',
       phase: phase + 1,
       default: [1, 1],
@@ -203,6 +214,7 @@ export function getTextureProps<T extends Material>(
     },
     {
       name: name[0].toUpperCase() + name.slice(1, name.length - 7) + 'TexCoordAddressU',
+      description: `U-axis wrap mode for the ${textureLabel} texture, possible values are clamp, repeat and mirrored_repeat`,
       type: 'string',
       options: {
         enum: {
@@ -249,6 +261,7 @@ export function getTextureProps<T extends Material>(
     },
     {
       name: name[0].toUpperCase() + name.slice(1, name.length - 7) + 'TexCoordAddressV',
+      description: `V-axis wrap mode for the ${textureLabel} texture, possible values are clamp, repeat and mirrored_repeat`,
       type: 'string',
       options: {
         enum: {
@@ -293,6 +306,7 @@ export function getTextureProps<T extends Material>(
     },
     {
       name: name[0].toUpperCase() + name.slice(1, name.length - 7) + 'TexCoordIndex',
+      description: `UV set index used by the ${textureLabel} texture`,
       type: 'int',
       phase: phase + 1,
       default: 0,

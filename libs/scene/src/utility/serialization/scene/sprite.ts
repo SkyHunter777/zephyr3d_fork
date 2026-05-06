@@ -23,6 +23,7 @@ export function getSpriteClass(): SerializableClass {
       return defineProps([
         {
           name: 'Anchor',
+          description: 'Sprite pivot in normalized UV space',
           type: 'vec2',
           default: [0.5, 0.5],
           get(this: Sprite, value) {
@@ -36,6 +37,7 @@ export function getSpriteClass(): SerializableClass {
         },
         {
           name: 'UVTopLeft',
+          description: 'Top-left UV coordinate of the sprite image',
           type: 'vec2',
           default: [0, 0],
           get(this: Sprite, value) {
@@ -49,6 +51,7 @@ export function getSpriteClass(): SerializableClass {
         },
         {
           name: 'UVBottomRight',
+          description: 'Bottom-right UV coordinate of the sprite image',
           type: 'vec2',
           default: [1, 1],
           get(this: Sprite, value) {
@@ -62,6 +65,7 @@ export function getSpriteClass(): SerializableClass {
         },
         {
           name: 'Material',
+          description: 'Sprite material object',
           type: 'object',
           options: {
             mimeTypes: ['application/vnd.zephyr3d.material+json']
@@ -85,6 +89,7 @@ export function getSpriteClass(): SerializableClass {
         },
         {
           name: 'Geometry Instance',
+          description: 'If true, the sprite uses a material instance',
           type: 'bool',
           get(this: Sprite, value) {
             value.bool[0] = !!this.material?.$isInstance;
@@ -96,6 +101,7 @@ export function getSpriteClass(): SerializableClass {
         },
         {
           name: 'MaterialInstanceUniforms',
+          description: 'Per-instance overrides for sprite material uniforms',
           type: 'object',
           phase: 1,
           options: {

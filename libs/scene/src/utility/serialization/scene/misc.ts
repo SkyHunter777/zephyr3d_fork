@@ -10,6 +10,7 @@ export function getAABBClass(): SerializableClass {
       return defineProps([
         {
           name: 'Min',
+          description: 'Minimum corner of the bounding box',
           type: 'vec3',
           get(this: AABB, value) {
             value.num[0] = this.minPoint.x;
@@ -22,6 +23,7 @@ export function getAABBClass(): SerializableClass {
         },
         {
           name: 'Max',
+          description: 'Maximum corner of the bounding box',
           type: 'vec3',
           get(this: AABB, value) {
             value.num[0] = this.maxPoint.x;

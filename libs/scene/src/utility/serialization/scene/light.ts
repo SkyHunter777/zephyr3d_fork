@@ -490,6 +490,7 @@ export function getPointLightClass(): SerializableClass {
         },
         {
           name: 'DiffuseScale',
+          description: 'Diffuse light intensity multiplier',
           type: 'float',
           default: 1,
           options: {
@@ -506,6 +507,7 @@ export function getPointLightClass(): SerializableClass {
         },
         {
           name: 'SpecularScale',
+          description: 'Specular light intensity multiplier',
           type: 'float',
           default: 1,
           options: {
@@ -522,6 +524,7 @@ export function getPointLightClass(): SerializableClass {
         },
         {
           name: 'SourceRadius',
+          description: 'Apparent radius of the light source for soft shadows and highlights',
           type: 'float',
           default: 0,
           options: {

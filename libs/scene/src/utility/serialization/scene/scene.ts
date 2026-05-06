@@ -22,6 +22,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
       return defineProps([
         {
           name: 'Name',
+          description: 'Scene name',
           type: 'string',
           default: '',
           isHidden() {
@@ -177,6 +178,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'SkyType',
+          description: 'Type of sky rendering used by the scene',
           type: 'string',
           phase: 0,
           options: {
@@ -265,6 +267,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'FogType',
+          description: 'Type of fog rendering used by the scene',
           type: 'string',
           phase: 0,
           options: {
@@ -284,6 +287,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         {
           type: 'float',
           name: 'HeightFogDensity',
+          description: 'Base density of exponential height fog',
           default: 0.04,
           options: { group: 'HeightFog', label: 'Density', minValue: 0, maxValue: 1 },
           isValid(this: Scene) {
@@ -298,6 +302,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'HeightFogFalloff',
+          description: 'How quickly fog density changes with height',
           type: 'float',
           default: 0.2,
           options: { group: 'HeightFog', label: 'Falloff', minValue: 0, maxValue: 1 },
@@ -313,6 +318,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'HeightFogStartHeight',
+          description: 'World height where height fog starts',
           type: 'float',
           default: 0,
           options: { group: 'HeightFog', label: 'StartHeight', minValue: 0, maxValue: 1000 },
@@ -328,6 +334,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'HeightFogColor',
+          description: 'Base color of the height fog',
           type: 'rgb',
           phase: 1,
           default: [0, 0, 0],
@@ -351,6 +358,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'HeightFogStartDistance',
+          description: 'Distance from the camera where height fog begins',
           type: 'float',
           default: 0,
           options: {
@@ -369,6 +377,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'HeightFogEndDistance',
+          description: 'Distance from the camera where height fog reaches full effect',
           type: 'float',
           default: 10000,
           options: {
@@ -387,6 +396,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'HeightFogMaxOpacity',
+          description: 'Maximum opacity of the height fog',
           type: 'float',
           options: { group: 'HeightFog', label: 'MaxOpacity', minValue: 0, maxValue: 1 },
           default: 1,
@@ -402,6 +412,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'HeightFogAtmosphereStrength',
+          description: 'How much atmospheric scattering contributes to the fog',
           type: 'float',
           options: { group: 'HeightFog', label: 'AtmosphereStrength', minValue: 0, maxValue: 10 },
           default: 1,
@@ -417,6 +428,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'HeightFogDirExponent',
+          description: 'Directional inscattering exponent for height fog',
           type: 'float',
           default: 4,
           options: { group: 'HeightFog', label: 'DirectionalExponent' },
@@ -432,6 +444,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'HeightFogDirColor',
+          description: 'Directional inscattering color for height fog',
           type: 'rgb',
           default: [0, 0, 0],
           options: {
@@ -452,6 +465,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'AerialPerspectiveDistance',
+          description: 'Distance scale for aerial perspective in the scattering sky model',
           type: 'float',
           phase: 1,
           options: { animatable: true, minValue: 1, maxValue: 50000 },
@@ -468,6 +482,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'CameraHeightScale',
+          description: 'Scale factor applied to camera height in atmospheric scattering',
           type: 'float',
           phase: 1,
           options: { animatable: true, minValue: 1, maxValue: 1000 },
@@ -484,6 +499,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'AtmosphereExposure',
+          description: 'Exposure multiplier for atmospheric scattering and sky rendering',
           type: 'float',
           options: { animatable: true, minValue: 0, maxValue: 8 },
           default: 1,
@@ -499,6 +515,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'Cloudy',
+          description: 'Cloud coverage amount for the procedural sky',
           type: 'float',
           default: 0.6,
           phase: 1,
@@ -515,6 +532,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'CloudIntensity',
+          description: 'Brightness of procedural clouds',
           type: 'float',
           default: 40,
           phase: 1,
@@ -531,6 +549,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'Wind',
+          description: 'Wind direction and speed used by the procedural sky',
           type: 'vec2',
           default: [0, 0],
           phase: 1,
@@ -548,6 +567,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'SkyBoxRotation',
+          description: 'Euler rotation of the skybox',
           type: 'vec3',
           default: [0, 0, 0],
           phase: 1,
@@ -699,6 +719,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'ScriptConfig',
+          description: 'Configuration object passed to the first scene script',
           type: 'object',
           default: null,
           options: { objectTypes: [JSONData, JSONArray] },
@@ -736,6 +757,7 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'ScriptConfigs',
+          description: 'Per-script configuration array for all scene scripts',
           type: 'object',
           default: null,
           options: { objectTypes: [JSONArray] },

@@ -1118,6 +1118,9 @@ export class PropertyEditor extends Observable<{
       if (ImGui.IsItemClicked(ImGui.MouseButton.Left)) {
         this.revealAssetFromProperty(object, value);
       }
+      if (value.description && ImGui.IsItemHovered()) {
+        ImGui.SetTooltip(value.description);
+      }
       if (level > 0) {
         ImGui.SetCursorPosX(baseX);
       }

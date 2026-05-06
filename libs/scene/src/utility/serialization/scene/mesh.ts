@@ -35,6 +35,7 @@ export function getMeshClass(): SerializableClass {
         },
         {
           name: 'SkinnedBoundingInfo',
+          description: 'Serialized skinned bounding data for the mesh',
           type: 'string',
           isHidden() {
             return true;
@@ -74,6 +75,7 @@ export function getMeshClass(): SerializableClass {
         },
         {
           name: 'Skeleton',
+          description: 'Persistent ID of the skeleton bound to this mesh',
           type: 'string',
           isHidden() {
             return false;
@@ -87,6 +89,7 @@ export function getMeshClass(): SerializableClass {
         },
         {
           name: 'MorphData',
+          description: 'Serialized morph-target vertex data',
           type: 'string',
           isHidden() {
             return true;
@@ -119,6 +122,7 @@ export function getMeshClass(): SerializableClass {
         },
         {
           name: 'MorphTargets',
+          description: 'Named morph-target weights for this mesh',
           type: 'object',
           options: { objectTypes: [JSONData] },
           isPersistent() {
@@ -147,6 +151,7 @@ export function getMeshClass(): SerializableClass {
         },
         {
           name: 'MorphInfo',
+          description: 'Serialized morph-target layout and metadata',
           type: 'string',
           isHidden() {
             return true;
@@ -186,6 +191,7 @@ export function getMeshClass(): SerializableClass {
         },
         {
           name: 'MorphBoundingBox',
+          description: 'Serialized bounding box for morphed geometry',
           type: 'string',
           isHidden() {
             return true;

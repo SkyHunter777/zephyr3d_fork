@@ -102,6 +102,7 @@ export function getCapsuleShapeClass(): SerializableClass {
         },
         {
           name: 'RadialDetail',
+          description: 'Number of radial segments around the capsule',
           type: 'int',
           default: 20,
           get(this: CapsuleShape, value) {
@@ -116,6 +117,7 @@ export function getCapsuleShapeClass(): SerializableClass {
         },
         {
           name: 'HemisphereDetail',
+          description: 'Number of segments used for each capsule hemisphere',
           type: 'int',
           default: 10,
           get(this: CapsuleShape, value) {
@@ -130,6 +132,7 @@ export function getCapsuleShapeClass(): SerializableClass {
         },
         {
           name: 'HeightDetail',
+          description: 'Number of segments along the straight section of the capsule',
           type: 'int',
           default: 1,
           get(this: CapsuleShape, value) {
@@ -144,6 +147,7 @@ export function getCapsuleShapeClass(): SerializableClass {
         },
         {
           name: 'Anchor',
+          description: 'Normalized anchor position along the capsule height',
           type: 'float',
           default: 0.5,
           get(this: CapsuleShape, value) {
@@ -190,6 +194,7 @@ export function getBoxFrameShapeClass(): SerializableClass {
         },
         {
           name: 'Anchor',
+          description: 'Anchor point of the box frame',
           type: 'vec3',
           default: [0.5, 0.5, 0.5],
           get(this: BoxShape, value) {
@@ -221,6 +226,7 @@ export function getTorusShapeClass(): SerializableClass {
       return defineProps([
         {
           name: 'NumSlices',
+          description: 'Number of slices around the torus ring',
           type: 'int',
           options: { minValue: 3, maxValue: 100 },
           default: 40,
@@ -233,6 +239,7 @@ export function getTorusShapeClass(): SerializableClass {
         },
         {
           name: 'NumSegments',
+          description: 'Number of segments around the torus tube',
           type: 'int',
           options: { minValue: 3, maxValue: 100 },
           default: 16,
@@ -245,6 +252,7 @@ export function getTorusShapeClass(): SerializableClass {
         },
         {
           name: 'OuterRadius',
+          description: 'Outer radius from the torus center to the tube center',
           type: 'float',
           options: { minValue: 0, maxValue: 9999 },
           default: 1,
@@ -257,6 +265,7 @@ export function getTorusShapeClass(): SerializableClass {
         },
         {
           name: 'InnerRadius',
+          description: 'Radius of the torus tube',
           type: 'float',
           options: { minValue: 0, maxValue: 9999 },
           default: 0.3,
@@ -269,6 +278,7 @@ export function getTorusShapeClass(): SerializableClass {
         },
         {
           name: 'RadialDetail',
+          description: 'Number of radial segments around the torus tube',
           type: 'int',
           options: { minValue: 3, maxValue: 100 },
           default: 20,
@@ -311,6 +321,7 @@ export function getPlaneShapeClass(): SerializableClass {
         },
         {
           name: 'Resolution',
+          description: 'Subdivision counts of the plane along its X and Z axes',
           type: 'int2',
           default: [1, 1],
           get(this: PlaneShape, value) {
@@ -327,6 +338,7 @@ export function getPlaneShapeClass(): SerializableClass {
         },
         {
           name: 'Anchor',
+          description: 'Anchor point of the plane in normalized local coordinates',
           type: 'vec2',
           default: [0.5, 0.5],
           options: { minValue: 0, maxValue: 1 },
@@ -344,6 +356,7 @@ export function getPlaneShapeClass(): SerializableClass {
         },
         {
           name: 'TwoSided',
+          description: 'If true, the plane is rendered on both sides',
           type: 'bool',
           default: false,
           get(this: PlaneShape, value) {
@@ -368,6 +381,7 @@ export function getCylinderShapeClass(): SerializableClass {
       return defineProps([
         {
           name: 'Height',
+          description: 'Height of the cylinder',
           type: 'float',
           default: 1,
           get(this: CylinderShape, value) {
@@ -379,6 +393,7 @@ export function getCylinderShapeClass(): SerializableClass {
         },
         {
           name: 'BottomRadius',
+          description: 'Radius of the bottom cap of the cylinder',
           type: 'float',
           default: 1,
           options: { minValue: 0, maxValue: 9999 },
@@ -391,6 +406,7 @@ export function getCylinderShapeClass(): SerializableClass {
         },
         {
           name: 'TopRadius',
+          description: 'Radius of the top cap of the cylinder',
           type: 'float',
           default: 1,
           options: { minValue: 0, maxValue: 9999 },
@@ -403,6 +419,7 @@ export function getCylinderShapeClass(): SerializableClass {
         },
         {
           name: 'HeightDetail',
+          description: 'Number of segments along the cylinder height',
           type: 'int',
           default: 1,
           options: { minValue: 1, maxValue: 100 },
@@ -415,6 +432,7 @@ export function getCylinderShapeClass(): SerializableClass {
         },
         {
           name: 'RadialDetail',
+          description: 'Number of radial segments around the cylinder',
           type: 'int',
           default: 20,
           options: { minValue: 2, maxValue: 100 },
@@ -427,6 +445,7 @@ export function getCylinderShapeClass(): SerializableClass {
         },
         {
           name: 'Anchor',
+          description: 'Normalized anchor position along the cylinder height',
           type: 'float',
           default: 0,
           options: { minValue: 0, maxValue: 1 },
@@ -439,6 +458,7 @@ export function getCylinderShapeClass(): SerializableClass {
         },
         {
           name: 'TopCap',
+          description: 'If true, generates a top cap for the cylinder',
           type: 'bool',
           default: true,
           get(this: CylinderShape, value) {
@@ -450,6 +470,7 @@ export function getCylinderShapeClass(): SerializableClass {
         },
         {
           name: 'BottomCap',
+          description: 'If true, generates a bottom cap for the cylinder',
           type: 'bool',
           default: true,
           get(this: CylinderShape, value) {
@@ -474,6 +495,7 @@ export function getSphereShapeClass(): SerializableClass {
       return defineProps([
         {
           name: 'Radius',
+          description: 'Radius of the sphere',
           type: 'float',
           default: 1,
           get(this: SphereShape, value) {
@@ -485,6 +507,7 @@ export function getSphereShapeClass(): SerializableClass {
         },
         {
           name: 'VerticalDetail',
+          description: 'Number of vertical segments of the sphere',
           type: 'int',
           options: { minValue: 2, maxValue: 100 },
           default: 20,
@@ -497,6 +520,7 @@ export function getSphereShapeClass(): SerializableClass {
         },
         {
           name: 'HorizontalDetail',
+          description: 'Number of horizontal segments of the sphere',
           type: 'int',
           options: { minValue: 2, maxValue: 100 },
           default: 20,
@@ -522,6 +546,7 @@ export function getTetrahedronShapeClass(): SerializableClass {
       return defineProps([
         {
           name: 'Height',
+          description: 'Height of the tetrahedron',
           type: 'float',
           default: 1,
           get(this: TetrahedronShape, value) {
@@ -533,6 +558,7 @@ export function getTetrahedronShapeClass(): SerializableClass {
         },
         {
           name: 'SizeX',
+          description: 'Width of the tetrahedron base along the X axis',
           type: 'float',
           get(this: TetrahedronShape, value) {
             value.num[0] = this.options.sizeX;
@@ -543,6 +569,7 @@ export function getTetrahedronShapeClass(): SerializableClass {
         },
         {
           name: 'SizeZ',
+          description: 'Depth of the tetrahedron base along the Z axis',
           type: 'float',
           get(this: TetrahedronShape, value) {
             value.num[0] = this.options.sizeZ;

@@ -196,6 +196,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'PrefabId',
+          description: 'Persistent ID of the prefab source for this node',
           type: 'string',
           isHidden() {
             return true;
@@ -206,6 +207,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'Name',
+          description: 'Display name of the node',
           type: 'string',
           getDefaultValue() {
             return '';
@@ -219,6 +221,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'Position',
+          description: 'Local position of the node',
           type: 'vec3',
           default: [0, 0, 0],
           options: {
@@ -238,6 +241,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'Scale',
+          description: 'Local scale of the node',
           type: 'vec3',
           default: [1, 1, 1],
           options: {
@@ -373,6 +377,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'GeometryCache',
+          description: 'Alembic geometry cache asset used by this node',
           type: 'string',
           options: {
             group: 'Animation',
@@ -410,6 +415,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'GeometryCacheAutoPlay',
+          description: 'If true, plays the geometry cache automatically when loaded',
           type: 'bool',
           default: false,
           options: {
@@ -496,6 +502,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'Skeletons',
+          description: 'Skeleton references used by the node animations',
           type: 'object_array',
           phase: 1,
           isHidden() {
@@ -576,6 +583,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'ScriptConfig',
+          description: 'Configuration object passed to the attached script',
           type: 'object',
           options: { objectTypes: [JSONData, JSONArray] },
           isHidden() {
@@ -612,6 +620,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
         },
         {
           name: 'ScriptConfigs',
+          description: 'Per-script configuration array for all attached scripts',
           type: 'object',
           options: { objectTypes: [JSONArray] },
           getDefaultValue(this: SceneNode) {
