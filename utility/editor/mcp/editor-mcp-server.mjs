@@ -5,8 +5,10 @@ import process from 'node:process';
 import { isMainThread, parentPort, workerData } from 'node:worker_threads';
 
 const DEFAULT_PORT = Number(process.env.EDITOR_MCP_PORT || workerData?.port || 47231);
-const BRIDGE_TOKEN = process.env.EDITOR_MCP_TOKEN || workerData?.token || crypto.randomBytes(12).toString('hex');
-const DEFAULT_EDITOR_URL = process.env.EDITOR_URL || workerData?.editorUrl || 'http://127.0.0.1:8000/dist/index.html';
+const BRIDGE_TOKEN =
+  process.env.EDITOR_MCP_TOKEN || workerData?.token || crypto.randomBytes(12).toString('hex');
+const DEFAULT_EDITOR_URL =
+  process.env.EDITOR_URL || workerData?.editorUrl || 'http://127.0.0.1:8000/dist/index.html';
 const IPC_TRANSPORT = !isMainThread && workerData?.transport === 'ipc';
 
 class EditorBridgeServer {
@@ -242,7 +244,9 @@ class EditorBridgeServer {
 
   send(method, params, timeoutMs = 30000) {
     if (!this.client) {
-      throw new Error('No editor window is connected. Launch the Electron editor and wait for editor_wait_ready.');
+      throw new Error(
+        'No editor window is connected. Launch the Electron editor and wait for editor_wait_ready.'
+      );
     }
     const id = this.nextId++;
     const payload = JSON.stringify({ id, method, params: params ?? {} });
@@ -317,8 +321,7 @@ function tokenMatches(expected, actual) {
   const expectedBuffer = Buffer.from(expected, 'utf8');
   const actualBuffer = Buffer.from(actual, 'utf8');
   return (
-    expectedBuffer.length === actualBuffer.length &&
-    crypto.timingSafeEqual(expectedBuffer, actualBuffer)
+    expectedBuffer.length === actualBuffer.length && crypto.timingSafeEqual(expectedBuffer, actualBuffer)
   );
 }
 
@@ -414,7 +417,8 @@ function numberSchema(options = {}) {
 
 function createCoordinateRemapSchema() {
   return {
-    description: 'Optional axis remap applied after coordinateSystem. Use a preset string or explicit axis mapping.',
+    description:
+      'Optional axis remap applied after coordinate_system. Use a preset string or explicit axis mapping.',
     oneOf: [
       {
         type: 'string',
@@ -461,12 +465,12 @@ function createUvSpecSchema() {
       },
       origin: numberTupleSchema(3, 'Mapping origin as [x, y, z].'),
       size: numberTupleSchema(2, 'Planar or box mapping size as [width, height].'),
-      tileSize: numberTupleSchema(2, 'World-space tiling size as [u, v].'),
+      tile_size: numberTupleSchema(2, 'World-space tiling size as [u, v].'),
       scale: numberTupleSchema(2, 'UV scale as [u, v].'),
       offset: numberTupleSchema(2, 'UV offset as [u, v].'),
-      flipU: { type: 'boolean' },
-      flipV: { type: 'boolean' },
-      swapUV: { type: 'boolean' },
+      flip_u: { type: 'boolean' },
+      flip_v: { type: 'boolean' },
+      swap_uv: { type: 'boolean' },
       repeat: numberTupleSchema(2, 'Repeat multiplier as [u, v].')
     }
   };
@@ -478,16 +482,16 @@ function createBaseNodeProperties() {
       type: 'string',
       description: 'Optional caller-defined node identifier for your own bookkeeping.'
     },
-    coordinateSystem: {
+    coordinate_system: {
       type: 'string',
       enum: COORDINATE_SYSTEM_SCHEMA_VALUES,
-      description: 'Coordinate system used by this node before coordinateRemap is applied.'
+      description: 'Coordinate system used by this node before coordinate_remap is applied.'
     },
-    coordinateRemap: createCoordinateRemapSchema(),
+    coordinate_remap: createCoordinateRemapSchema(),
     position: numberTupleSchema(3, 'Optional local translation as [x, y, z].'),
     rotation: numberTupleSchema(4, 'Optional local rotation quaternion as [x, y, z, w].'),
     scale: numberTupleSchema(3, 'Optional local scale as [x, y, z].'),
-    preserveWinding: {
+    preserve_winding: {
       type: 'boolean',
       description: 'When true, keep triangle winding exactly as generated instead of auto-matching normals.'
     },
@@ -531,8 +535,8 @@ function createSphereNodeSchema() {
       ...createBaseNodeProperties(),
       type: { type: 'string', enum: ['sphere'] },
       radius: numberSchema({ exclusiveMinimum: 0, description: 'Sphere radius. Defaults to 0.5.' }),
-      widthSegments: integerSchema(3, 512, 'Horizontal segment count. Defaults to 32.'),
-      heightSegments: integerSchema(2, 256, 'Vertical segment count. Defaults to 16.')
+      width_segments: integerSchema(3, 512, 'Horizontal segment count. Defaults to 32.'),
+      height_segments: integerSchema(2, 256, 'Vertical segment count. Defaults to 16.')
     },
     required: ['type']
   };
@@ -552,8 +556,8 @@ function createRevolveNodeSchema() {
         description: 'Ordered profile points, each as [radius, height].'
       },
       segments: integerSchema(3, 1024, 'Revolution segment count. Defaults to 64.'),
-      capTop: { type: 'boolean' },
-      capBottom: { type: 'boolean' }
+      cap_top: { type: 'boolean' },
+      cap_bottom: { type: 'boolean' }
     },
     required: ['type', 'profile']
   };
@@ -568,7 +572,7 @@ function createSurfacePatchSchema() {
         minItems: 16,
         maxItems: 16,
         items: { type: 'integer', minimum: 0 },
-        description: 'Sixteen control point indices into controlPoints.'
+        description: 'Sixteen control point indices into control_points.'
       },
       {
         type: 'array',
@@ -585,7 +589,7 @@ function createSurfacePatchSchema() {
             minItems: 16,
             maxItems: 16,
             items: { type: 'integer', minimum: 0 },
-            description: 'Sixteen control point indices into controlPoints.'
+            description: 'Sixteen control point indices into control_points.'
           },
           points: {
             type: 'array',
@@ -595,10 +599,10 @@ function createSurfacePatchSchema() {
             description: 'Sixteen inline control points.'
           },
           mirror: numberTupleSchema(3, 'Per-axis mirror multiplier, for example [-1, 1, 1].'),
-          reverseU: { type: 'boolean' },
-          reverseV: { type: 'boolean' },
-          flipWinding: { type: 'boolean' },
-          flipNormals: { type: 'boolean' }
+          reverse_u: { type: 'boolean' },
+          reverse_v: { type: 'boolean' },
+          flip_winding: { type: 'boolean' },
+          flip_normals: { type: 'boolean' }
         },
         anyOf: [{ required: ['indices'] }, { required: ['points'] }]
       }
@@ -613,12 +617,12 @@ function createSurfaceNodeSchema() {
     properties: {
       ...createBaseNodeProperties(),
       type: { type: 'string', enum: ['surface'] },
-      surfaceType: {
+      surface_type: {
         type: 'string',
         enum: SURFACE_TYPE_SCHEMA_VALUES,
         description: 'Surface implementation. Only bezier_patch is currently supported.'
       },
-      controlPoints: {
+      control_points: {
         type: 'array',
         minItems: 1,
         items: numberTupleSchema(3, 'Control point as [x, y, z].'),
@@ -630,22 +634,22 @@ function createSurfaceNodeSchema() {
         items: createSurfacePatchSchema(),
         description: 'One or more bicubic Bezier patches.'
       },
-      segmentsU: integerSchema(1, 256, 'Subdivision count in the U direction. Defaults to 16.'),
-      segmentsV: integerSchema(1, 256, 'Subdivision count in the V direction. Defaults to segmentsU.'),
-      flipWinding: { type: 'boolean' },
-      flipNormals: { type: 'boolean' },
-      normalOrientation: {
+      segments_u: integerSchema(1, 256, 'Subdivision count in the U direction. Defaults to 16.'),
+      segments_v: integerSchema(1, 256, 'Subdivision count in the V direction. Defaults to segments_u.'),
+      flip_winding: { type: 'boolean' },
+      flip_normals: { type: 'boolean' },
+      normal_orientation: {
         type: 'string',
         enum: ['patch', 'outward', 'inward'],
         description: 'Normal orientation strategy after tessellation.'
       },
-      smoothSeams: { type: 'boolean' },
-      seamTolerance: numberSchema({
+      smooth_seams: { type: 'boolean' },
+      seam_tolerance: numberSchema({
         exclusiveMinimum: 0,
         description: 'Normal welding tolerance for shared vertices. Defaults to 1e-5.'
       }),
-      doubleSided: { type: 'boolean' },
-      backfaceOffset: numberSchema({
+      double_sided: { type: 'boolean' },
+      backface_offset: numberSchema({
         minimum: 0,
         description: 'Optional inward offset applied when duplicating backfaces.'
       })
@@ -661,10 +665,11 @@ function createCurveNodeSchema() {
     properties: {
       ...createBaseNodeProperties(),
       type: { type: 'string', enum: ['curve'] },
-      curveType: {
+      curve_type: {
         type: 'string',
         enum: CURVE_TYPE_SCHEMA_VALUES,
-        description: 'Curve interpolation mode. Use catmull_rom for Catmull-Rom splines. Defaults to polyline.'
+        description:
+          'Curve interpolation mode. Use catmull_rom for Catmull-Rom splines. Defaults to polyline.'
       },
       shape: {
         type: 'string',
@@ -677,7 +682,7 @@ function createCurveNodeSchema() {
         items: numberTupleSchema(3, 'Curve control point as [x, y, z].'),
         description: 'Curve control points.'
       },
-      degree: integerSchema(1, undefined, 'NURBS degree. Defaults to 3 when curveType is nurbs.'),
+      degree: integerSchema(1, undefined, 'NURBS degree. Defaults to 3 when curve_type is nurbs.'),
       knots: {
         type: 'array',
         minItems: 2,
@@ -712,11 +717,11 @@ function createCurveNodeSchema() {
         description: 'Optional per-sample ribbon thickness values.'
       },
       up: numberTupleSchema(3, 'Preferred ribbon up direction as [x, y, z].'),
-      radialSegments: integerSchema(3, 128, 'Tube radial segment count. Defaults to 12.'),
-      tubularSegments: integerSchema(1, 512, 'Sampling density along the curve. Defaults to 16.'),
+      radial_segments: integerSchema(3, 128, 'Tube radial segment count. Defaults to 12.'),
+      tubular_segments: integerSchema(1, 512, 'Sampling density along the curve. Defaults to 16.'),
       closed: { type: 'boolean' },
-      capStart: { type: 'boolean' },
-      capEnd: { type: 'boolean' }
+      cap_start: { type: 'boolean' },
+      cap_end: { type: 'boolean' }
     },
     required: ['type', 'points']
   };
@@ -915,14 +920,18 @@ const GENERATED_MODEL_SPEC_SCHEMA = {
     generation: {
       type: 'object',
       properties: {
-        maxVertices: integerSchema(1, undefined, 'Abort generation when the resulting mesh exceeds this vertex count.'),
-        generateTangents: {
+        max_vertices: integerSchema(
+          1,
+          undefined,
+          'Abort generation when the resulting mesh exceeds this vertex count.'
+        ),
+        generate_tangents: {
           type: 'boolean',
           description: 'Generate tangent_f32x4 data for normal mapped materials.'
         },
         tangents: {
           type: 'boolean',
-          description: 'Alias of generateTangents.'
+          description: 'Alias of generate_tangents.'
         }
       }
     },
@@ -944,7 +953,7 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        baseUrl: {
+        base_url: {
           type: 'string',
           description: 'Editor URL, defaulting to EDITOR_URL or local web-dev-server.'
         },
@@ -961,7 +970,7 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        timeoutMs: { type: 'number', default: 30000 }
+        timeout_ms: { type: 'number', default: 30000 }
       }
     }
   },
@@ -996,16 +1005,16 @@ const BASE_TOOLS = [
           description:
             'Optional absolute directory path for the new project. In Electron this bypasses the native folder picker.'
         },
-        saveSceneChanges: {
+        save_scene_changes: {
           type: 'boolean',
           description:
             'Save the current dirty scene before creating the project. Fails if the scene has no path.'
         },
-        discardSceneChanges: {
+        discard_scene_changes: {
           type: 'boolean',
           description: 'Discard current dirty scene changes before creating the project.'
         },
-        timeoutMs: { type: 'number', default: 30000 }
+        timeout_ms: { type: 'number', default: 30000 }
       }
     }
   },
@@ -1017,17 +1026,20 @@ const BASE_TOOLS = [
       type: 'object',
       required: ['id'],
       properties: {
-        id: { type: 'string', description: 'Project id to open. In Electron this may be an absolute directory path.' },
-        saveSceneChanges: {
+        id: {
+          type: 'string',
+          description: 'Project id to open. In Electron this may be an absolute directory path.'
+        },
+        save_scene_changes: {
           type: 'boolean',
           description:
             'Save the current dirty scene before opening the project. Fails if the scene has no path.'
         },
-        discardSceneChanges: {
+        discard_scene_changes: {
           type: 'boolean',
           description: 'Discard current dirty scene changes before opening the project.'
         },
-        timeoutMs: { type: 'number', default: 30000 }
+        timeout_ms: { type: 'number', default: 30000 }
       }
     }
   },
@@ -1038,16 +1050,16 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        saveSceneChanges: {
+        save_scene_changes: {
           type: 'boolean',
           description:
             'Save the current dirty scene before closing the project. Fails if the scene has no path.'
         },
-        discardSceneChanges: {
+        discard_scene_changes: {
           type: 'boolean',
           description: 'Discard current dirty scene changes before closing the project.'
         },
-        timeoutMs: { type: 'number', default: 30000 }
+        timeout_ms: { type: 'number', default: 30000 }
       }
     }
   },
@@ -1058,16 +1070,16 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        saveSceneChanges: {
+        save_scene_changes: {
           type: 'boolean',
           description:
             'Save the current dirty scene before exporting the project. Fails if the scene has no path.'
         },
-        discardSceneChanges: {
+        discard_scene_changes: {
           type: 'boolean',
           description: 'Export without saving current dirty scene changes.'
         },
-        timeoutMs: { type: 'number', default: 60000 }
+        timeout_ms: { type: 'number', default: 60000 }
       }
     }
   },
@@ -1078,16 +1090,16 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        saveSceneChanges: {
+        save_scene_changes: {
           type: 'boolean',
           description:
             'Save the current dirty scene before deleting the project. Fails if the scene has no path.'
         },
-        discardSceneChanges: {
+        discard_scene_changes: {
           type: 'boolean',
           description: 'Discard current dirty scene changes before deleting the project.'
         },
-        timeoutMs: { type: 'number', default: 30000 }
+        timeout_ms: { type: 'number', default: 30000 }
       }
     }
   },
@@ -1097,7 +1109,7 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1108,7 +1120,7 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1119,7 +1131,7 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1134,10 +1146,11 @@ const BASE_TOOLS = [
         path: { type: 'string', description: 'VFS directory path, such as /assets or /assets/materials.' },
         recursive: { type: 'boolean', description: 'Read directories recursively when true.' },
         pattern: { type: 'string', description: 'Optional VFS glob pattern filter.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
+  /*
   {
     name: 'asset_read_file',
     description:
@@ -1152,7 +1165,7 @@ const BASE_TOOLS = [
           enum: ['utf8', 'binary'],
           description: 'Read mode. Defaults to utf8. binary returns base64 text.'
         },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1170,10 +1183,11 @@ const BASE_TOOLS = [
           description: 'Write mode. Defaults to utf8. binary content must be base64 text.'
         },
         content: { type: 'string', description: 'UTF-8 text or base64 binary content.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
+  */
   {
     name: 'asset_create_material',
     description:
@@ -1199,7 +1213,7 @@ const BASE_TOOLS = [
           type: 'boolean',
           description: 'Overwrite an existing material file when true.'
         },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1209,18 +1223,18 @@ const BASE_TOOLS = [
       'Clone a material asset to a writable project asset path. Use this before changing properties on a built-in material, because built-in materials are read-only and cannot be modified in place. Returns { err }.',
     inputSchema: {
       type: 'object',
-      required: ['srcPath', 'dstPath'],
+      required: ['src_path', 'dst_path'],
       properties: {
-        srcPath: {
+        src_path: {
           type: 'string',
           description: 'Source material asset VFS path, such as /assets/@builtins/materials/unlit.zmtl.'
         },
-        dstPath: {
+        dst_path: {
           type: 'string',
           description:
             'Destination writable material asset VFS path under /assets, such as /assets/materials/unlit_copy.zmtl.'
         },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1230,7 +1244,7 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1243,7 +1257,7 @@ const BASE_TOOLS = [
       required: ['path'],
       properties: {
         path: { type: 'string', description: 'Material asset VFS path.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1262,9 +1276,9 @@ const BASE_TOOLS = [
             'Property updates. Values may be boolean, string, number, or number arrays for vec/rgb/rgba properties.',
           items: {
             type: 'object',
-            required: ['propertyName', 'value'],
+            required: ['property_name', 'value'],
             properties: {
-              propertyName: { type: 'string', description: 'Editable material property name.' },
+              property_name: { type: 'string', description: 'Editable material property name.' },
               value: {
                 description: 'Property value.',
                 oneOf: [
@@ -1277,7 +1291,7 @@ const BASE_TOOLS = [
             }
           }
         },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1295,7 +1309,7 @@ const BASE_TOOLS = [
           description: 'Material property names to read.',
           items: { type: 'string' }
         },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1305,14 +1319,14 @@ const BASE_TOOLS = [
       'Export a .zmsh primitive asset to a binary .glb asset in the project VFS. Returns { path, bytes, err }.',
     inputSchema: {
       type: 'object',
-      required: ['srcPath'],
+      required: ['src_path'],
       properties: {
-        srcPath: { type: 'string', description: 'Source .zmsh primitive VFS path under /assets.' },
-        destPath: {
+        src_path: { type: 'string', description: 'Source .zmsh primitive VFS path under /assets.' },
+        dest_path: {
           type: 'string',
-          description: 'Destination .glb VFS path under /assets. Defaults to srcPath with .glb extension.'
+          description: 'Destination .glb VFS path under /assets. Defaults to src_path with .glb extension.'
         },
-        timeoutMs: { type: 'number', default: 30000 }
+        timeout_ms: { type: 'number', default: 30000 }
       }
     }
   },
@@ -1333,7 +1347,7 @@ const BASE_TOOLS = [
           type: 'string',
           description: 'Optional persistent id of the parent scene node. Defaults to the scene root.'
         },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1345,7 +1359,7 @@ const BASE_TOOLS = [
       required: ['mesh_id'],
       properties: {
         mesh_id: { type: 'string', description: 'Persistent id of the mesh node.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1358,7 +1372,7 @@ const BASE_TOOLS = [
       properties: {
         mesh_id: { type: 'string', description: 'Persistent id of the mesh node.' },
         material_path: { type: 'string', description: 'Material asset VFS path.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1370,7 +1384,7 @@ const BASE_TOOLS = [
       required: ['mesh_id'],
       properties: {
         mesh_id: { type: 'string', description: 'Persistent id of the mesh node.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1383,7 +1397,7 @@ const BASE_TOOLS = [
       properties: {
         mesh_id: { type: 'string', description: 'Persistent id of the mesh node.' },
         primitive_path: { type: 'string', description: 'Primitive asset VFS path.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1399,7 +1413,7 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1412,7 +1426,7 @@ const BASE_TOOLS = [
       required: ['id'],
       properties: {
         id: { type: 'string', description: 'Persistent id of the scene node.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1429,7 +1443,7 @@ const BASE_TOOLS = [
           enum: ['box', 'sphere', 'plane', 'cylinder', 'torus', 'tetrahedron'],
           description: 'Built-in primitive shape type.'
         },
-        parentId: {
+        parent_id: {
           type: 'string',
           description: 'Optional persistent id of the parent scene node. Defaults to the scene root.'
         },
@@ -1458,7 +1472,7 @@ const BASE_TOOLS = [
           items: { type: 'number' },
           description: 'Optional local rotation quaternion as [x, y, z, w]. Defaults to [0, 0, 0, 1].'
         },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1471,7 +1485,7 @@ const BASE_TOOLS = [
       required: ['id'],
       properties: {
         id: { type: 'string', description: 'Persistent id of the scene node.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1484,7 +1498,7 @@ const BASE_TOOLS = [
       required: ['id'],
       properties: {
         id: { type: 'string', description: 'Persistent id of the scene node.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1518,7 +1532,7 @@ const BASE_TOOLS = [
           items: { type: 'number' },
           description: 'Optional local rotation quaternion as [x, y, z, w].'
         },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1528,7 +1542,7 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1540,7 +1554,7 @@ const BASE_TOOLS = [
       required: ['id'],
       properties: {
         id: { type: 'string', description: 'Persistent id of the scene node.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1552,7 +1566,7 @@ const BASE_TOOLS = [
       required: ['id'],
       properties: {
         id: { type: 'string', description: 'Persistent id of the scene node.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1561,11 +1575,11 @@ const BASE_TOOLS = [
     description: 'Set a scene node parent by persistent node id. Returns { err }.',
     inputSchema: {
       type: 'object',
-      required: ['id', 'parentId'],
+      required: ['id', 'parent_id'],
       properties: {
         id: { type: 'string', description: 'Persistent id of the scene node.' },
-        parentId: { type: 'string', description: 'Persistent id of the new parent scene node.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        parent_id: { type: 'string', description: 'Persistent id of the new parent scene node.' },
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1577,7 +1591,7 @@ const BASE_TOOLS = [
       required: ['parent'],
       properties: {
         parent: { type: 'string', description: 'Persistent id of the parent scene node.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1588,7 +1602,7 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1598,22 +1612,22 @@ const BASE_TOOLS = [
       'Set the active scene camera by persistent camera node id. Returns the new active camera state in world space.',
     inputSchema: {
       type: 'object',
-      required: ['cameraId'],
+      required: ['camera_id'],
       properties: {
-        cameraId: { type: 'string', description: 'Persistent id of the camera node to make active.' },
-        timeoutMs: { type: 'number', default: 10000 }
+        camera_id: { type: 'string', description: 'Persistent id of the camera node to make active.' },
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
   {
     name: 'camera_look_at',
     description:
-      'Aim a camera using world-space position and target. When cameraId is omitted, this operates on the active scene camera.',
+      'Aim a camera using world-space position and target. When camera_id is omitted, this operates on the active scene camera.',
     inputSchema: {
       type: 'object',
       required: ['target'],
       properties: {
-        cameraId: {
+        camera_id: {
           type: 'string',
           description: 'Optional persistent id of the camera node. Defaults to the active scene camera.'
         },
@@ -1622,7 +1636,8 @@ const BASE_TOOLS = [
           minItems: 3,
           maxItems: 3,
           items: { type: 'number' },
-          description: 'Optional world-space camera position as [x, y, z]. Defaults to the camera current world position.'
+          description:
+            'Optional world-space camera position as [x, y, z]. Defaults to the camera current world position.'
         },
         target: {
           type: 'array',
@@ -1638,7 +1653,7 @@ const BASE_TOOLS = [
           items: { type: 'number' },
           description: 'Optional world-space up vector as [x, y, z]. Defaults to [0, 1, 0].'
         },
-        timeoutMs: { type: 'number', default: 10000 }
+        timeout_ms: { type: 'number', default: 10000 }
       },
       examples: [
         {
@@ -1655,52 +1670,54 @@ const BASE_TOOLS = [
   {
     name: 'model_generate_begin',
     description:
-      'Start an editor-side worker job that tessellates a compact procedural model spec into a .zmsh mesh asset and optionally creates a mesh node in the current scene. Use this for LLM-generated geometry instead of sending large raw vertex buffers through MCP. The schema includes concrete examples for box, revolve, and CSG workflows. Returns { jobId, status, err }.',
+      'Start an editor-side worker job that tessellates a compact procedural model spec into a .zmsh mesh asset and optionally creates a mesh node in the current scene. Use this for LLM-generated geometry instead of sending large raw vertex buffers through MCP. The schema includes concrete examples for box, revolve, and CSG workflows.',
     inputSchema: {
       type: 'object',
-      required: ['spec', 'destPath'],
+      required: ['spec', 'dest_path'],
       properties: {
         spec: {
           ...GENERATED_MODEL_SPEC_SCHEMA
         },
-        destPath: {
+        dest_path: {
           type: 'string',
           description: 'Destination .zmsh VFS path under /assets.',
           examples: ['/assets/generated/pedestal.zmsh', '/assets/generated/vase.zmsh']
         },
         name: {
           type: 'string',
-          description: 'Optional mesh node name when createNode is true.',
+          description: 'Optional mesh node name when create_node is true.',
           examples: ['Pedestal', 'Vase', 'ArchCutout']
         },
-        createNode: { type: 'boolean', default: true },
-        generationTimeoutMs: { type: 'number', default: 60000 },
-        timeoutMs: { type: 'number', default: 10000 }
+        create_node: { type: 'boolean', default: true },
+        generation_timeout_ms: { type: 'number', default: 60000 },
+        timeout_ms: { type: 'number', default: 10000 }
       },
       examples: MODEL_GENERATE_BEGIN_EXAMPLES
     }
   },
   {
     name: 'model_generate_status',
-    description: 'Get status for an editor-side procedural model generation job. Returns { job, err }.',
+    description:
+      'Get status for an editor-side procedural model generation job. Pass job_id from model_generate_begin.',
     inputSchema: {
       type: 'object',
-      required: ['jobId'],
+      required: ['job_id'],
       properties: {
-        jobId: { type: 'string' },
-        timeoutMs: { type: 'number', default: 10000 }
+        job_id: { type: 'string' },
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
   {
     name: 'model_generate_cancel',
-    description: 'Cancel an editor-side procedural model generation job. Returns { jobId, status, err }.',
+    description:
+      'Cancel an editor-side procedural model generation job. Pass job_id from model_generate_begin.',
     inputSchema: {
       type: 'object',
-      required: ['jobId'],
+      required: ['job_id'],
       properties: {
-        jobId: { type: 'string' },
-        timeoutMs: { type: 'number', default: 10000 }
+        job_id: { type: 'string' },
+        timeout_ms: { type: 'number', default: 10000 }
       }
     }
   },
@@ -1712,8 +1729,8 @@ const BASE_TOOLS = [
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Optional destination scene VFS path ending in .zscn.' },
-        resetView: { type: 'boolean', default: true, description: 'Reset the scene view camera.' },
-        timeoutMs: { type: 'number', default: 30000 }
+        reset_view: { type: 'boolean', default: true, description: 'Reset the scene view camera.' },
+        timeout_ms: { type: 'number', default: 30000 }
       }
     }
   },
@@ -1726,22 +1743,33 @@ const BASE_TOOLS = [
       required: ['path'],
       properties: {
         path: { type: 'string', description: 'Scene VFS path, such as /assets/my_scene.zscn.' },
-        resetView: { type: 'boolean', default: true, description: 'Reset the scene view camera.' },
-        timeoutMs: { type: 'number', default: 30000 }
+        reset_view: { type: 'boolean', default: true, description: 'Reset the scene view camera.' },
+        timeout_ms: { type: 'number', default: 30000 }
+      }
+    }
+  },
+  {
+    name: 'editor_save_scene',
+    description:
+      'Save the current scene to its existing path. Returns editor status plus err if failed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        timeout_ms: { type: 'number', default: 30000 }
       }
     }
   },
   {
     name: 'editor_call',
     description:
-      'Advanced escape hatch: call a raw browser bridge method. Prefer the typed tools such as editor_create_scene, editor_open_scene, editor_render_frames, editor_screenshot, editor_console_logs, and editor_sample_pixels when available.',
+      'Advanced escape hatch: call a raw browser bridge method. Prefer the typed tools such as editor_create_scene, editor_open_scene, editor_save_scene, editor_screenshot, editor_console_logs, and editor_sample_pixels when available.',
     inputSchema: {
       type: 'object',
       required: ['method'],
       properties: {
         method: { type: 'string' },
         params: { type: 'object' },
-        timeoutMs: { type: 'number', default: 30000 }
+        timeout_ms: { type: 'number', default: 30000 }
       }
     }
   },
@@ -1755,17 +1783,7 @@ const BASE_TOOLS = [
       properties: {
         script: { type: 'string' },
         expression: { type: 'boolean', default: false },
-        timeoutMs: { type: 'number', default: 30000 }
-      }
-    }
-  },
-  {
-    name: 'editor_render_frames',
-    description: 'Advance and render one or more editor frames.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        frames: { type: 'number', default: 1 }
+        timeout_ms: { type: 'number', default: 30000 }
       }
     }
   },
@@ -1775,7 +1793,7 @@ const BASE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        mimeType: { type: 'string', default: 'image/png' }
+        mime_type: { type: 'string', default: 'image/png' }
       }
     }
   },
@@ -1808,91 +1826,16 @@ function toCamelCase(value) {
   return String(value).replace(/[_-]([a-z])/g, (_match, ch) => ch.toUpperCase());
 }
 
-function canonicalizeSchema(schema) {
-  if (!schema || typeof schema !== 'object') {
-    return schema;
+function normalizeResultKeysToSnakeCase(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeResultKeysToSnakeCase(item));
   }
-  if (Array.isArray(schema)) {
-    return schema.map((value) => canonicalizeSchema(value));
-  }
-  const cloned = { ...schema };
-  if (schema.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties)) {
-    const properties = {};
-    for (const [key, value] of Object.entries(schema.properties)) {
-      properties[toSnakeCase(key)] = canonicalizeSchema(value);
-    }
-    cloned.properties = properties;
-    if (!Object.prototype.hasOwnProperty.call(cloned, 'additionalProperties')) {
-      cloned.additionalProperties = false;
-    }
-  }
-  if (Array.isArray(schema.required)) {
-    cloned.required = schema.required.map((value) => toSnakeCase(value));
-  }
-  if (schema.items) {
-    cloned.items = canonicalizeSchema(schema.items);
-  }
-  if (Array.isArray(schema.oneOf)) {
-    cloned.oneOf = schema.oneOf.map((value) => canonicalizeSchema(value));
-  }
-  if (Array.isArray(schema.anyOf)) {
-    cloned.anyOf = schema.anyOf.map((value) => canonicalizeSchema(value));
-  }
-  if (Array.isArray(schema.allOf)) {
-    cloned.allOf = schema.allOf.map((value) => canonicalizeSchema(value));
-  }
-  return cloned;
-}
-
-function normalizeToolArguments(value, originalSchema, canonicalSchema) {
-  if (
-    !originalSchema ||
-    typeof originalSchema !== 'object' ||
-    value === null ||
-    value === undefined
-  ) {
-    return value;
-  }
-  if (
-    originalSchema.type === 'object' &&
-    originalSchema.properties &&
-    typeof value === 'object' &&
-    !Array.isArray(value)
-  ) {
+  if (value && typeof value === 'object') {
     const normalized = {};
-    const consumed = new Set();
-    for (const [originalKey, childOriginalSchema] of Object.entries(originalSchema.properties)) {
-      const canonicalKey = toSnakeCase(originalKey);
-      const childCanonicalSchema = canonicalSchema?.properties?.[canonicalKey];
-      if (Object.prototype.hasOwnProperty.call(value, originalKey)) {
-        consumed.add(originalKey);
-        normalized[originalKey] = normalizeToolArguments(
-          value[originalKey],
-          childOriginalSchema,
-          childCanonicalSchema
-        );
-        continue;
-      }
-      if (Object.prototype.hasOwnProperty.call(value, canonicalKey)) {
-        consumed.add(canonicalKey);
-        normalized[originalKey] = normalizeToolArguments(
-          value[canonicalKey],
-          childOriginalSchema,
-          childCanonicalSchema
-        );
-      }
-    }
     for (const [key, childValue] of Object.entries(value)) {
-      if (!consumed.has(key)) {
-        normalized[key] = childValue;
-      }
+      normalized[toSnakeCase(key)] = normalizeResultKeysToSnakeCase(childValue);
     }
     return normalized;
-  }
-  if (originalSchema.type === 'array' && Array.isArray(value)) {
-    return value.map((child) =>
-      normalizeToolArguments(child, originalSchema.items, canonicalSchema?.items)
-    );
   }
   return value;
 }
@@ -1912,6 +1855,7 @@ function normalizeGeneratedModelSpec(value, key = '') {
   if (typeof value === 'string') {
     switch (key) {
       case 'coordinateSystem':
+      case 'coordinate_system':
         return (
           {
             editor: 'editor',
@@ -1924,6 +1868,7 @@ function normalizeGeneratedModelSpec(value, key = '') {
           }[value] ?? value
         );
       case 'coordinateRemap':
+      case 'coordinate_remap':
         return (
           {
             none: 'none',
@@ -1934,6 +1879,7 @@ function normalizeGeneratedModelSpec(value, key = '') {
           }[value] ?? value
         );
       case 'surfaceType':
+      case 'surface_type':
         return (
           {
             bezier_patch: 'bezierPatch',
@@ -1941,6 +1887,7 @@ function normalizeGeneratedModelSpec(value, key = '') {
           }[value] ?? value
         );
       case 'curveType':
+      case 'curve_type':
         return (
           {
             polyline: 'polyline',
@@ -1960,11 +1907,10 @@ function normalizeGeneratedModelSpec(value, key = '') {
 function buildToolCatalog() {
   const publicTools = [];
   for (const tool of BASE_TOOLS) {
-    const canonicalSchema = canonicalizeSchema(cloneSchema(tool.inputSchema ?? { type: 'object', properties: {} }));
     if (!HIDDEN_TOOL_NAMES.has(tool.name)) {
       publicTools.push({
         ...tool,
-        inputSchema: canonicalSchema
+        inputSchema: cloneSchema(tool.inputSchema ?? { type: 'object', properties: {} })
       });
     }
   }
@@ -1975,7 +1921,7 @@ const TOOLS = buildToolCatalog();
 
 const handlers = {
   async editor_connect_info(args) {
-    const base = args.baseUrl || DEFAULT_EDITOR_URL;
+    const base = args.base_url || DEFAULT_EDITOR_URL;
     const url = new URL(base);
     url.searchParams.set('mcp', String(bridge.port));
     url.searchParams.set('mcpToken', BRIDGE_TOKEN);
@@ -1997,7 +1943,7 @@ const handlers = {
     };
   },
   async editor_wait_ready(args) {
-    const client = await bridge.waitForClient(Number(args.timeoutMs ?? 30000));
+    const client = await bridge.waitForClient(Number(args.timeout_ms ?? 30000));
     return { ...bridge.getInfo(), client };
   },
   async editor_status() {
@@ -2014,15 +1960,15 @@ const handlers = {
     if (!name) {
       return { id: null, err: 'Project name is required to create' };
     }
-    return bridge.send(
-      'createProject',
-      {
-        name,
-        saveSceneChanges: !!args.saveSceneChanges,
-        discardSceneChanges: !!args.discardSceneChanges
-      },
-      Number(args.timeoutMs ?? 30000)
-    );
+    const params = {
+      name,
+      save_scene_changes: !!args.save_scene_changes,
+      discard_scene_changes: !!args.discard_scene_changes
+    };
+    if (typeof args.path === 'string' && args.path.trim()) {
+      params.path = args.path.trim();
+    }
+    return bridge.send('createProject', params, Number(args.timeout_ms ?? 30000));
   },
   async project_open(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
@@ -2033,50 +1979,50 @@ const handlers = {
       'openProject',
       {
         id,
-        saveSceneChanges: !!args.saveSceneChanges,
-        discardSceneChanges: !!args.discardSceneChanges
+        save_scene_changes: !!args.save_scene_changes,
+        discard_scene_changes: !!args.discard_scene_changes
       },
-      Number(args.timeoutMs ?? 30000)
+      Number(args.timeout_ms ?? 30000)
     );
   },
   async project_close(args) {
     return bridge.send(
       'closeProject',
       {
-        saveSceneChanges: !!args.saveSceneChanges,
-        discardSceneChanges: !!args.discardSceneChanges
+        save_scene_changes: !!args.save_scene_changes,
+        discard_scene_changes: !!args.discard_scene_changes
       },
-      Number(args.timeoutMs ?? 30000)
+      Number(args.timeout_ms ?? 30000)
     );
   },
   async project_export(args) {
     return bridge.send(
       'exportProject',
       {
-        saveSceneChanges: !!args.saveSceneChanges,
-        discardSceneChanges: !!args.discardSceneChanges
+        save_scene_changes: !!args.save_scene_changes,
+        discard_scene_changes: !!args.discard_scene_changes
       },
-      Number(args.timeoutMs ?? 60000)
+      Number(args.timeout_ms ?? 60000)
     );
   },
   async project_delete(args) {
     return bridge.send(
       'deleteProject',
       {
-        saveSceneChanges: !!args.saveSceneChanges,
-        discardSceneChanges: !!args.discardSceneChanges
+        save_scene_changes: !!args.save_scene_changes,
+        discard_scene_changes: !!args.discard_scene_changes
       },
-      Number(args.timeoutMs ?? 30000)
+      Number(args.timeout_ms ?? 30000)
     );
   },
   async asset_get_root(args) {
-    return bridge.send('asset_get_root_directory', {}, Number(args.timeoutMs ?? 10000));
+    return bridge.send('asset_get_root_directory', {}, Number(args.timeout_ms ?? 10000));
   },
   async asset_get_builtin_primitives(args) {
-    return bridge.send('asset_get_builtin_primitives', {}, Number(args.timeoutMs ?? 10000));
+    return bridge.send('asset_get_builtin_primitives', {}, Number(args.timeout_ms ?? 10000));
   },
   async asset_get_builtin_materials(args) {
-    return bridge.send('asset_get_builtin_materials', {}, Number(args.timeoutMs ?? 10000));
+    return bridge.send('asset_get_builtin_materials', {}, Number(args.timeout_ms ?? 10000));
   },
   async asset_read_directory(args) {
     const path = typeof args.path === 'string' ? args.path.trim() : '';
@@ -2090,7 +2036,7 @@ const handlers = {
     if (Object.prototype.hasOwnProperty.call(args, 'pattern')) {
       params.pattern = args.pattern;
     }
-    return bridge.send('asset_read_directory', params, Number(args.timeoutMs ?? 10000));
+    return bridge.send('asset_read_directory', params, Number(args.timeout_ms ?? 10000));
   },
   async asset_read_file(args) {
     const path = typeof args.path === 'string' ? args.path.trim() : '';
@@ -2101,7 +2047,7 @@ const handlers = {
     if (encoding !== 'utf8' && encoding !== 'binary') {
       return { result: null, err: 'asset_read_file encoding must be `utf8` or `binary`' };
     }
-    return bridge.send('asset_read_file', { path, encoding }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('asset_read_file', { path, encoding }, Number(args.timeout_ms ?? 10000));
   },
   async asset_write_file(args) {
     const path = typeof args.path === 'string' ? args.path.trim() : '';
@@ -2118,7 +2064,7 @@ const handlers = {
     return bridge.send(
       'asset_write_file',
       { path, encoding, content: args.content },
-      Number(args.timeoutMs ?? 10000)
+      Number(args.timeout_ms ?? 10000)
     );
   },
   async asset_create_material(args) {
@@ -2138,28 +2084,32 @@ const handlers = {
     if (Object.prototype.hasOwnProperty.call(args, 'overwrite')) {
       params.overwrite = args.overwrite;
     }
-    return bridge.send('asset_create_material', params, Number(args.timeoutMs ?? 10000));
+    return bridge.send('asset_create_material', params, Number(args.timeout_ms ?? 10000));
   },
   async asset_clone_material(args) {
-    const srcPath = typeof args.srcPath === 'string' ? args.srcPath.trim() : '';
+    const srcPath = typeof args.src_path === 'string' ? args.src_path.trim() : '';
     if (!srcPath) {
-      return { err: 'asset_clone_material requires srcPath' };
+      return { err: 'asset_clone_material requires src_path' };
     }
-    const dstPath = typeof args.dstPath === 'string' ? args.dstPath.trim() : '';
+    const dstPath = typeof args.dst_path === 'string' ? args.dst_path.trim() : '';
     if (!dstPath) {
-      return { err: 'asset_clone_material requires dstPath' };
+      return { err: 'asset_clone_material requires dst_path' };
     }
-    return bridge.send('asset_clone_material', { srcPath, dstPath }, Number(args.timeoutMs ?? 10000));
+    return bridge.send(
+      'asset_clone_material',
+      { src_path: srcPath, dst_path: dstPath },
+      Number(args.timeout_ms ?? 10000)
+    );
   },
   async material_get_classes(args) {
-    return bridge.send('getMaterialClasses', {}, Number(args.timeoutMs ?? 10000));
+    return bridge.send('getMaterialClasses', {}, Number(args.timeout_ms ?? 10000));
   },
   async material_get_property_list(args) {
     const path = typeof args.path === 'string' ? args.path.trim() : '';
     if (!path) {
       return { propertyList: null, err: 'material_get_property_list requires the material file path' };
     }
-    return bridge.send('getMaterialPropertyList', { path }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('getMaterialPropertyList', { path }, Number(args.timeout_ms ?? 10000));
   },
   async material_set_properties(args) {
     const path = typeof args.path === 'string' ? args.path.trim() : '';
@@ -2174,16 +2124,16 @@ const handlers = {
       if (!prop || typeof prop !== 'object') {
         return { err: 'material_set_properties property entries must be objects' };
       }
-      const propertyName = typeof prop.propertyName === 'string' ? prop.propertyName.trim() : '';
+      const propertyName = typeof prop.property_name === 'string' ? prop.property_name.trim() : '';
       if (!propertyName) {
         return { err: 'material_set_properties requires the material property name' };
       }
       if (!Object.prototype.hasOwnProperty.call(prop, 'value')) {
         return { err: `material_set_properties requires value for property ${propertyName}` };
       }
-      properties.push({ propertyName, value: prop.value });
+      properties.push({ property_name: propertyName, value: prop.value });
     }
-    return bridge.send('material_set_properties', { path, properties }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('material_set_properties', { path, properties }, Number(args.timeout_ms ?? 10000));
   },
   async material_get_properties(args) {
     const path = typeof args.path === 'string' ? args.path.trim() : '';
@@ -2197,18 +2147,18 @@ const handlers = {
     if (properties.length !== args.properties.length) {
       return { values: null, err: 'material_get_properties property names must be non-empty strings' };
     }
-    return bridge.send('material_get_properties', { path, properties }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('material_get_properties', { path, properties }, Number(args.timeout_ms ?? 10000));
   },
   async primitive_export_glb(args) {
-    const srcPath = typeof args.srcPath === 'string' ? args.srcPath.trim() : '';
+    const srcPath = typeof args.src_path === 'string' ? args.src_path.trim() : '';
     if (!srcPath) {
-      return { path: null, bytes: 0, err: 'primitive_export_glb requires srcPath' };
+      return { path: null, bytes: 0, err: 'primitive_export_glb requires src_path' };
     }
-    const params = { srcPath };
-    if (typeof args.destPath === 'string' && args.destPath.trim()) {
-      params.destPath = args.destPath.trim();
+    const params = { src_path: srcPath };
+    if (typeof args.dest_path === 'string' && args.dest_path.trim()) {
+      params.dest_path = args.dest_path.trim();
     }
-    return bridge.send('primitive_export_glb', params, Number(args.timeoutMs ?? 30000));
+    return bridge.send('primitive_export_glb', params, Number(args.timeout_ms ?? 30000));
   },
   async mesh_create(args) {
     const primitivePath = typeof args.primitive_path === 'string' ? args.primitive_path.trim() : '';
@@ -2226,14 +2176,14 @@ const handlers = {
     if (typeof args.parent_id === 'string' && args.parent_id.trim()) {
       params.parent_id = args.parent_id.trim();
     }
-    return bridge.send('mesh_create', params, Number(args.timeoutMs ?? 10000));
+    return bridge.send('mesh_create', params, Number(args.timeout_ms ?? 10000));
   },
   async mesh_get_material(args) {
     const meshId = typeof args.mesh_id === 'string' ? args.mesh_id.trim() : '';
     if (!meshId) {
       return { material_path: null, err: 'mesh_get_material requires the mesh_id' };
     }
-    return bridge.send('mesh_get_material', { mesh_id: meshId }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('mesh_get_material', { mesh_id: meshId }, Number(args.timeout_ms ?? 10000));
   },
   async mesh_set_material(args) {
     const meshId = typeof args.mesh_id === 'string' ? args.mesh_id.trim() : '';
@@ -2247,7 +2197,7 @@ const handlers = {
     return bridge.send(
       'mesh_set_material',
       { mesh_id: meshId, material_path: materialPath },
-      Number(args.timeoutMs ?? 10000)
+      Number(args.timeout_ms ?? 10000)
     );
   },
   async mesh_get_primitive(args) {
@@ -2255,7 +2205,7 @@ const handlers = {
     if (!meshId) {
       return { primitive_path: null, err: 'mesh_get_primitive requires the mesh_id' };
     }
-    return bridge.send('mesh_get_primitive', { mesh_id: meshId }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('mesh_get_primitive', { mesh_id: meshId }, Number(args.timeout_ms ?? 10000));
   },
   async mesh_set_primitive(args) {
     const meshId = typeof args.mesh_id === 'string' ? args.mesh_id.trim() : '';
@@ -2269,21 +2219,21 @@ const handlers = {
     return bridge.send(
       'mesh_set_primitive',
       { mesh_id: meshId, primitive_path: primitivePath },
-      Number(args.timeoutMs ?? 10000)
+      Number(args.timeout_ms ?? 10000)
     );
   },
   async node_get_classes(args) {
-    return bridge.send('getNodeClasses', {}, Number(args.timeoutMs ?? 10000));
+    return bridge.send('getNodeClasses', {}, Number(args.timeout_ms ?? 10000));
   },
   async scene_get_property_list(args) {
-    return bridge.send('getScenePropertyList', {}, Number(args.timeoutMs ?? 10000));
+    return bridge.send('getScenePropertyList', {}, Number(args.timeout_ms ?? 10000));
   },
   async node_get_property_list(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
       return { propertyList: null, err: 'node_get_property_list requires the node id' };
     }
-    return bridge.send('getNodePropertyList', { id }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('getNodePropertyList', { id }, Number(args.timeout_ms ?? 10000));
   },
   async shape_create_node(args) {
     const shape = typeof args.shape === 'string' ? args.shape.trim() : '';
@@ -2292,7 +2242,7 @@ const handlers = {
     }
     const params = { shape };
     if (typeof args.parent_id === 'string' && args.parent_id.trim()) {
-      params.parentId = args.parent_id.trim();
+      params.parent_id = args.parent_id.trim();
     }
     if (typeof args.name === 'string' && args.name.trim()) {
       params.name = args.name.trim();
@@ -2306,21 +2256,21 @@ const handlers = {
     if (Object.prototype.hasOwnProperty.call(args, 'rotation')) {
       params.rotation = args.rotation;
     }
-    return bridge.send('createShapeNode', params, Number(args.timeoutMs ?? 10000));
+    return bridge.send('createShapeNode', params, Number(args.timeout_ms ?? 10000));
   },
   async node_get_class(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
       return { nodeClass: null, err: 'node_get_class requires the node id' };
     }
-    return bridge.send('getNodeClass', { id }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('getNodeClass', { id }, Number(args.timeout_ms ?? 10000));
   },
   async node_get_local_transform(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
       return { transform: null, err: 'node_get_local_transform requires the node id' };
     }
-    return bridge.send('getNodeLocalTransform', { id }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('getNodeLocalTransform', { id }, Number(args.timeout_ms ?? 10000));
   },
   async node_set_local_transform(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
@@ -2337,24 +2287,24 @@ const handlers = {
     if (Object.prototype.hasOwnProperty.call(args, 'rotation')) {
       params.rotation = args.rotation;
     }
-    return bridge.send('setNodeLocalTransform', params, Number(args.timeoutMs ?? 10000));
+    return bridge.send('setNodeLocalTransform', params, Number(args.timeout_ms ?? 10000));
   },
   async scene_get_root_node(args) {
-    return bridge.send('getSceneRootNode', {}, Number(args.timeoutMs ?? 10000));
+    return bridge.send('getSceneRootNode', {}, Number(args.timeout_ms ?? 10000));
   },
   async node_get_parent(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
       return { parentNode: null, err: 'node_get_parent requires the node id' };
     }
-    return bridge.send('getParentNode', { id }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('getParentNode', { id }, Number(args.timeout_ms ?? 10000));
   },
   async node_remove(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
       return { err: 'node_remove requires the node id' };
     }
-    return bridge.send('removeNode', { id }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('removeNode', { id }, Number(args.timeout_ms ?? 10000));
   },
   async node_set_parent(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
@@ -2365,30 +2315,30 @@ const handlers = {
     if (!parentId) {
       return { err: 'node_set_parent requires the parent_id' };
     }
-    return bridge.send('setParentNode', { id, parentId }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('setParentNode', { id, parent_id: parentId }, Number(args.timeout_ms ?? 10000));
   },
   async node_get_children(args) {
     const parent = typeof args.parent === 'string' ? args.parent.trim() : '';
     if (!parent) {
       return { subNodes: null, err: 'node_get_children requires the parent node id' };
     }
-    return bridge.send('getSubNodes', { parent }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('getSubNodes', { parent }, Number(args.timeout_ms ?? 10000));
   },
   async camera_get_active(args) {
-    return bridge.send('camera_get_active', {}, Number(args.timeoutMs ?? 10000));
+    return bridge.send('camera_get_active', {}, Number(args.timeout_ms ?? 10000));
   },
   async camera_set_active(args) {
-    const cameraId = typeof args.cameraId === 'string' ? args.cameraId.trim() : '';
+    const cameraId = typeof args.camera_id === 'string' ? args.camera_id.trim() : '';
     if (!cameraId) {
       return {
         camera: null,
         transform: null,
         direction: null,
         view_center: null,
-        err: 'camera_set_active requires cameraId'
+        err: 'camera_set_active requires camera_id'
       };
     }
-    return bridge.send('camera_set_active', { camera_id: cameraId }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('camera_set_active', { camera_id: cameraId }, Number(args.timeout_ms ?? 10000));
   },
   async camera_look_at(args) {
     if (!Array.isArray(args.target) || args.target.length !== 3) {
@@ -2403,8 +2353,8 @@ const handlers = {
     const params = {
       target: args.target
     };
-    if (typeof args.cameraId === 'string' && args.cameraId.trim()) {
-      params.camera_id = args.cameraId.trim();
+    if (typeof args.camera_id === 'string' && args.camera_id.trim()) {
+      params.camera_id = args.camera_id.trim();
     }
     if (Array.isArray(args.position)) {
       params.position = args.position;
@@ -2412,54 +2362,54 @@ const handlers = {
     if (Array.isArray(args.up)) {
       params.up = args.up;
     }
-    return bridge.send('camera_look_at', params, Number(args.timeoutMs ?? 10000));
+    return bridge.send('camera_look_at', params, Number(args.timeout_ms ?? 10000));
   },
   async model_generate_begin(args) {
     if (!args.spec || typeof args.spec !== 'object') {
       return { jobId: null, status: null, err: 'model_generate_begin requires spec' };
     }
-    const destPath = typeof args.destPath === 'string' ? args.destPath.trim() : '';
+    const destPath = typeof args.dest_path === 'string' ? args.dest_path.trim() : '';
     if (!destPath) {
-      return { jobId: null, status: null, err: 'model_generate_begin requires destPath' };
+      return { jobId: null, status: null, err: 'model_generate_begin requires dest_path' };
     }
     const params = {
       spec: normalizeGeneratedModelSpec(args.spec),
-      destPath
+      dest_path: destPath
     };
     if (typeof args.name === 'string') {
       params.name = args.name;
     }
-    if (Object.prototype.hasOwnProperty.call(args, 'createNode')) {
-      params.createNode = !!args.createNode;
+    if (Object.prototype.hasOwnProperty.call(args, 'create_node')) {
+      params.create_node = !!args.create_node;
     }
-    if (Object.prototype.hasOwnProperty.call(args, 'generationTimeoutMs')) {
-      params.generationTimeoutMs = Number(args.generationTimeoutMs);
+    if (Object.prototype.hasOwnProperty.call(args, 'generation_timeout_ms')) {
+      params.generation_timeout_ms = Number(args.generation_timeout_ms);
     }
-    return bridge.send('model_generate_begin', params, Number(args.timeoutMs ?? 10000));
+    return bridge.send('model_generate_begin', params, Number(args.timeout_ms ?? 10000));
   },
   async model_generate_status(args) {
-    const jobId = typeof args.jobId === 'string' ? args.jobId.trim() : '';
+    const jobId = typeof args.job_id === 'string' ? args.job_id.trim() : '';
     if (!jobId) {
-      return { job: null, err: 'model_generate_status requires jobId' };
+      return { job: null, err: 'model_generate_status requires job_id' };
     }
-    return bridge.send('model_generate_status', { jobId }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('model_generate_status', { job_id: jobId }, Number(args.timeout_ms ?? 10000));
   },
   async model_generate_cancel(args) {
-    const jobId = typeof args.jobId === 'string' ? args.jobId.trim() : '';
+    const jobId = typeof args.job_id === 'string' ? args.job_id.trim() : '';
     if (!jobId) {
-      return { jobId: null, status: null, err: 'model_generate_cancel requires jobId' };
+      return { jobId: null, status: null, err: 'model_generate_cancel requires job_id' };
     }
-    return bridge.send('model_generate_cancel', { jobId }, Number(args.timeoutMs ?? 10000));
+    return bridge.send('model_generate_cancel', { job_id: jobId }, Number(args.timeout_ms ?? 10000));
   },
   async editor_create_scene(args) {
     const params = {};
     if (typeof args.path === 'string' && args.path.trim()) {
       params.path = args.path.trim();
     }
-    if (Object.prototype.hasOwnProperty.call(args, 'resetView')) {
-      params.resetView = !!args.resetView;
+    if (Object.prototype.hasOwnProperty.call(args, 'reset_view')) {
+      params.reset_view = !!args.reset_view;
     }
-    return bridge.send('createScene', params, Number(args.timeoutMs ?? 30000));
+    return bridge.send('createScene', params, Number(args.timeout_ms ?? 30000));
   },
   async editor_open_scene(args) {
     const path = typeof args.path === 'string' ? args.path.trim() : '';
@@ -2467,26 +2417,26 @@ const handlers = {
       return { err: 'editor_open_scene requires path' };
     }
     const params = { path };
-    if (Object.prototype.hasOwnProperty.call(args, 'resetView')) {
-      params.resetView = !!args.resetView;
+    if (Object.prototype.hasOwnProperty.call(args, 'reset_view')) {
+      params.reset_view = !!args.reset_view;
     }
-    return bridge.send('openScene', params, Number(args.timeoutMs ?? 30000));
+    return bridge.send('openScene', params, Number(args.timeout_ms ?? 30000));
+  },
+  async editor_save_scene(args) {
+    return bridge.send('saveScene', {}, Number(args.timeout_ms ?? 30000));
   },
   async editor_call(args) {
-    return bridge.send(String(args.method), args.params ?? {}, Number(args.timeoutMs ?? 30000));
+    return bridge.send(String(args.method), args.params ?? {}, Number(args.timeout_ms ?? 30000));
   },
   async editor_eval(args) {
     return bridge.send(
       'eval',
       { script: String(args.script), expression: !!args.expression },
-      Number(args.timeoutMs ?? 30000)
+      Number(args.timeout_ms ?? 30000)
     );
   },
-  async editor_render_frames(args) {
-    return bridge.send('renderFrames', { frames: Number(args.frames ?? 1) }, 30000);
-  },
   async editor_screenshot(args) {
-    return bridge.send('screenshot', { mimeType: args.mimeType ?? 'image/png' }, 30000);
+    return bridge.send('screenshot', { mime_type: args.mime_type ?? 'image/png' }, 30000);
   },
   async editor_console_logs(args) {
     return bridge.send('consoleLogs', { limit: Number(args.limit ?? 100) }, 10000);

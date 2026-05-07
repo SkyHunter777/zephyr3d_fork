@@ -143,6 +143,41 @@ function formatValue(value: any): string {
   }
 }
 
+function toSnakeCase(value: string): string {
+  return String(value)
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[\s-]+/g, '_')
+    .toLowerCase();
+}
+
+function normalizeResultKeysToSnakeCase(value: any): any {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeResultKeysToSnakeCase(item));
+  }
+  if (value && typeof value === 'object') {
+    const normalized: Record<string, any> = {};
+    for (const [key, childValue] of Object.entries(value)) {
+      normalized[toSnakeCase(key)] = normalizeResultKeysToSnakeCase(childValue);
+    }
+    return normalized;
+  }
+  return value;
+}
+
+function globPatternToRegExp(pattern: string): RegExp {
+  const source = String(pattern)
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '\0');
+  return new RegExp(`^${source.replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\0/g, '.*')}$`);
+}
+
+function matchesGlobPattern(path: string, pattern: string): boolean {
+  const matcher = globPatternToRegExp(pattern);
+  const relativePath = path.startsWith('/') ? path.slice(1) : path;
+  const name = PathUtils.basename(path);
+  return matcher.test(name) || matcher.test(relativePath);
+}
+
 function toJson(value: any, depth = MAX_SERIALIZE_DEPTH, seen = new WeakSet<object>()): JsonValue {
   if (value === null || value === undefined) {
     return null;
@@ -472,7 +507,7 @@ async function prepareProjectChange(editor: Editor, params: any): Promise<string
   if (!controller?.sceneChanged) {
     return null;
   }
-  if (params?.saveSceneChanges) {
+  if (params?.save_scene_changes) {
     const scenePath = getCurrentScenePath(editor);
     if (!scenePath) {
       return 'Current scene has unsaved changes and no path; cannot save without prompting';
@@ -480,11 +515,39 @@ async function prepareProjectChange(editor: Editor, params: any): Promise<string
     await controller.saveScene?.();
     return controller.sceneChanged ? 'Current scene could not be saved' : null;
   }
-  if (params?.discardSceneChanges) {
+  if (params?.discard_scene_changes) {
     controller.discardSceneChanges();
     return null;
   }
-  return 'Current scene has unsaved changes; pass saveSceneChanges or discardSceneChanges';
+  return 'Current scene has unsaved changes; pass save_scene_changes or discard_scene_changes';
+}
+
+async function saveCurrentScene(editor: Editor): Promise<any> {
+  if (!editor.currentProject) {
+    return {
+      ...getStatus(editor),
+      err: 'No project is currently opened; create or open a project before saving a scene'
+    };
+  }
+  const controller = getSceneController(editor);
+  if (!controller?.saveScene) {
+    await editor.moduleManager.activate('Scene', '');
+  }
+  const sceneController = getSceneController(editor);
+  if (!sceneController?.saveScene) {
+    return {
+      ...getStatus(editor),
+      err: 'Scene module is not active or does not support saving scenes'
+    };
+  }
+  if (!sceneController.scenePath) {
+    return {
+      ...getStatus(editor),
+      err: 'Current scene has no path; create the scene with `path` or save it through the editor UI first'
+    };
+  }
+  await sceneController.saveScene();
+  return getStatus(editor);
 }
 
 async function closeCurrentProject(editor: Editor, params: any): Promise<string | null> {
@@ -705,7 +768,7 @@ async function handleMessage(editor: Editor, ws: WebSocket, data: any): Promise<
   }
   try {
     const result = await dispatch(editor, req.method, req.params ?? {});
-    ws.send(JSON.stringify({ id: req.id, result: toJson(result) }));
+    ws.send(JSON.stringify({ id: req.id, result: toJson(normalizeResultKeysToSnakeCase(result)) }));
   } catch (err) {
     ws.send(
       JSON.stringify({
@@ -750,12 +813,12 @@ async function startGeneratedModelJob(
       err: 'model_generate_begin requires `spec` to be a procedural model JSON object'
     };
   }
-  let destPath = typeof params.destPath === 'string' ? params.destPath.trim() : '';
+  let destPath = typeof params.dest_path === 'string' ? params.dest_path.trim() : '';
   if (!destPath) {
     return {
       jobId: null,
       status: null,
-      err: 'model_generate_begin requires `destPath`, for example /assets/generated/model.zmsh'
+      err: 'model_generate_begin requires `dest_path`, for example /assets/generated/model.zmsh'
     };
   }
   if (!destPath.endsWith('.zmsh')) {
@@ -766,7 +829,7 @@ async function startGeneratedModelJob(
     return {
       jobId: null,
       status: null,
-      err: `destPath must be under /assets: ${destPath}`
+      err: `dest_path must be under /assets: ${destPath}`
     };
   }
   if (destPath.startsWith('/assets/@builtins/')) {
@@ -778,7 +841,7 @@ async function startGeneratedModelJob(
   }
   const timeoutMs = Math.max(
     1000,
-    Math.min(10 * 60 * 1000, Number(params.generationTimeoutMs ?? DEFAULT_GENERATED_MODEL_TIMEOUT_MS))
+    Math.min(10 * 60 * 1000, Number(params.generation_timeout_ms ?? DEFAULT_GENERATED_MODEL_TIMEOUT_MS))
   );
   const jobId = `gm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const job: GeneratedModelJob = {
@@ -793,7 +856,7 @@ async function startGeneratedModelJob(
       typeof params.name === 'string' && params.name.trim()
         ? params.name.trim()
         : PathUtils.basename(destPath, '.zmsh'),
-    createNode: params.createNode !== false,
+    createNode: params.create_node !== false,
     worker: null,
     timer: 0,
     error: null,
@@ -962,15 +1025,12 @@ async function exportPrimitiveGlb(
         err: 'No project is currently opened; create or open a project first'
       };
     }
-    let srcPath = typeof params.srcPath === 'string' ? params.srcPath.trim() : '';
-    if (!srcPath && typeof params.path === 'string') {
-      srcPath = params.path.trim();
-    }
+    let srcPath = typeof params.src_path === 'string' ? params.src_path.trim() : '';
     if (!srcPath) {
       return {
         path: null,
         bytes: 0,
-        err: 'primitive_export_glb requires `srcPath`, the source .zmsh primitive path under /assets'
+        err: 'primitive_export_glb requires `src_path`, the source .zmsh primitive path under /assets'
       };
     }
     srcPath = ProjectService.VFS.normalizePath(srcPath);
@@ -978,17 +1038,17 @@ async function exportPrimitiveGlb(
       return {
         path: null,
         bytes: 0,
-        err: `srcPath must be under /assets: ${srcPath}`
+        err: `src_path must be under /assets: ${srcPath}`
       };
     }
     if (!srcPath.endsWith('.zmsh')) {
       return {
         path: null,
         bytes: 0,
-        err: `srcPath must point to a .zmsh primitive asset: ${srcPath}`
+        err: `src_path must point to a .zmsh primitive asset: ${srcPath}`
       };
     }
-    let destPath = typeof params.destPath === 'string' ? params.destPath.trim() : '';
+    let destPath = typeof params.dest_path === 'string' ? params.dest_path.trim() : '';
     if (!destPath) {
       destPath = `${srcPath.slice(0, -'.zmsh'.length)}.glb`;
     }
@@ -1000,7 +1060,7 @@ async function exportPrimitiveGlb(
       return {
         path: null,
         bytes: 0,
-        err: `destPath must be under /assets: ${destPath}`
+        err: `dest_path must be under /assets: ${destPath}`
       };
     }
     if (destPath.startsWith('/assets/@builtins/')) {
@@ -1122,7 +1182,7 @@ function serializeGeneratedModelJob(job: GeneratedModelJob | undefined) {
   if (!job) {
     return {
       job: null,
-      err: 'Generated model job not found; pass a jobId returned by model_generate_begin'
+      err: 'Generated model job not found; pass a job_id returned by model_generate_begin'
     };
   }
   return {
@@ -1150,22 +1210,22 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
     case 'primitive_export_glb':
       return exportPrimitiveGlb(params);
     case 'model_generate_status': {
-      const jobId = typeof params.jobId === 'string' ? params.jobId.trim() : '';
+      const jobId = typeof params.job_id === 'string' ? params.job_id.trim() : '';
       if (!jobId) {
         return {
           job: null,
-          err: 'model_generate_status requires `jobId`, returned by model_generate_begin'
+          err: 'model_generate_status requires `job_id`, returned by model_generate_begin'
         };
       }
       return serializeGeneratedModelJob(generatedModelJobs.get(jobId));
     }
     case 'model_generate_cancel': {
-      const jobId = typeof params.jobId === 'string' ? params.jobId.trim() : '';
+      const jobId = typeof params.job_id === 'string' ? params.job_id.trim() : '';
       if (!jobId) {
         return {
           jobId: null,
           status: null,
-          err: 'model_generate_cancel requires `jobId`, returned by model_generate_begin'
+          err: 'model_generate_cancel requires `job_id`, returned by model_generate_begin'
         };
       }
       return cancelGeneratedModelJob(jobId);
@@ -1413,20 +1473,20 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
             {
               path: '/assets/@builtins/materials/lambert.zmtl',
               type: 'lambert',
-              immuable: true
+              immutable: true
             },
             {
-              path: '/assets/@builtins/materials/pbr_metallic_roughness',
+              path: '/assets/@builtins/materials/pbr_metallic_roughness.zmtl',
               type: 'pbr_metallic_roughness',
               immutable: true
             },
             {
-              path: '/assets/@builtins/materials/pbr_specular_glossiness',
+              path: '/assets/@builtins/materials/pbr_specular_glossiness.zmtl',
               type: 'pbr_specular_glossiness',
               immutable: true
             },
             {
-              path: '/assets/@builtins/materials/prite_std.zmtl',
+              path: '/assets/@builtins/materials/sprite_std.zmtl',
               type: 'sprite_standard',
               immutable: true
             },
@@ -1592,17 +1652,17 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
             err: 'No project is currently opened; create or open a project first'
           };
         }
-        let srcPath: string = params.srcPath;
+        let srcPath: string = params.src_path;
         if (typeof srcPath !== 'string' || !srcPath) {
           return {
-            err: 'asset_clone_material requires `srcPath`, for example /assets/@builtins/unlit.zmtl'
+            err: 'asset_clone_material requires `src_path`, for example /assets/@builtins/unlit.zmtl'
           };
         }
         srcPath = ProjectService.VFS.normalizePath(srcPath);
-        let dstPath: string = params.dstPath;
+        let dstPath: string = params.dst_path;
         if (typeof dstPath !== 'string' || !dstPath) {
           return {
-            err: 'asset_clone_material requires `dstPath`, for example /assets/new_material.zmtl'
+            err: 'asset_clone_material requires `dst_path`, for example /assets/new_material.zmtl'
           };
         }
         await ProjectService.VFS.copyFile(srcPath, dstPath, { overwrite: true });
@@ -1750,7 +1810,10 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           pattern: params.pattern
         });
         return {
-          result: entries,
+          result:
+            typeof params.pattern === 'string'
+              ? entries.filter((entry) => matchesGlobPattern(entry.path, params.pattern))
+              : entries,
           err: null
         };
       } catch (err) {
@@ -1809,7 +1872,7 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           if (!prop) {
             return {
               values: null,
-              err: `Unknown material property "${propertyName}" for ${path}. Use material_get_property_list first and pass one of its propertyName/name values.`
+              err: `Unknown material property "${propertyName}" for ${path}. Use material_get_property_list first and pass one of its property_name/name values.`
             };
           }
           if (!prop.get) {
@@ -1885,10 +1948,10 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
             err: 'Builtin materials are not modifierable, use `asset_clone_material` first'
           };
         }
-        const properties = params.properties as { propertyName: string; value: unknown }[];
+        const properties = params.properties as { property_name: string; value: unknown }[];
         if (!Array.isArray(properties)) {
           return {
-            err: 'material_set_properties requires `properties` as an array of { propertyName, value } objects'
+            err: 'material_set_properties requires `properties` as an array of { property_name, value } objects'
           };
         }
         const material = await getEngine().resourceManager.fetchMaterial(path);
@@ -1908,17 +1971,17 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
         }
         const props = materialClass.getProps();
         for (const p of properties) {
-          let propertyName = p.propertyName as string;
+          let propertyName = p.property_name as string;
           if (typeof propertyName !== 'string' || !propertyName.trim()) {
             return {
-              err: 'material_set_properties requires each property update to include non-empty `propertyName`'
+              err: 'material_set_properties requires each property update to include non-empty `property_name`'
             };
           }
           propertyName = propertyName.trim();
           const prop = props.find((prop) => prop.name === propertyName);
           if (!prop) {
             return {
-              err: `Unknown material property "${propertyName}" for ${path}. Use material_get_property_list first and pass one of its propertyName/name values.`
+              err: `Unknown material property "${propertyName}" for ${path}. Use material_get_property_list first and pass one of its property_name/name values.`
             };
           }
           if (!prop.set) {
@@ -2395,7 +2458,7 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           err: `Unsupported shape type: ${params.shape}. Supported shapes: ${Object.keys(shapePrimitivePaths).join(', ')}`
         };
       }
-      const parentId = typeof params.parentId === 'string' ? params.parentId.trim() : '';
+      const parentId = typeof params.parent_id === 'string' ? params.parent_id.trim() : '';
       const parentNode = parentId ? scene.findNodeById(parentId) : scene.rootNode;
       if (!parentNode) {
         return {
@@ -2647,10 +2710,10 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           err: 'setParentNode requires `id`, the persistent id of the node to reparent'
         };
       }
-      const newParentId = params.parentId as string;
+      const newParentId = params.parent_id as string;
       if (typeof newParentId !== 'string' || !newParentId.trim()) {
         return {
-          err: 'setParentNode requires `parentId`, the persistent id of the new parent node'
+          err: 'setParentNode requires `parent_id`, the persistent id of the new parent node'
         };
       }
       const node = getNode(editor, id.trim());
@@ -2713,7 +2776,10 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           err: 'Scene module is not active or does not support creating scenes'
         };
       }
-      sceneController.createScene(params?.resetView ?? true, params?.path);
+      sceneController.createScene(params?.reset_view ?? true, params?.path);
+      if (params?.path) {
+        await sceneController.saveScene?.();
+      }
       return getStatus(editor);
     }
     case 'openScene': {
@@ -2735,18 +2801,11 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           err: 'Scene module is not active or does not support opening scenes'
         };
       }
-      await sceneController.openScene(path, params?.resetView ?? true);
+      await sceneController.openScene(path, params?.reset_view ?? true);
       return getStatus(editor);
     }
-    case 'renderFrames': {
-      const frames = Math.max(1, Math.min(Number(params?.frames ?? 1), 120));
-      for (let i = 0; i < frames; i++) {
-        editor.update(16.6667);
-        editor.render();
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-      }
-      return getStatus(editor);
-    }
+    case 'saveScene':
+      return await saveCurrentScene(editor);
     case 'screenshot': {
       const canvas = getCanvas();
       // GPU-backed canvases, especially WebGPU, may not remain serializable once the
@@ -2756,7 +2815,7 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
       return {
         width: canvas.width,
         height: canvas.height,
-        dataUrl: await canvasToDataUrl(canvas, params?.mimeType ?? 'image/png', params?.quality)
+        dataUrl: await canvasToDataUrl(canvas, params?.mime_type ?? 'image/png', params?.quality)
       };
     }
     case 'consoleLogs': {
