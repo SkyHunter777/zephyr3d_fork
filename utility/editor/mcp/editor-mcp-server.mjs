@@ -207,6 +207,11 @@ class EditorBridgeServer {
       return;
     }
     if (msg.type === 'hello') {
+      if (!tokenMatches(this.token, msg.token)) {
+        log('Rejecting editor bridge connection with an invalid token.');
+        socket.end();
+        return;
+      }
       if (this.client && this.client !== socket) {
         this.client.end();
       }
@@ -237,7 +242,7 @@ class EditorBridgeServer {
 
   send(method, params, timeoutMs = 30000) {
     if (!this.client) {
-      throw new Error('No editor page is connected. Open the editor URL returned by editor_connect_info.');
+      throw new Error('No editor window is connected. Launch the Electron editor and wait for editor_wait_ready.');
     }
     const id = this.nextId++;
     const payload = JSON.stringify({ id, method, params: params ?? {} });
@@ -305,6 +310,18 @@ class EditorBridgeServer {
   }
 }
 
+function tokenMatches(expected, actual) {
+  if (typeof expected !== 'string' || typeof actual !== 'string') {
+    return false;
+  }
+  const expectedBuffer = Buffer.from(expected, 'utf8');
+  const actualBuffer = Buffer.from(actual, 'utf8');
+  return (
+    expectedBuffer.length === actualBuffer.length &&
+    crypto.timingSafeEqual(expectedBuffer, actualBuffer)
+  );
+}
+
 function encodeWebSocketFrame(payload, opcode) {
   const length = payload.length;
   let header;
@@ -344,7 +361,583 @@ const MATERIAL_CLASSES = [
   'StandardSpriteMaterial'
 ];
 
-const tools = [
+const UV_AXIS_VALUES = ['x', 'y', 'z', '-x', '-y', '-z'];
+const POSITIVE_AXIS_VALUES = ['x', 'y', 'z'];
+const UV_MODE_VALUES = ['default', 'normalized', 'worldLength', 'planar', 'box', 'cylindrical', 'spherical'];
+const COORDINATE_SYSTEM_SCHEMA_VALUES = ['editor', 'y_up', 'z_up'];
+const COORDINATE_REMAP_SCHEMA_VALUES = ['none', 'z_up_to_y_up', 'y_up_to_z_up'];
+const SURFACE_TYPE_SCHEMA_VALUES = ['bezier_patch'];
+const CURVE_TYPE_SCHEMA_VALUES = ['polyline', 'bezier', 'catmull_rom', 'nurbs'];
+
+function numberTupleSchema(length, description) {
+  return {
+    type: 'array',
+    minItems: length,
+    maxItems: length,
+    items: { type: 'number' },
+    description
+  };
+}
+
+function integerSchema(minimum, maximum, description) {
+  const schema = {
+    type: 'integer',
+    minimum
+  };
+  if (maximum !== undefined) {
+    schema.maximum = maximum;
+  }
+  if (description) {
+    schema.description = description;
+  }
+  return schema;
+}
+
+function numberSchema(options = {}) {
+  const schema = {
+    type: 'number'
+  };
+  if (options.minimum !== undefined) {
+    schema.minimum = options.minimum;
+  }
+  if (options.maximum !== undefined) {
+    schema.maximum = options.maximum;
+  }
+  if (options.exclusiveMinimum !== undefined) {
+    schema.exclusiveMinimum = options.exclusiveMinimum;
+  }
+  if (options.description) {
+    schema.description = options.description;
+  }
+  return schema;
+}
+
+function createCoordinateRemapSchema() {
+  return {
+    description: 'Optional axis remap applied after coordinateSystem. Use a preset string or explicit axis mapping.',
+    oneOf: [
+      {
+        type: 'string',
+        enum: COORDINATE_REMAP_SCHEMA_VALUES
+      },
+      {
+        type: 'object',
+        properties: {
+          axes: {
+            type: 'array',
+            minItems: 3,
+            maxItems: 3,
+            items: { type: 'string', enum: UV_AXIS_VALUES },
+            description: 'Explicit X/Y/Z source axes, for example ["x", "z", "-y"].'
+          }
+        },
+        required: ['axes']
+      }
+    ]
+  };
+}
+
+function createUvSpecSchema() {
+  return {
+    type: 'object',
+    description: 'Optional UV generation and remapping settings for generated vertices.',
+    properties: {
+      mode: {
+        type: 'string',
+        enum: UV_MODE_VALUES,
+        description: 'UV generation mode.'
+      },
+      axes: {
+        type: 'array',
+        minItems: 2,
+        maxItems: 2,
+        items: { type: 'string', enum: UV_AXIS_VALUES },
+        description: 'U/V source axes, for example ["x", "z"].'
+      },
+      axis: {
+        type: 'string',
+        enum: POSITIVE_AXIS_VALUES,
+        description: 'Primary positive axis for cylindrical or spherical mapping.'
+      },
+      origin: numberTupleSchema(3, 'Mapping origin as [x, y, z].'),
+      size: numberTupleSchema(2, 'Planar or box mapping size as [width, height].'),
+      tileSize: numberTupleSchema(2, 'World-space tiling size as [u, v].'),
+      scale: numberTupleSchema(2, 'UV scale as [u, v].'),
+      offset: numberTupleSchema(2, 'UV offset as [u, v].'),
+      flipU: { type: 'boolean' },
+      flipV: { type: 'boolean' },
+      swapUV: { type: 'boolean' },
+      repeat: numberTupleSchema(2, 'Repeat multiplier as [u, v].')
+    }
+  };
+}
+
+function createBaseNodeProperties() {
+  return {
+    id: {
+      type: 'string',
+      description: 'Optional caller-defined node identifier for your own bookkeeping.'
+    },
+    coordinateSystem: {
+      type: 'string',
+      enum: COORDINATE_SYSTEM_SCHEMA_VALUES,
+      description: 'Coordinate system used by this node before coordinateRemap is applied.'
+    },
+    coordinateRemap: createCoordinateRemapSchema(),
+    position: numberTupleSchema(3, 'Optional local translation as [x, y, z].'),
+    rotation: numberTupleSchema(4, 'Optional local rotation quaternion as [x, y, z, w].'),
+    scale: numberTupleSchema(3, 'Optional local scale as [x, y, z].'),
+    preserveWinding: {
+      type: 'boolean',
+      description: 'When true, keep triangle winding exactly as generated instead of auto-matching normals.'
+    },
+    uv: createUvSpecSchema()
+  };
+}
+
+function createBoxNodeSchema() {
+  return {
+    type: 'object',
+    description: 'Axis-aligned box primitive.',
+    properties: {
+      ...createBaseNodeProperties(),
+      type: { type: 'string', enum: ['box'] },
+      size: numberTupleSchema(3, 'Optional box size as [x, y, z]. Defaults to [1, 1, 1].')
+    },
+    required: ['type']
+  };
+}
+
+function createCylinderNodeSchema() {
+  return {
+    type: 'object',
+    description: 'Cylinder primitive with capped top and bottom.',
+    properties: {
+      ...createBaseNodeProperties(),
+      type: { type: 'string', enum: ['cylinder'] },
+      radius: numberSchema({ exclusiveMinimum: 0, description: 'Cylinder radius. Defaults to 0.5.' }),
+      height: numberSchema({ exclusiveMinimum: 0, description: 'Cylinder height. Defaults to 1.' }),
+      segments: integerSchema(3, 512, 'Radial segment count. Defaults to 32.')
+    },
+    required: ['type']
+  };
+}
+
+function createSphereNodeSchema() {
+  return {
+    type: 'object',
+    description: 'UV sphere primitive.',
+    properties: {
+      ...createBaseNodeProperties(),
+      type: { type: 'string', enum: ['sphere'] },
+      radius: numberSchema({ exclusiveMinimum: 0, description: 'Sphere radius. Defaults to 0.5.' }),
+      widthSegments: integerSchema(3, 512, 'Horizontal segment count. Defaults to 32.'),
+      heightSegments: integerSchema(2, 256, 'Vertical segment count. Defaults to 16.')
+    },
+    required: ['type']
+  };
+}
+
+function createRevolveNodeSchema() {
+  return {
+    type: 'object',
+    description: 'Surface of revolution built from a [radius, height] profile.',
+    properties: {
+      ...createBaseNodeProperties(),
+      type: { type: 'string', enum: ['revolve'] },
+      profile: {
+        type: 'array',
+        minItems: 2,
+        items: numberTupleSchema(2, 'Profile point as [radius, height]. Radius must be non-negative.'),
+        description: 'Ordered profile points, each as [radius, height].'
+      },
+      segments: integerSchema(3, 1024, 'Revolution segment count. Defaults to 64.'),
+      capTop: { type: 'boolean' },
+      capBottom: { type: 'boolean' }
+    },
+    required: ['type', 'profile']
+  };
+}
+
+function createSurfacePatchSchema() {
+  return {
+    description: 'Bezier patch definition using 16 indices, 16 inline points, or a patch object.',
+    oneOf: [
+      {
+        type: 'array',
+        minItems: 16,
+        maxItems: 16,
+        items: { type: 'integer', minimum: 0 },
+        description: 'Sixteen control point indices into controlPoints.'
+      },
+      {
+        type: 'array',
+        minItems: 16,
+        maxItems: 16,
+        items: numberTupleSchema(3, 'Inline control point as [x, y, z].'),
+        description: 'Sixteen inline control points.'
+      },
+      {
+        type: 'object',
+        properties: {
+          indices: {
+            type: 'array',
+            minItems: 16,
+            maxItems: 16,
+            items: { type: 'integer', minimum: 0 },
+            description: 'Sixteen control point indices into controlPoints.'
+          },
+          points: {
+            type: 'array',
+            minItems: 16,
+            maxItems: 16,
+            items: numberTupleSchema(3, 'Inline control point as [x, y, z].'),
+            description: 'Sixteen inline control points.'
+          },
+          mirror: numberTupleSchema(3, 'Per-axis mirror multiplier, for example [-1, 1, 1].'),
+          reverseU: { type: 'boolean' },
+          reverseV: { type: 'boolean' },
+          flipWinding: { type: 'boolean' },
+          flipNormals: { type: 'boolean' }
+        },
+        anyOf: [{ required: ['indices'] }, { required: ['points'] }]
+      }
+    ]
+  };
+}
+
+function createSurfaceNodeSchema() {
+  return {
+    type: 'object',
+    description: 'Bezier patch surface assembled from one or more bicubic patches.',
+    properties: {
+      ...createBaseNodeProperties(),
+      type: { type: 'string', enum: ['surface'] },
+      surfaceType: {
+        type: 'string',
+        enum: SURFACE_TYPE_SCHEMA_VALUES,
+        description: 'Surface implementation. Only bezier_patch is currently supported.'
+      },
+      controlPoints: {
+        type: 'array',
+        minItems: 1,
+        items: numberTupleSchema(3, 'Control point as [x, y, z].'),
+        description: 'Shared control points referenced by patch indices.'
+      },
+      patches: {
+        type: 'array',
+        minItems: 1,
+        items: createSurfacePatchSchema(),
+        description: 'One or more bicubic Bezier patches.'
+      },
+      segmentsU: integerSchema(1, 256, 'Subdivision count in the U direction. Defaults to 16.'),
+      segmentsV: integerSchema(1, 256, 'Subdivision count in the V direction. Defaults to segmentsU.'),
+      flipWinding: { type: 'boolean' },
+      flipNormals: { type: 'boolean' },
+      normalOrientation: {
+        type: 'string',
+        enum: ['patch', 'outward', 'inward'],
+        description: 'Normal orientation strategy after tessellation.'
+      },
+      smoothSeams: { type: 'boolean' },
+      seamTolerance: numberSchema({
+        exclusiveMinimum: 0,
+        description: 'Normal welding tolerance for shared vertices. Defaults to 1e-5.'
+      }),
+      doubleSided: { type: 'boolean' },
+      backfaceOffset: numberSchema({
+        minimum: 0,
+        description: 'Optional inward offset applied when duplicating backfaces.'
+      })
+    },
+    required: ['type', 'patches']
+  };
+}
+
+function createCurveNodeSchema() {
+  return {
+    type: 'object',
+    description: 'Curve-driven ribbon or tube mesh.',
+    properties: {
+      ...createBaseNodeProperties(),
+      type: { type: 'string', enum: ['curve'] },
+      curveType: {
+        type: 'string',
+        enum: CURVE_TYPE_SCHEMA_VALUES,
+        description: 'Curve interpolation mode. Use catmull_rom for Catmull-Rom splines. Defaults to polyline.'
+      },
+      shape: {
+        type: 'string',
+        enum: ['tube', 'ribbon'],
+        description: 'Generated geometry style. Defaults to tube.'
+      },
+      points: {
+        type: 'array',
+        minItems: 2,
+        items: numberTupleSchema(3, 'Curve control point as [x, y, z].'),
+        description: 'Curve control points.'
+      },
+      degree: integerSchema(1, undefined, 'NURBS degree. Defaults to 3 when curveType is nurbs.'),
+      knots: {
+        type: 'array',
+        minItems: 2,
+        items: { type: 'number' },
+        description: 'Optional NURBS knot vector.'
+      },
+      weights: {
+        type: 'array',
+        minItems: 1,
+        items: numberSchema({ exclusiveMinimum: 0 }),
+        description: 'Optional positive NURBS weights.'
+      },
+      radius: numberSchema({ exclusiveMinimum: 0, description: 'Tube radius. Defaults to 0.05.' }),
+      radii: {
+        type: 'array',
+        minItems: 1,
+        items: numberSchema({ exclusiveMinimum: 0 }),
+        description: 'Optional per-sample tube radii.'
+      },
+      width: numberSchema({ exclusiveMinimum: 0, description: 'Ribbon width. Defaults to 1.' }),
+      widths: {
+        type: 'array',
+        minItems: 1,
+        items: numberSchema({ exclusiveMinimum: 0 }),
+        description: 'Optional per-sample ribbon widths.'
+      },
+      thickness: numberSchema({ minimum: 0, description: 'Ribbon thickness. Defaults to 0.' }),
+      thicknesses: {
+        type: 'array',
+        minItems: 1,
+        items: numberSchema({ minimum: 0 }),
+        description: 'Optional per-sample ribbon thickness values.'
+      },
+      up: numberTupleSchema(3, 'Preferred ribbon up direction as [x, y, z].'),
+      radialSegments: integerSchema(3, 128, 'Tube radial segment count. Defaults to 12.'),
+      tubularSegments: integerSchema(1, 512, 'Sampling density along the curve. Defaults to 16.'),
+      closed: { type: 'boolean' },
+      capStart: { type: 'boolean' },
+      capEnd: { type: 'boolean' }
+    },
+    required: ['type', 'points']
+  };
+}
+
+function createMeshNodeSchema() {
+  return {
+    type: 'object',
+    description: 'Explicit triangle mesh. Use when primitives, curves, or patches are insufficient.',
+    properties: {
+      ...createBaseNodeProperties(),
+      type: { type: 'string', enum: ['mesh'] },
+      positions: {
+        type: 'array',
+        minItems: 1,
+        items: numberTupleSchema(3, 'Vertex position as [x, y, z].'),
+        description: 'Vertex positions.'
+      },
+      normals: {
+        type: 'array',
+        minItems: 1,
+        items: numberTupleSchema(3, 'Vertex normal as [x, y, z].'),
+        description: 'Optional vertex normals. Must match positions length when provided.'
+      },
+      uvs: {
+        type: 'array',
+        minItems: 1,
+        items: numberTupleSchema(2, 'Vertex UV as [u, v].'),
+        description: 'Optional vertex UVs. Must match positions length when provided.'
+      },
+      indices: {
+        type: 'array',
+        minItems: 3,
+        items: { type: 'integer', minimum: 0 },
+        description: 'Triangle indices into positions.'
+      }
+    },
+    required: ['type', 'positions', 'indices']
+  };
+}
+
+function createCsgNodeSchema(depth) {
+  const nestedNodeSchema = createProceduralNodeSchema(depth);
+  return {
+    type: 'object',
+    description:
+      'Constructive solid geometry node. Use children for union/intersection, or base + subtract for difference.',
+    properties: {
+      ...createBaseNodeProperties(),
+      type: { type: 'string', enum: ['csg'] },
+      op: {
+        type: 'string',
+        enum: ['union', 'difference', 'intersection', 'intersect'],
+        description: 'Boolean operation. Use intersect as an alias of intersection if preferred.'
+      },
+      children: {
+        type: 'array',
+        minItems: 2,
+        items: nestedNodeSchema,
+        description: 'Operands for union or intersection.'
+      },
+      base: {
+        ...nestedNodeSchema,
+        description: 'Base operand for difference.'
+      },
+      subtract: {
+        type: 'array',
+        minItems: 1,
+        items: nestedNodeSchema,
+        description: 'Subtract operands for difference.'
+      }
+    },
+    required: ['type', 'op'],
+    anyOf: [{ required: ['children'] }, { required: ['base', 'subtract'] }]
+  };
+}
+
+function createProceduralNodeSchema(depth = 2) {
+  const variants = [
+    createBoxNodeSchema(),
+    createCylinderNodeSchema(),
+    createSphereNodeSchema(),
+    createRevolveNodeSchema(),
+    createSurfaceNodeSchema(),
+    createCurveNodeSchema(),
+    createMeshNodeSchema()
+  ];
+  if (depth > 0) {
+    variants.push(createCsgNodeSchema(depth - 1));
+  }
+  return {
+    oneOf: variants
+  };
+}
+
+const MODEL_GENERATE_BEGIN_EXAMPLES = [
+  {
+    spec: {
+      version: 1,
+      nodes: [
+        {
+          type: 'box',
+          size: [1.6, 0.3, 1.6],
+          position: [0, 0.15, 0],
+          uv: {
+            mode: 'box'
+          }
+        }
+      ]
+    },
+    dest_path: '/assets/generated/pedestal.zmsh',
+    name: 'Pedestal',
+    create_node: true
+  },
+  {
+    spec: {
+      version: 1,
+      generation: {
+        max_vertices: 24000,
+        generate_tangents: true
+      },
+      nodes: [
+        {
+          type: 'revolve',
+          profile: [
+            [0, 0],
+            [0.18, 0],
+            [0.42, 0.08],
+            [0.34, 0.72],
+            [0.2, 1.1],
+            [0, 1.1]
+          ],
+          segments: 48,
+          cap_bottom: true,
+          uv: {
+            mode: 'cylindrical',
+            axis: 'y'
+          }
+        }
+      ]
+    },
+    dest_path: '/assets/generated/vase.zmsh',
+    name: 'Vase',
+    create_node: true
+  },
+  {
+    spec: {
+      version: 1,
+      generation: {
+        max_vertices: 60000
+      },
+      nodes: [
+        {
+          type: 'csg',
+          op: 'difference',
+          base: {
+            type: 'box',
+            size: [2.4, 2.4, 0.6],
+            position: [0, 1.2, 0]
+          },
+          subtract: [
+            {
+              type: 'curve',
+              curve_type: 'catmull_rom',
+              shape: 'tube',
+              points: [
+                [-0.95, 0, 0],
+                [-0.45, 1.2, 0],
+                [0.45, 1.2, 0],
+                [0.95, 0, 0]
+              ],
+              radius: 0.24,
+              tubular_segments: 32,
+              radial_segments: 12
+            }
+          ]
+        }
+      ]
+    },
+    dest_path: '/assets/generated/arch_cutout.zmsh',
+    name: 'ArchCutout',
+    create_node: true
+  }
+];
+
+const GENERATED_MODEL_SPEC_SCHEMA = {
+  type: 'object',
+  description:
+    'Procedural model spec. Prefer built-in primitives, revolve, surface, curve, and csg before falling back to raw mesh buffers. See examples for a pedestal box, a revolve vase, and a CSG arch cutout.',
+  properties: {
+    version: {
+      type: 'integer',
+      enum: [1],
+      description: 'Optional spec version. Omit or set to 1.'
+    },
+    generation: {
+      type: 'object',
+      properties: {
+        maxVertices: integerSchema(1, undefined, 'Abort generation when the resulting mesh exceeds this vertex count.'),
+        generateTangents: {
+          type: 'boolean',
+          description: 'Generate tangent_f32x4 data for normal mapped materials.'
+        },
+        tangents: {
+          type: 'boolean',
+          description: 'Alias of generateTangents.'
+        }
+      }
+    },
+    nodes: {
+      type: 'array',
+      minItems: 1,
+      items: createProceduralNodeSchema(2),
+      description: 'Top-level procedural nodes merged into a single generated mesh.'
+    }
+  },
+  required: ['nodes'],
+  examples: MODEL_GENERATE_BEGIN_EXAMPLES.map((example) => example.spec)
+};
+
+const BASE_TOOLS = [
   {
     name: 'editor_connect_info',
     description: 'Return the URL that opens the editor with the MCP bridge enabled.',
@@ -364,7 +957,7 @@ const tools = [
   },
   {
     name: 'editor_wait_ready',
-    description: 'Wait until an editor browser page connects to this MCP server.',
+    description: 'Wait until the Electron editor window connects to this MCP server.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -499,7 +1092,7 @@ const tools = [
     }
   },
   {
-    name: 'asset_get_root_directory',
+    name: 'asset_get_root',
     description: 'Get the project asset root directory. Returns { root, err }.',
     inputSchema: {
       type: 'object',
@@ -632,7 +1225,7 @@ const tools = [
     }
   },
   {
-    name: 'getMaterialClasses',
+    name: 'material_get_classes',
     description: 'Get the list of material classes supported by asset_create_material.',
     inputSchema: {
       type: 'object',
@@ -642,7 +1235,7 @@ const tools = [
     }
   },
   {
-    name: 'getMaterialPropertyList',
+    name: 'material_get_property_list',
     description:
       'Get the editable property metadata list for a material asset path. Returns { propertyList, err }.',
     inputSchema: {
@@ -795,12 +1388,12 @@ const tools = [
     }
   },
   {
-    name: 'getNodeClasses',
+    name: 'node_get_classes',
     description: 'Get the list of scene node classes that can be reported by the editor bridge.',
     inputSchema: { type: 'object', properties: {} }
   },
   {
-    name: 'getScenePropertyList',
+    name: 'scene_get_property_list',
     description:
       'Get the editable property metadata list for the current scene. Returns { propertyList, err }.',
     inputSchema: {
@@ -811,7 +1404,7 @@ const tools = [
     }
   },
   {
-    name: 'getNodePropertyList',
+    name: 'node_get_property_list',
     description:
       'Get the editable property metadata list for a scene node by persistent node id. Returns { propertyList, err }.',
     inputSchema: {
@@ -824,7 +1417,7 @@ const tools = [
     }
   },
   {
-    name: 'createShapeNode',
+    name: 'shape_create_node',
     description:
       'Create a built-in primitive mesh node in the current scene. Supports optional parent, name, and local transform.',
     inputSchema: {
@@ -870,7 +1463,7 @@ const tools = [
     }
   },
   {
-    name: 'getNodeClass',
+    name: 'node_get_class',
     description:
       'Get the class of a scene node by persistent node id. Returns { nodeClass, err } where nodeClass is null on error.',
     inputSchema: {
@@ -883,7 +1476,7 @@ const tools = [
     }
   },
   {
-    name: 'getNodeLocalTransform',
+    name: 'node_get_local_transform',
     description:
       'Get a scene node local transform relative to its parent. Returns position, scale, and rotation quaternion arrays.',
     inputSchema: {
@@ -896,7 +1489,7 @@ const tools = [
     }
   },
   {
-    name: 'setNodeLocalTransform',
+    name: 'node_set_local_transform',
     description:
       'Set a scene node local transform relative to its parent. Omit position, scale, or rotation to keep the current value.',
     inputSchema: {
@@ -930,7 +1523,7 @@ const tools = [
     }
   },
   {
-    name: 'getSceneRootNode',
+    name: 'scene_get_root_node',
     description: 'Get the current scene root node. Returns { node: { id, name }, err }.',
     inputSchema: {
       type: 'object',
@@ -940,7 +1533,7 @@ const tools = [
     }
   },
   {
-    name: 'getParentNode',
+    name: 'node_get_parent',
     description: 'Get the parent node id of a scene node by persistent node id. Returns { parentNode, err }.',
     inputSchema: {
       type: 'object',
@@ -952,7 +1545,7 @@ const tools = [
     }
   },
   {
-    name: 'removeNode',
+    name: 'node_remove',
     description: 'Remove a scene node by persistent node id. Returns { err }.',
     inputSchema: {
       type: 'object',
@@ -964,7 +1557,7 @@ const tools = [
     }
   },
   {
-    name: 'setParentNode',
+    name: 'node_set_parent',
     description: 'Set a scene node parent by persistent node id. Returns { err }.',
     inputSchema: {
       type: 'object',
@@ -977,7 +1570,7 @@ const tools = [
     }
   },
   {
-    name: 'getSubNodes',
+    name: 'node_get_children',
     description: 'Get direct child nodes of a scene node. Returns { subNodes: [{ id, name }], err }.',
     inputSchema: {
       type: 'object',
@@ -989,24 +1582,102 @@ const tools = [
     }
   },
   {
+    name: 'camera_get_active',
+    description:
+      'Get the active scene camera in world space. Returns camera metadata, world transform, direction vectors, and controller view center when available.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        timeoutMs: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
+    name: 'camera_set_active',
+    description:
+      'Set the active scene camera by persistent camera node id. Returns the new active camera state in world space.',
+    inputSchema: {
+      type: 'object',
+      required: ['cameraId'],
+      properties: {
+        cameraId: { type: 'string', description: 'Persistent id of the camera node to make active.' },
+        timeoutMs: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
+    name: 'camera_look_at',
+    description:
+      'Aim a camera using world-space position and target. When cameraId is omitted, this operates on the active scene camera.',
+    inputSchema: {
+      type: 'object',
+      required: ['target'],
+      properties: {
+        cameraId: {
+          type: 'string',
+          description: 'Optional persistent id of the camera node. Defaults to the active scene camera.'
+        },
+        position: {
+          type: 'array',
+          minItems: 3,
+          maxItems: 3,
+          items: { type: 'number' },
+          description: 'Optional world-space camera position as [x, y, z]. Defaults to the camera current world position.'
+        },
+        target: {
+          type: 'array',
+          minItems: 3,
+          maxItems: 3,
+          items: { type: 'number' },
+          description: 'Required world-space look target as [x, y, z].'
+        },
+        up: {
+          type: 'array',
+          minItems: 3,
+          maxItems: 3,
+          items: { type: 'number' },
+          description: 'Optional world-space up vector as [x, y, z]. Defaults to [0, 1, 0].'
+        },
+        timeoutMs: { type: 'number', default: 10000 }
+      },
+      examples: [
+        {
+          target: [0, 1, 0]
+        },
+        {
+          position: [8, 6, 8],
+          target: [0, 1, 0],
+          up: [0, 1, 0]
+        }
+      ]
+    }
+  },
+  {
     name: 'model_generate_begin',
     description:
-      'Start an editor-side worker job that tessellates a compact procedural model spec into a .zmsh mesh asset and optionally creates a mesh node in the current scene. Use this for LLM-generated geometry instead of sending large raw vertex buffers through MCP. Returns { jobId, status, err }.',
+      'Start an editor-side worker job that tessellates a compact procedural model spec into a .zmsh mesh asset and optionally creates a mesh node in the current scene. Use this for LLM-generated geometry instead of sending large raw vertex buffers through MCP. The schema includes concrete examples for box, revolve, and CSG workflows. Returns { jobId, status, err }.',
     inputSchema: {
       type: 'object',
       required: ['spec', 'destPath'],
       properties: {
         spec: {
-          type: 'object',
-          description:
-            'JSON object with { version?: 1, generation?: { maxVertices?: number, generateTangents?: boolean }, nodes: ProceduralNode[] }. Supported node.type values are box, cylinder, sphere, revolve, surface, curve, mesh, and csg. Use csg.op union/difference/intersection for booleans; use curve.shape tube or ribbon with optional nurbs curveType for roads, pipes, and strips; use surface patches for Bezier/NURBS-like patch modeling. Nodes support position, rotation quaternion [x,y,z,w], scale, coordinateRemap, preserveWinding, and uv options. Set generation.generateTangents=true to write tangent_f32x4.'
+          ...GENERATED_MODEL_SPEC_SCHEMA
         },
-        destPath: { type: 'string', description: 'Destination .zmsh VFS path under /assets.' },
-        name: { type: 'string', description: 'Optional mesh node name when createNode is true.' },
+        destPath: {
+          type: 'string',
+          description: 'Destination .zmsh VFS path under /assets.',
+          examples: ['/assets/generated/pedestal.zmsh', '/assets/generated/vase.zmsh']
+        },
+        name: {
+          type: 'string',
+          description: 'Optional mesh node name when createNode is true.',
+          examples: ['Pedestal', 'Vase', 'ArchCutout']
+        },
         createNode: { type: 'boolean', default: true },
         generationTimeoutMs: { type: 'number', default: 60000 },
         timeoutMs: { type: 'number', default: 10000 }
-      }
+      },
+      examples: MODEL_GENERATE_BEGIN_EXAMPLES
     }
   },
   {
@@ -1100,7 +1771,7 @@ const tools = [
   },
   {
     name: 'editor_screenshot',
-    description: 'Capture the editor canvas as a PNG data URL.',
+    description: 'Capture the editor canvas and return image content plus screenshot metadata.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1120,106 +1791,187 @@ const tools = [
   }
 ];
 
-const TOOL_ALIASES = [
-  {
-    name: 'asset_get_root',
-    target: 'asset_get_root_directory',
-    description:
-      'Preferred concise name for asset_get_root_directory. Get the project asset root directory. Returns { root, err }.'
-  },
-  {
-    name: 'material_get_classes',
-    target: 'getMaterialClasses',
-    description:
-      'Preferred snake_case name for getMaterialClasses. List built-in material classes accepted by asset_create_material.'
-  },
-  {
-    name: 'material_get_property_list',
-    target: 'getMaterialPropertyList',
-    description:
-      'Preferred snake_case name for getMaterialPropertyList. Inspect editable properties for a material asset before calling material_set_properties.'
-  },
-  {
-    name: 'node_get_classes',
-    target: 'getNodeClasses',
-    description:
-      'Preferred snake_case name for getNodeClasses. List scene node class names reported by node inspection tools.'
-  },
-  {
-    name: 'scene_get_property_list',
-    target: 'getScenePropertyList',
-    description: 'Preferred snake_case name for getScenePropertyList. Inspect editable scene properties.'
-  },
-  {
-    name: 'node_get_property_list',
-    target: 'getNodePropertyList',
-    description:
-      'Preferred snake_case name for getNodePropertyList. Inspect editable properties for a scene node by persistent id.'
-  },
-  {
-    name: 'shape_create_node',
-    target: 'createShapeNode',
-    description:
-      'Preferred snake_case name for createShapeNode. Create a built-in primitive mesh node such as box, sphere, plane, cylinder, torus, or tetrahedron.'
-  },
-  {
-    name: 'node_get_class',
-    target: 'getNodeClass',
-    description:
-      'Preferred snake_case name for getNodeClass. Get the class name for a scene node by persistent id.'
-  },
-  {
-    name: 'node_get_local_transform',
-    target: 'getNodeLocalTransform',
-    description:
-      'Preferred snake_case name for getNodeLocalTransform. Read a scene node local transform as position, scale, and rotation quaternion.'
-  },
-  {
-    name: 'node_set_local_transform',
-    target: 'setNodeLocalTransform',
-    description:
-      'Preferred snake_case name for setNodeLocalTransform. Set any subset of position, scale, and rotation quaternion on a scene node.'
-  },
-  {
-    name: 'scene_get_root_node',
-    target: 'getSceneRootNode',
-    description:
-      'Preferred snake_case name for getSceneRootNode. Get the current scene root node id and name.'
-  },
-  {
-    name: 'node_get_parent',
-    target: 'getParentNode',
-    description: 'Preferred snake_case name for getParentNode. Get the parent node id for a scene node.'
-  },
-  {
-    name: 'node_remove',
-    target: 'removeNode',
-    description: 'Preferred snake_case name for removeNode. Remove a scene node by persistent id.'
-  },
-  {
-    name: 'node_set_parent',
-    target: 'setParentNode',
-    description: 'Preferred snake_case name for setParentNode. Reparent a scene node by persistent id.'
-  },
-  {
-    name: 'node_get_children',
-    target: 'getSubNodes',
-    description: 'Preferred snake_case name for getSubNodes. List direct child nodes of a scene node.'
-  }
-];
+const HIDDEN_TOOL_NAMES = new Set(['editor_connect_info', 'editor_call', 'editor_eval']);
 
-for (const alias of [...TOOL_ALIASES].reverse()) {
-  const target = tools.find((tool) => tool.name === alias.target);
-  if (!target || tools.some((tool) => tool.name === alias.name)) {
-    continue;
-  }
-  tools.unshift({
-    ...target,
-    name: alias.name,
-    description: alias.description
-  });
-  target.description = `Legacy camelCase/verbose alias. Prefer ${alias.name}. ${target.description}`;
+function cloneSchema(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
+
+function toSnakeCase(value) {
+  return String(value)
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[\s-]+/g, '_')
+    .toLowerCase();
+}
+
+function toCamelCase(value) {
+  return String(value).replace(/[_-]([a-z])/g, (_match, ch) => ch.toUpperCase());
+}
+
+function canonicalizeSchema(schema) {
+  if (!schema || typeof schema !== 'object') {
+    return schema;
+  }
+  if (Array.isArray(schema)) {
+    return schema.map((value) => canonicalizeSchema(value));
+  }
+  const cloned = { ...schema };
+  if (schema.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties)) {
+    const properties = {};
+    for (const [key, value] of Object.entries(schema.properties)) {
+      properties[toSnakeCase(key)] = canonicalizeSchema(value);
+    }
+    cloned.properties = properties;
+    if (!Object.prototype.hasOwnProperty.call(cloned, 'additionalProperties')) {
+      cloned.additionalProperties = false;
+    }
+  }
+  if (Array.isArray(schema.required)) {
+    cloned.required = schema.required.map((value) => toSnakeCase(value));
+  }
+  if (schema.items) {
+    cloned.items = canonicalizeSchema(schema.items);
+  }
+  if (Array.isArray(schema.oneOf)) {
+    cloned.oneOf = schema.oneOf.map((value) => canonicalizeSchema(value));
+  }
+  if (Array.isArray(schema.anyOf)) {
+    cloned.anyOf = schema.anyOf.map((value) => canonicalizeSchema(value));
+  }
+  if (Array.isArray(schema.allOf)) {
+    cloned.allOf = schema.allOf.map((value) => canonicalizeSchema(value));
+  }
+  return cloned;
+}
+
+function normalizeToolArguments(value, originalSchema, canonicalSchema) {
+  if (
+    !originalSchema ||
+    typeof originalSchema !== 'object' ||
+    value === null ||
+    value === undefined
+  ) {
+    return value;
+  }
+  if (
+    originalSchema.type === 'object' &&
+    originalSchema.properties &&
+    typeof value === 'object' &&
+    !Array.isArray(value)
+  ) {
+    const normalized = {};
+    const consumed = new Set();
+    for (const [originalKey, childOriginalSchema] of Object.entries(originalSchema.properties)) {
+      const canonicalKey = toSnakeCase(originalKey);
+      const childCanonicalSchema = canonicalSchema?.properties?.[canonicalKey];
+      if (Object.prototype.hasOwnProperty.call(value, originalKey)) {
+        consumed.add(originalKey);
+        normalized[originalKey] = normalizeToolArguments(
+          value[originalKey],
+          childOriginalSchema,
+          childCanonicalSchema
+        );
+        continue;
+      }
+      if (Object.prototype.hasOwnProperty.call(value, canonicalKey)) {
+        consumed.add(canonicalKey);
+        normalized[originalKey] = normalizeToolArguments(
+          value[canonicalKey],
+          childOriginalSchema,
+          childCanonicalSchema
+        );
+      }
+    }
+    for (const [key, childValue] of Object.entries(value)) {
+      if (!consumed.has(key)) {
+        normalized[key] = childValue;
+      }
+    }
+    return normalized;
+  }
+  if (originalSchema.type === 'array' && Array.isArray(value)) {
+    return value.map((child) =>
+      normalizeToolArguments(child, originalSchema.items, canonicalSchema?.items)
+    );
+  }
+  return value;
+}
+
+function normalizeGeneratedModelSpec(value, key = '') {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeGeneratedModelSpec(item));
+  }
+  if (value && typeof value === 'object') {
+    const normalized = {};
+    for (const [childKey, childValue] of Object.entries(value)) {
+      const normalizedKey = toCamelCase(childKey);
+      normalized[normalizedKey] = normalizeGeneratedModelSpec(childValue, normalizedKey);
+    }
+    return normalized;
+  }
+  if (typeof value === 'string') {
+    switch (key) {
+      case 'coordinateSystem':
+        return (
+          {
+            editor: 'editor',
+            y_up: 'yUp',
+            yup: 'yUp',
+            yUp: 'yUp',
+            z_up: 'zUp',
+            zup: 'zUp',
+            zUp: 'zUp'
+          }[value] ?? value
+        );
+      case 'coordinateRemap':
+        return (
+          {
+            none: 'none',
+            z_up_to_y_up: 'zUpToYUp',
+            zUpToYUp: 'zUpToYUp',
+            y_up_to_z_up: 'yUpToZUp',
+            yUpToZUp: 'yUpToZUp'
+          }[value] ?? value
+        );
+      case 'surfaceType':
+        return (
+          {
+            bezier_patch: 'bezierPatch',
+            bezierPatch: 'bezierPatch'
+          }[value] ?? value
+        );
+      case 'curveType':
+        return (
+          {
+            polyline: 'polyline',
+            bezier: 'bezier',
+            catmull_rom: 'catmullRom',
+            catmullRom: 'catmullRom',
+            nurbs: 'nurbs'
+          }[value] ?? value
+        );
+      default:
+        return value;
+    }
+  }
+  return value;
+}
+
+function buildToolCatalog() {
+  const publicTools = [];
+  for (const tool of BASE_TOOLS) {
+    const canonicalSchema = canonicalizeSchema(cloneSchema(tool.inputSchema ?? { type: 'object', properties: {} }));
+    if (!HIDDEN_TOOL_NAMES.has(tool.name)) {
+      publicTools.push({
+        ...tool,
+        inputSchema: canonicalSchema
+      });
+    }
+  }
+  return publicTools;
+}
+
+const TOOLS = buildToolCatalog();
 
 const handlers = {
   async editor_connect_info(args) {
@@ -1317,7 +2069,7 @@ const handlers = {
       Number(args.timeoutMs ?? 30000)
     );
   },
-  async asset_get_root_directory(args) {
+  async asset_get_root(args) {
     return bridge.send('asset_get_root_directory', {}, Number(args.timeoutMs ?? 10000));
   },
   async asset_get_builtin_primitives(args) {
@@ -1399,13 +2151,13 @@ const handlers = {
     }
     return bridge.send('asset_clone_material', { srcPath, dstPath }, Number(args.timeoutMs ?? 10000));
   },
-  async getMaterialClasses(args) {
+  async material_get_classes(args) {
     return bridge.send('getMaterialClasses', {}, Number(args.timeoutMs ?? 10000));
   },
-  async getMaterialPropertyList(args) {
+  async material_get_property_list(args) {
     const path = typeof args.path === 'string' ? args.path.trim() : '';
     if (!path) {
-      return { propertyList: null, err: 'getMaterialPropertyList requires the material file path' };
+      return { propertyList: null, err: 'material_get_property_list requires the material file path' };
     }
     return bridge.send('getMaterialPropertyList', { path }, Number(args.timeoutMs ?? 10000));
   },
@@ -1520,27 +2272,27 @@ const handlers = {
       Number(args.timeoutMs ?? 10000)
     );
   },
-  async getNodeClasses(args) {
+  async node_get_classes(args) {
     return bridge.send('getNodeClasses', {}, Number(args.timeoutMs ?? 10000));
   },
-  async getScenePropertyList(args) {
+  async scene_get_property_list(args) {
     return bridge.send('getScenePropertyList', {}, Number(args.timeoutMs ?? 10000));
   },
-  async getNodePropertyList(args) {
+  async node_get_property_list(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
-      return { propertyList: null, err: 'getNodePropertyList requires the node id' };
+      return { propertyList: null, err: 'node_get_property_list requires the node id' };
     }
     return bridge.send('getNodePropertyList', { id }, Number(args.timeoutMs ?? 10000));
   },
-  async createShapeNode(args) {
+  async shape_create_node(args) {
     const shape = typeof args.shape === 'string' ? args.shape.trim() : '';
     if (!shape) {
-      return { node: null, transform: null, err: 'createShapeNode requires the shape type' };
+      return { node: null, transform: null, err: 'shape_create_node requires the shape type' };
     }
     const params = { shape };
-    if (typeof args.parentId === 'string' && args.parentId.trim()) {
-      params.parentId = args.parentId.trim();
+    if (typeof args.parent_id === 'string' && args.parent_id.trim()) {
+      params.parentId = args.parent_id.trim();
     }
     if (typeof args.name === 'string' && args.name.trim()) {
       params.name = args.name.trim();
@@ -1556,24 +2308,24 @@ const handlers = {
     }
     return bridge.send('createShapeNode', params, Number(args.timeoutMs ?? 10000));
   },
-  async getNodeClass(args) {
+  async node_get_class(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
-      return { nodeClass: null, err: 'getNodeClass requires the node id' };
+      return { nodeClass: null, err: 'node_get_class requires the node id' };
     }
     return bridge.send('getNodeClass', { id }, Number(args.timeoutMs ?? 10000));
   },
-  async getNodeLocalTransform(args) {
+  async node_get_local_transform(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
-      return { transform: null, err: 'getNodeLocalTransform requires the node id' };
+      return { transform: null, err: 'node_get_local_transform requires the node id' };
     }
     return bridge.send('getNodeLocalTransform', { id }, Number(args.timeoutMs ?? 10000));
   },
-  async setNodeLocalTransform(args) {
+  async node_set_local_transform(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
-      return { transform: null, err: 'setNodeLocalTransform requires the node id' };
+      return { transform: null, err: 'node_set_local_transform requires the node id' };
     }
     const params = { id };
     if (Object.prototype.hasOwnProperty.call(args, 'position')) {
@@ -1587,40 +2339,80 @@ const handlers = {
     }
     return bridge.send('setNodeLocalTransform', params, Number(args.timeoutMs ?? 10000));
   },
-  async getSceneRootNode(args) {
+  async scene_get_root_node(args) {
     return bridge.send('getSceneRootNode', {}, Number(args.timeoutMs ?? 10000));
   },
-  async getParentNode(args) {
+  async node_get_parent(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
-      return { parentNode: null, err: 'getParentNode requires the node id' };
+      return { parentNode: null, err: 'node_get_parent requires the node id' };
     }
     return bridge.send('getParentNode', { id }, Number(args.timeoutMs ?? 10000));
   },
-  async removeNode(args) {
+  async node_remove(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
-      return { err: 'removeNode requires the node id' };
+      return { err: 'node_remove requires the node id' };
     }
     return bridge.send('removeNode', { id }, Number(args.timeoutMs ?? 10000));
   },
-  async setParentNode(args) {
+  async node_set_parent(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
-      return { err: 'setParentNode requires the node id' };
+      return { err: 'node_set_parent requires the node id' };
     }
-    const parentId = typeof args.parentId === 'string' ? args.parentId.trim() : '';
+    const parentId = typeof args.parent_id === 'string' ? args.parent_id.trim() : '';
     if (!parentId) {
-      return { err: 'setParentNode requires the parentId' };
+      return { err: 'node_set_parent requires the parent_id' };
     }
     return bridge.send('setParentNode', { id, parentId }, Number(args.timeoutMs ?? 10000));
   },
-  async getSubNodes(args) {
+  async node_get_children(args) {
     const parent = typeof args.parent === 'string' ? args.parent.trim() : '';
     if (!parent) {
-      return { subNodes: null, err: 'getSubNodes requires the parent node id' };
+      return { subNodes: null, err: 'node_get_children requires the parent node id' };
     }
     return bridge.send('getSubNodes', { parent }, Number(args.timeoutMs ?? 10000));
+  },
+  async camera_get_active(args) {
+    return bridge.send('camera_get_active', {}, Number(args.timeoutMs ?? 10000));
+  },
+  async camera_set_active(args) {
+    const cameraId = typeof args.cameraId === 'string' ? args.cameraId.trim() : '';
+    if (!cameraId) {
+      return {
+        camera: null,
+        transform: null,
+        direction: null,
+        view_center: null,
+        err: 'camera_set_active requires cameraId'
+      };
+    }
+    return bridge.send('camera_set_active', { camera_id: cameraId }, Number(args.timeoutMs ?? 10000));
+  },
+  async camera_look_at(args) {
+    if (!Array.isArray(args.target) || args.target.length !== 3) {
+      return {
+        camera: null,
+        transform: null,
+        direction: null,
+        view_center: null,
+        err: 'camera_look_at requires target as a 3-number world-space array'
+      };
+    }
+    const params = {
+      target: args.target
+    };
+    if (typeof args.cameraId === 'string' && args.cameraId.trim()) {
+      params.camera_id = args.cameraId.trim();
+    }
+    if (Array.isArray(args.position)) {
+      params.position = args.position;
+    }
+    if (Array.isArray(args.up)) {
+      params.up = args.up;
+    }
+    return bridge.send('camera_look_at', params, Number(args.timeoutMs ?? 10000));
   },
   async model_generate_begin(args) {
     if (!args.spec || typeof args.spec !== 'object') {
@@ -1631,7 +2423,7 @@ const handlers = {
       return { jobId: null, status: null, err: 'model_generate_begin requires destPath' };
     }
     const params = {
-      spec: args.spec,
+      spec: normalizeGeneratedModelSpec(args.spec),
       destPath
     };
     if (typeof args.name === 'string') {
@@ -1701,10 +2493,61 @@ const handlers = {
   }
 };
 
-for (const alias of TOOL_ALIASES) {
-  if (handlers[alias.target] && !handlers[alias.name]) {
-    handlers[alias.name] = handlers[alias.target];
+function isToolErrorResult(result) {
+  return !!(
+    result &&
+    typeof result === 'object' &&
+    Object.prototype.hasOwnProperty.call(result, 'err') &&
+    result.err
+  );
+}
+
+function formatToolResultText(result) {
+  if (result === undefined) {
+    return '';
   }
+  if (isToolErrorResult(result)) {
+    return String(result.err);
+  }
+  return JSON.stringify(result, null, 2);
+}
+
+function buildToolResultEnvelope(name, result) {
+  if (name === 'editor_screenshot' && typeof result?.dataUrl === 'string') {
+    const comma = result.dataUrl.indexOf(',');
+    const mime = /^data:([^;]+);base64,/.exec(result.dataUrl)?.[1] || 'image/png';
+    const data = comma >= 0 ? result.dataUrl.slice(comma + 1) : result.dataUrl;
+    return {
+      structuredContent: {
+        width: result.width,
+        height: result.height,
+        mimeType: mime
+      },
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              width: result.width,
+              height: result.height,
+              mimeType: mime
+            },
+            null,
+            2
+          )
+        },
+        { type: 'image', data, mimeType: mime }
+      ]
+    };
+  }
+  const envelope = {
+    structuredContent: result ?? null,
+    content: [{ type: 'text', text: formatToolResultText(result) }]
+  };
+  if (isToolErrorResult(result)) {
+    envelope.isError = true;
+  }
+  return envelope;
 }
 
 let stdinBuffer = Buffer.alloc(0);
@@ -1844,7 +2687,7 @@ async function dispatchRpc(method, params) {
         }
       };
     case 'tools/list':
-      return { tools };
+      return { tools: TOOLS };
     case 'resources/list':
       return { resources: [] };
     case 'prompts/list':
@@ -1861,20 +2704,7 @@ async function dispatchRpc(method, params) {
         throw new Error(`Unknown tool: ${name}`);
       }
       const result = await handler(args);
-      if (name === 'editor_screenshot' && typeof result?.dataUrl === 'string') {
-        const comma = result.dataUrl.indexOf(',');
-        const mime = /^data:([^;]+);base64,/.exec(result.dataUrl)?.[1] || 'image/png';
-        const data = comma >= 0 ? result.dataUrl.slice(comma + 1) : result.dataUrl;
-        return {
-          content: [
-            { type: 'text', text: JSON.stringify({ width: result.width, height: result.height }, null, 2) },
-            { type: 'image', data, mimeType: mime }
-          ]
-        };
-      }
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
-      };
+      return buildToolResultEnvelope(name, result);
     }
     default:
       throw new Error(`Unsupported MCP method: ${method}`);

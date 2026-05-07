@@ -1,4 +1,5 @@
 import type { Editor } from '../core/editor';
+import type { Camera } from '@zephyr3d/scene';
 import type { PropertyValue, SceneNode, Material } from '@zephyr3d/scene';
 import type { Primitive } from '@zephyr3d/scene';
 import { Mesh, Scene } from '@zephyr3d/scene';
@@ -6,10 +7,12 @@ import { getDevice, getEngine, OrthoCamera, PerspectiveCamera } from '@zephyr3d/
 import { BlobReader, BlobWriter, configure, ZipWriter } from '@zip.js/zip.js';
 import { base64ToUint8Array, DRef, PathUtils, Quaternion, uint8ArrayToBase64, Vector3 } from '@zephyr3d/base';
 import { ProjectService } from '../core/services/project';
+import { isDesktopApp } from '../core/services/desktop';
 import { fileListFileName, libDir } from '../core/build/templates';
 import { SceneController } from '../controllers/scenecontroller';
 import { AddShapeCommand } from '../commands/scenecommands';
 import { eventBus } from '../core/eventbus';
+import { EditorCameraController } from './editorcontroller';
 import { shapePrimitivePaths, type ShapePrimitiveType } from './shapeprimitives';
 import { SharedModel, type AssetPrimitiveInfo } from '../loaders/model';
 import { buildPrimitiveGlbFromZmshContent } from './primitiveglb';
@@ -248,6 +251,218 @@ function getScene(editor: Editor): Scene {
   return getSceneController(editor)?.model?.scene ?? null;
 }
 
+function getNodeClassName(node: SceneNode): NodeClass {
+  return node.isMesh()
+    ? 'Mesh'
+    : node.isBatchGroup()
+      ? 'BatchGroup'
+      : node.isClipmapTerrain()
+        ? 'ClipmapTerrain'
+        : node.isLight() && node.isDirectionLight()
+          ? 'DirectionalLight'
+          : node.isLight() && node.isPointLight()
+            ? 'PointLight'
+            : node.isLight() && node.isSpotLight()
+              ? 'SpotLight'
+              : node.isLight() && node.isRectLight()
+                ? 'RectLight'
+                : node.isParticleSystem()
+                  ? 'ParticleSystem'
+                  : node.isWater()
+                    ? 'Water'
+                    : node instanceof PerspectiveCamera
+                      ? 'PerspectiveCamera'
+                      : node instanceof OrthoCamera
+                        ? 'OrthoCamera'
+                        : node.isCamera()
+                          ? 'Camera'
+                          : 'SceneNode';
+}
+
+function vec3ToArray(vec: { x: number; y: number; z: number }): [number, number, number] {
+  return [vec.x, vec.y, vec.z];
+}
+
+function quatToArray(quat: { x: number; y: number; z: number; w: number }): [number, number, number, number] {
+  return [quat.x, quat.y, quat.z, quat.w];
+}
+
+function cloneVector3(vec: { x: number; y: number; z: number }): Vector3 {
+  return new Vector3(vec.x, vec.y, vec.z);
+}
+
+function getActiveCamera(editor: Editor): { camera: Camera | null; err: string | null } {
+  const scene = getScene(editor);
+  if (!scene) {
+    return {
+      camera: null,
+      err: 'No scene is currently opened; create or open a scene first'
+    };
+  }
+  if (!scene.mainCamera) {
+    return {
+      camera: null,
+      err: 'No active camera is available in the current scene'
+    };
+  }
+  return {
+    camera: scene.mainCamera,
+    err: null
+  };
+}
+
+function getCameraNode(editor: Editor, id?: string): { camera: Camera | null; err: string | null } {
+  const scene = getScene(editor);
+  if (!scene) {
+    return {
+      camera: null,
+      err: 'No scene is currently opened; create or open a scene first'
+    };
+  }
+  const cameraId = typeof id === 'string' ? id.trim() : '';
+  if (!cameraId) {
+    return getActiveCamera(editor);
+  }
+  const node = getNode(editor, cameraId);
+  if (node.err) {
+    return {
+      camera: null,
+      err: node.err
+    };
+  }
+  if (!node.node.isCamera()) {
+    return {
+      camera: null,
+      err: `Scene node is not a camera: ${cameraId}`
+    };
+  }
+  return {
+    camera: node.node as Camera,
+    err: null
+  };
+}
+
+function serializeCameraState(
+  editor: Editor,
+  camera: Camera,
+  lookTarget?: Vector3
+): {
+  camera: {
+    id: string;
+    name: string;
+    node_class: NodeClass;
+    is_active: boolean;
+  };
+  transform: {
+    position: [number, number, number];
+    rotation: [number, number, number, number];
+    scale: [number, number, number];
+  };
+  direction: {
+    forward: [number, number, number];
+    up: [number, number, number];
+    right: [number, number, number];
+  };
+  view_center: [number, number, number] | null;
+  look_target?: [number, number, number];
+  err: null;
+} {
+  const scene = getScene(editor);
+  const worldPosition = new Vector3();
+  const worldScale = new Vector3();
+  const worldRotation = new Quaternion();
+  camera.worldMatrix.decompose(worldScale, worldRotation, worldPosition);
+  const right = camera.worldMatrix.getRow(0).xyz().inplaceNormalize();
+  const up = camera.worldMatrix.getRow(1).xyz().inplaceNormalize();
+  const forward = camera.worldMatrix.getRow(2).xyz().inplaceNormalize().scaleBy(-1);
+  const controller = camera.controller instanceof EditorCameraController ? camera.controller : null;
+  const viewCenter = controller?.getViewCenter?.() ?? null;
+  const result = {
+    camera: {
+      id: camera.persistentId,
+      name: camera.name,
+      node_class: getNodeClassName(camera),
+      is_active: camera === scene?.mainCamera
+    },
+    transform: {
+      position: vec3ToArray(worldPosition),
+      rotation: quatToArray(worldRotation),
+      scale: vec3ToArray(worldScale)
+    },
+    direction: {
+      forward: vec3ToArray(forward),
+      up: vec3ToArray(up),
+      right: vec3ToArray(right)
+    },
+    view_center: viewCenter ? vec3ToArray(viewCenter) : null,
+    err: null as null
+  };
+  if (lookTarget) {
+    return {
+      ...result,
+      look_target: vec3ToArray(lookTarget)
+    };
+  }
+  return result;
+}
+
+function setSceneMainCamera(editor: Editor, camera: Camera): string | null {
+  const controller = getSceneController(editor);
+  const scene = controller?.model?.scene ?? null;
+  if (!controller || !scene) {
+    return 'No scene is currently opened; create or open a scene first';
+  }
+  const view: any = controller.view;
+  if (typeof view.handleSetMainCamera === 'function') {
+    view.handleSetMainCamera(camera);
+    return null;
+  }
+  if (camera !== scene.mainCamera) {
+    view._proxy?.showProxy?.(scene.mainCamera);
+    scene.mainCamera.controller = null;
+    view._proxy?.hideProxy?.(camera);
+    scene.mainCamera = camera;
+    scene.mainCamera.controller = new EditorCameraController();
+    if (view._postGizmoRenderer) {
+      view._postGizmoRenderer.camera = camera;
+      view._postGizmoRenderer.node = null;
+    }
+    eventBus.dispatchEvent('scene_changed');
+  } else if (!(scene.mainCamera.controller instanceof EditorCameraController)) {
+    scene.mainCamera.controller = new EditorCameraController();
+  }
+  return null;
+}
+
+function applyCameraWorldLookAt(
+  editor: Editor,
+  camera: Camera,
+  eyeWorld: Vector3,
+  targetWorld: Vector3,
+  upWorld: Vector3
+): void {
+  const localEye = camera.parent
+    ? camera.parent.invWorldMatrix.transformPointAffine(eyeWorld, new Vector3())
+    : cloneVector3(eyeWorld);
+  const localTarget = camera.parent
+    ? camera.parent.invWorldMatrix.transformPointAffine(targetWorld, new Vector3())
+    : cloneVector3(targetWorld);
+  const localUp = camera.parent
+    ? camera.parent.invWorldMatrix.transformVectorAffine(upWorld, new Vector3()).inplaceNormalize()
+    : cloneVector3(upWorld).inplaceNormalize();
+  const controller = camera.controller instanceof EditorCameraController ? camera.controller : null;
+  if (controller?.setViewCenter) {
+    controller.setViewCenter(targetWorld);
+  }
+  if (controller) {
+    controller.lookAt(localEye, localTarget, localUp);
+    controller.syncCameraDistanceToViewCenter?.();
+  } else {
+    camera.lookAt(localEye, localTarget, localUp);
+  }
+  eventBus.dispatchEvent('scene_changed');
+}
+
 function getCurrentScenePath(editor: Editor): string {
   return getSceneController(editor)?.scenePath ?? '';
 }
@@ -417,11 +632,18 @@ function parseNumberArray(
 
 export function installEditorMCPBridge(editor: Editor): void {
   const url = new URL(window.location.href);
-  const mcpEnabled = url.searchParams.has('mcp') || url.searchParams.has('mcpPort');
+  const mcpEnabled =
+    url.searchParams.get('desktop') === 'electron' &&
+    isDesktopApp() &&
+    (url.searchParams.has('mcp') || url.searchParams.has('mcpPort'));
 
   let ws: WebSocket | null = null;
   let reconnectTimer = 0;
   let closed = false;
+
+  if (!mcpEnabled) {
+    return;
+  }
 
   (window as any).__zephyrEditor = editor;
   (window as any).__zephyrEditorMCP = {
@@ -435,10 +657,6 @@ export function installEditorMCPBridge(editor: Editor): void {
       return getSceneController(editor);
     }
   };
-
-  if (!mcpEnabled) {
-    return;
-  }
 
   const port = url.searchParams.get('mcp') || url.searchParams.get('mcpPort') || DEFAULT_MCP_PORT;
   const token = url.searchParams.get('mcpToken') ?? '';
@@ -2044,6 +2262,119 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
       ];
       return classes;
     }
+    case 'camera_get_active': {
+      const camera = getActiveCamera(editor);
+      if (camera.err) {
+        return {
+          camera: null,
+          transform: null,
+          direction: null,
+          view_center: null,
+          err: camera.err
+        };
+      }
+      return serializeCameraState(editor, camera.camera!);
+    }
+    case 'camera_set_active': {
+      const cameraId = typeof params.camera_id === 'string' ? params.camera_id.trim() : '';
+      if (!cameraId) {
+        return {
+          camera: null,
+          transform: null,
+          direction: null,
+          view_center: null,
+          err: 'camera_set_active requires `camera_id`, the persistent id of a camera node'
+        };
+      }
+      const camera = getCameraNode(editor, cameraId);
+      if (camera.err) {
+        return {
+          camera: null,
+          transform: null,
+          direction: null,
+          view_center: null,
+          err: camera.err
+        };
+      }
+      const err = setSceneMainCamera(editor, camera.camera!);
+      if (err) {
+        return {
+          camera: null,
+          transform: null,
+          direction: null,
+          view_center: null,
+          err
+        };
+      }
+      return serializeCameraState(editor, camera.camera!);
+    }
+    case 'camera_look_at': {
+      const cameraId = typeof params.camera_id === 'string' ? params.camera_id.trim() : '';
+      const camera = getCameraNode(editor, cameraId);
+      if (camera.err) {
+        return {
+          camera: null,
+          transform: null,
+          direction: null,
+          view_center: null,
+          err: camera.err
+        };
+      }
+      const currentWorldPosition = camera.camera!.getWorldPosition();
+      const position = parseNumberArray(params.position, 'position', 3, vec3ToArray(currentWorldPosition));
+      if (position.err) {
+        return {
+          camera: null,
+          transform: null,
+          direction: null,
+          view_center: null,
+          err: position.err
+        };
+      }
+      const target = parseNumberArray(params.target, 'target', 3);
+      if (target.err) {
+        return {
+          camera: null,
+          transform: null,
+          direction: null,
+          view_center: null,
+          err: target.err
+        };
+      }
+      const up = parseNumberArray(params.up, 'up', 3, [0, 1, 0]);
+      if (up.err) {
+        return {
+          camera: null,
+          transform: null,
+          direction: null,
+          view_center: null,
+          err: up.err
+        };
+      }
+      const eyeWorld = new Vector3(position.value![0], position.value![1], position.value![2]);
+      const targetWorld = new Vector3(target.value![0], target.value![1], target.value![2]);
+      const upWorld = new Vector3(up.value![0], up.value![1], up.value![2]);
+      if (Vector3.distance(eyeWorld, targetWorld) < 1e-6) {
+        return {
+          camera: null,
+          transform: null,
+          direction: null,
+          view_center: null,
+          err: 'camera_look_at requires `position` and `target` to be different world-space points'
+        };
+      }
+      if (upWorld.magnitude < 1e-6) {
+        return {
+          camera: null,
+          transform: null,
+          direction: null,
+          view_center: null,
+          err: 'camera_look_at requires `up` to be a non-zero world-space vector'
+        };
+      }
+      applyCameraWorldLookAt(editor, camera.camera!, eyeWorld, targetWorld, upWorld);
+      return serializeCameraState(editor, camera.camera!, targetWorld);
+    }
     case 'createShapeNode': {
       const controller = getSceneController(editor);
       const scene = controller?.model?.scene ?? null;
@@ -2145,35 +2476,8 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           err: node.err
         };
       }
-      const cls: NodeClass = node.node.isMesh()
-        ? 'Mesh'
-        : node.node.isBatchGroup()
-          ? 'BatchGroup'
-          : node.node.isClipmapTerrain()
-            ? 'ClipmapTerrain'
-            : node.node.isLight() && node.node.isDirectionLight()
-              ? 'DirectionalLight'
-              : node.node.isLight() && node.node.isPointLight()
-                ? 'PointLight'
-                : node.node.isLight() && node.node.isSpotLight()
-                  ? 'SpotLight'
-                  : node.node.isLight() && node.node.isRectLight()
-                    ? 'RectLight'
-                    : node.node.isMesh()
-                      ? 'Mesh'
-                      : node.node.isParticleSystem()
-                        ? 'ParticleSystem'
-                        : node.node.isWater()
-                          ? 'Water'
-                          : node.node instanceof PerspectiveCamera
-                            ? 'PerspectiveCamera'
-                            : node.node instanceof OrthoCamera
-                              ? 'OrthoCamera'
-                              : node.node.isCamera()
-                                ? 'Camera'
-                                : 'SceneNode';
       return {
-        nodeClass: cls,
+        nodeClass: getNodeClassName(node.node),
         err: null
       };
     }

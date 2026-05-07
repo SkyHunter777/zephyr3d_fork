@@ -721,6 +721,7 @@ function startEmbeddedMcpWorker() {
     const worker = new Worker(path.join(__dirname, '..', 'mcp', 'editor-mcp-server.mjs'), {
       workerData: {
         transport: 'ipc',
+        port: 0,
         editorUrl: process.env.ZEPHYR_EDITOR_ELECTRON_URL || process.env.EDITOR_URL || undefined
       }
     });

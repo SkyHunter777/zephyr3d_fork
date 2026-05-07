@@ -36,8 +36,6 @@
     "build:app": "cross-env NODE_OPTIONS=--max_old_space_size=8192 vite build --mode production",
     "build:lib": "cross-env NODE_OPTIONS=--max_old_space_size=8192 rollup -c --silent",
     "serve": "web-dev-server --no-cache --open dist/index.html",
-    "serve:mcp": "web-dev-server --no-cache --open dist/index.html?mcp=47231",
-    "mcp": "node ./mcp/editor-mcp-server.mjs",
     "electron:start": "electron .",
     "electron:dev": "rush build -t editor && electron .",
     "electron:prepare": "node ./scripts/prepare-electron-app.cjs",
