@@ -233,7 +233,7 @@ export class Editor {
   }
   async saveProject() {
     if (this._currentProject && !this._isRemoteProject) {
-      ProjectService.saveProject(this._currentProject);
+      await ProjectService.saveProject(this._currentProject);
     }
   }
   async getProjectSettings() {

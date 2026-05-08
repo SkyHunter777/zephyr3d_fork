@@ -106,11 +106,19 @@ export class ElectronFS extends VFS {
     if (options.pattern) {
       const relativePath = metadata.path.startsWith('/') ? metadata.path.slice(1) : metadata.path;
       if (typeof options.pattern === 'string') {
-        return metadata.name.includes(options.pattern) || relativePath.includes(options.pattern);
+        const pattern = this.globToRegExp(options.pattern);
+        return pattern.test(metadata.name) || pattern.test(relativePath);
       }
       return options.pattern.test(metadata.name) || options.pattern.test(relativePath);
     }
     return true;
+  }
+
+  private globToRegExp(pattern: string): RegExp {
+    const source = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\0');
+    return new RegExp(
+      `^${source.replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\0/g, '.*')}$`
+    );
   }
 }
 
