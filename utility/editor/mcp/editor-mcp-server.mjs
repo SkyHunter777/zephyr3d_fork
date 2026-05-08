@@ -763,6 +763,51 @@ function createMeshNodeSchema() {
   };
 }
 
+function createScriptNodeSchema() {
+  return {
+    type: 'object',
+    description:
+      'Execute a restricted local JavaScript generator that returns triangle mesh data. Use this when built-in primitives, curves, surfaces, CSG, and explicit mesh arrays are not ergonomic enough.',
+    properties: {
+      ...createBaseNodeProperties(),
+      type: { type: 'string', enum: ['script'] },
+      script: {
+        type: 'object',
+        description:
+          'Restricted JavaScript. The script must define an entry function, defaulting to generate(api, input), and return either { positions, indices, normals?, uvs? } or api.mesh().build(). Available API: api.mesh(), api.math, api.assert(), api.check(), api.progress(). No network, filesystem, DOM, Node.js, eval, or dynamic imports are available.',
+        properties: {
+          language: {
+            type: 'string',
+            enum: ['javascript', 'js'],
+            description: 'Script language. Omit or use javascript.'
+          },
+          entry: {
+            type: 'string',
+            description: 'Entry function name. Defaults to generate.'
+          },
+          source: {
+            type: 'string',
+            description: 'JavaScript source code executed inside the editor-side worker.'
+          }
+        },
+        required: ['source']
+      },
+      input: {
+        description: 'Optional JSON input object passed as the second argument to the script entry function.',
+        oneOf: [
+          { type: 'object', additionalProperties: true },
+          { type: 'array', items: {} },
+          { type: 'string' },
+          { type: 'number' },
+          { type: 'boolean' },
+          { type: 'null' }
+        ]
+      }
+    },
+    required: ['type', 'script']
+  };
+}
+
 function createCsgNodeSchema(depth) {
   const nestedNodeSchema = createProceduralNodeSchema(depth);
   return {
@@ -807,7 +852,8 @@ function createProceduralNodeSchema(depth = 2) {
     createRevolveNodeSchema(),
     createSurfaceNodeSchema(),
     createCurveNodeSchema(),
-    createMeshNodeSchema()
+    createMeshNodeSchema(),
+    createScriptNodeSchema()
   ];
   if (depth > 0) {
     variants.push(createCsgNodeSchema(depth - 1));
@@ -904,6 +950,69 @@ const MODEL_GENERATE_BEGIN_EXAMPLES = [
     dest_path: '/assets/generated/arch_cutout.zmsh',
     name: 'ArchCutout',
     create_node: true
+  },
+  {
+    spec: {
+      version: 1,
+      generation: {
+        max_vertices: 40000,
+        max_indices: 120000
+      },
+      nodes: [
+        {
+          type: 'script',
+          input: {
+            outer_radius: 0.7,
+            inner_radius: 0.28,
+            radial_segments: 32,
+            tubular_segments: 20
+          },
+          script: {
+            source: `function generate(api, input) {
+  const mesh = api.mesh();
+  const outer = input?.outer_radius ?? 0.7;
+  const inner = input?.inner_radius ?? 0.28;
+  const radialSegments = input?.radial_segments ?? 32;
+  const tubularSegments = input?.tubular_segments ?? 20;
+  for (let j = 0; j <= tubularSegments; j++) {
+    const v = (j / tubularSegments) * api.math.TAU;
+    const cv = api.math.cos(v);
+    const sv = api.math.sin(v);
+    for (let i = 0; i <= radialSegments; i++) {
+      const u = (i / radialSegments) * api.math.TAU;
+      const cu = api.math.cos(u);
+      const su = api.math.sin(u);
+      const center = [outer * cu, outer * su, 0];
+      const normal = [cu * cv, su * cv, sv];
+      const position = [
+        (outer + inner * cv) * cu,
+        (outer + inner * cv) * su,
+        inner * sv
+      ];
+      mesh.addVertex(position, normal, [i / radialSegments, j / tubularSegments]);
+    }
+    api.progress((j + 1) / (tubularSegments + 1));
+  }
+  const stride = radialSegments + 1;
+  for (let j = 0; j < tubularSegments; j++) {
+    for (let i = 0; i < radialSegments; i++) {
+      const a = j * stride + i;
+      const b = a + 1;
+      const c = a + stride;
+      const d = c + 1;
+      mesh.addTriangle(a, b, d);
+      mesh.addTriangle(a, d, c);
+    }
+  }
+  return mesh.build();
+}`
+          }
+        }
+      ]
+    },
+    dest_path: '/assets/generated/script_torus.zmsh',
+    name: 'ScriptTorus',
+    create_node: true
   }
 ];
 
@@ -924,6 +1033,11 @@ const GENERATED_MODEL_SPEC_SCHEMA = {
           1,
           undefined,
           'Abort generation when the resulting mesh exceeds this vertex count.'
+        ),
+        max_indices: integerSchema(
+          3,
+          undefined,
+          'Abort generation when the resulting triangle-list index buffer exceeds this index count.'
         ),
         generate_tangents: {
           type: 'boolean',
@@ -1902,15 +2016,22 @@ function normalizeGeneratedModelSpec(value, key = '') {
             bezierPatch: 'bezierPatch'
           }[value] ?? value
         );
-      case 'curveType':
-      case 'curve_type':
-        return (
-          {
-            polyline: 'polyline',
+    case 'curveType':
+    case 'curve_type':
+      return (
+        {
+          polyline: 'polyline',
             bezier: 'bezier',
             catmull_rom: 'catmullRom',
             catmullRom: 'catmullRom',
             nurbs: 'nurbs'
+          }[value] ?? value
+        );
+      case 'language':
+        return (
+          {
+            javascript: 'javascript',
+            js: 'js'
           }[value] ?? value
         );
       default:

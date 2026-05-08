@@ -7,6 +7,7 @@ type GeneratedModelSpec = {
   nodes?: ProceduralNode[];
   generation?: {
     maxVertices?: number;
+    maxIndices?: number;
     generateTangents?: boolean;
     tangents?: boolean;
   };
@@ -20,7 +21,10 @@ type ProceduralNode =
   | SurfaceNode
   | CurveNode
   | MeshNode
+  | ScriptNode
   | CsgNode;
+
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 type BaseNode = {
   id?: string;
@@ -140,6 +144,16 @@ type MeshNode = BaseNode & {
   indices: number[];
 };
 
+type ScriptNode = BaseNode & {
+  type: 'script';
+  script: {
+    language?: 'javascript' | 'js';
+    entry?: string;
+    source: string;
+  };
+  input?: JsonValue;
+};
+
 type CsgNode = BaseNode & {
   type: 'csg';
   op: 'union' | 'difference' | 'intersection' | 'intersect';
@@ -211,7 +225,10 @@ type WorkerError = {
 };
 
 const DEFAULT_MAX_VERTICES = 500_000;
+const DEFAULT_MAX_INDICES = 1_500_000;
 const CSG_EPSILON = 1e-5;
+const SCRIPT_HARD_MAX_VERTICES = 2_000_000;
+const SCRIPT_HARD_MAX_INDICES = 6_000_000;
 
 self.onmessage = (event: MessageEvent<GenerateMessage>) => {
   const message = event.data;
@@ -251,6 +268,11 @@ function generatePrimitive(spec: GeneratedModelSpec, deadlineAt: number): Worker
   const maxVertices = spec.generation?.maxVertices ?? DEFAULT_MAX_VERTICES;
   if (vertexCount > maxVertices) {
     throw new Error(`Generated model has ${vertexCount} vertices, exceeding maxVertices ${maxVertices}`);
+  }
+  const indexCount = mesh.indices.length;
+  const maxIndices = spec.generation?.maxIndices ?? DEFAULT_MAX_INDICES;
+  if (indexCount > maxIndices) {
+    throw new Error(`Generated model has ${indexCount} indices, exceeding maxIndices ${maxIndices}`);
   }
   const generateTangents = spec.generation?.generateTangents === true || spec.generation?.tangents === true;
   if (generateTangents) {
@@ -331,6 +353,9 @@ function tessellateNode(node: ProceduralNode, deadlineAt: number): MeshData {
       break;
     case 'mesh':
       mesh = tessellateMesh(node);
+      break;
+    case 'script':
+      mesh = tessellateScript(node, deadlineAt);
       break;
     case 'csg':
       mesh = tessellateCsg(node, deadlineAt);
@@ -1283,6 +1308,319 @@ function tessellateMesh(node: MeshNode): MeshData {
     }
   }
   return mesh;
+}
+
+function tessellateScript(node: ScriptNode, deadlineAt: number): MeshData {
+  if (!node.script || typeof node.script !== 'object') {
+    throw new Error('script node requires a script object');
+  }
+  const language = String(node.script.language ?? 'javascript')
+    .trim()
+    .toLowerCase();
+  if (language !== 'javascript' && language !== 'js') {
+    throw new Error(`Unsupported script language: ${String(node.script.language)}`);
+  }
+  const source = typeof node.script.source === 'string' ? node.script.source : '';
+  if (!source.trim()) {
+    throw new Error('script.source must be a non-empty JavaScript string');
+  }
+  const entry =
+    typeof node.script.entry === 'string' && node.script.entry.trim() ? node.script.entry.trim() : 'generate';
+  if (!/^[A-Za-z_$][0-9A-Za-z_$]*$/.test(entry)) {
+    throw new Error(`script.entry must be a valid JavaScript identifier, got "${entry}"`);
+  }
+  const api = createScriptApi(deadlineAt);
+  let output: unknown;
+  try {
+    output = new Function(
+      'api',
+      'input',
+      `"use strict";
+const globalThis = undefined;
+const self = undefined;
+const window = undefined;
+const document = undefined;
+const navigator = undefined;
+const location = undefined;
+const fetch = undefined;
+const XMLHttpRequest = undefined;
+const WebSocket = undefined;
+const Worker = undefined;
+const SharedWorker = undefined;
+const importScripts = undefined;
+const postMessage = undefined;
+const close = undefined;
+const Function = undefined;
+const eval = undefined;
+const setTimeout = undefined;
+const setInterval = undefined;
+const queueMicrotask = undefined;
+const Math = api.math;
+${source}
+if (typeof ${entry} !== "function") {
+  throw new Error("script entry \\"${entry}\\" was not defined as a function");
+}
+return ${entry}(api, input);`
+    )(api, cloneJsonValue(node.input ?? null));
+  } catch (err) {
+    throw new Error(`script execution failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const scriptMesh = normalizeScriptMeshOutput(output);
+  return tessellateMesh({
+    ...node,
+    type: 'mesh',
+    positions: scriptMesh.positions,
+    normals: scriptMesh.normals,
+    uvs: scriptMesh.uvs,
+    indices: scriptMesh.indices
+  });
+}
+
+function createScriptApi(deadlineAt: number) {
+  const math = Object.freeze({
+    PI: Math.PI,
+    TAU: Math.PI * 2,
+    E: Math.E,
+    abs: Math.abs,
+    acos: Math.acos,
+    asin: Math.asin,
+    atan2: Math.atan2,
+    ceil: Math.ceil,
+    cos: Math.cos,
+    floor: Math.floor,
+    hypot: Math.hypot,
+    log: Math.log,
+    max: Math.max,
+    min: Math.min,
+    pow: Math.pow,
+    round: Math.round,
+    sign: Math.sign,
+    sin: Math.sin,
+    sqrt: Math.sqrt,
+    tan: Math.tan,
+    clamp: (value: number, min: number, max: number) => Math.min(max, Math.max(min, value)),
+    lerp: (a: number, b: number, t: number) => lerp(a, b, t)
+  });
+  return Object.freeze({
+    math,
+    mesh: () => createScriptMeshBuilder(deadlineAt),
+    assert: (condition: unknown, message?: string) => {
+      if (!condition) {
+        throw new Error(message ? String(message) : 'script assertion failed');
+      }
+    },
+    check: () => {
+      checkDeadline(deadlineAt);
+    },
+    progress: (value: number) => {
+      checkDeadline(deadlineAt);
+      if (!isFiniteNumber(value)) {
+        throw new Error('script progress value must be a finite number');
+      }
+      postProgress(Math.max(0, Math.min(0.95, value)));
+    }
+  });
+}
+
+function createScriptMeshBuilder(deadlineAt: number) {
+  const positions: Vec3[] = [];
+  const normals: (Vec3 | undefined)[] = [];
+  const uvs: (Vec2 | undefined)[] = [];
+  const indices: number[] = [];
+  const ensureVertexCapacity = () => {
+    if (positions.length >= SCRIPT_HARD_MAX_VERTICES) {
+      throw new Error(`script mesh exceeded hard vertex limit of ${SCRIPT_HARD_MAX_VERTICES}`);
+    }
+  };
+  const ensureIndexCapacity = (count: number) => {
+    if (indices.length + count > SCRIPT_HARD_MAX_INDICES) {
+      throw new Error(`script mesh exceeded hard index limit of ${SCRIPT_HARD_MAX_INDICES}`);
+    }
+  };
+  const validateVertexIndex = (value: unknown, name: string): number => {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= positions.length) {
+      throw new Error(`${name} must be an integer vertex index between 0 and ${positions.length - 1}`);
+    }
+    return value;
+  };
+  const build = () => {
+    checkDeadline(deadlineAt);
+    const hasAnyNormals = normals.some((value) => !!value);
+    const hasAnyUvs = uvs.some((value) => !!value);
+    if (hasAnyNormals && normals.some((value) => !value)) {
+      throw new Error('script mesh normals must be provided for every vertex or omitted entirely');
+    }
+    if (hasAnyUvs && uvs.some((value) => !value)) {
+      throw new Error('script mesh uvs must be provided for every vertex or omitted entirely');
+    }
+    return {
+      positions: positions.map((value) => [value[0], value[1], value[2]] as Vec3),
+      normals: hasAnyNormals
+        ? (normals as Vec3[]).map((value) => [value[0], value[1], value[2]] as Vec3)
+        : undefined,
+      uvs: hasAnyUvs ? (uvs as Vec2[]).map((value) => [value[0], value[1]] as Vec2) : undefined,
+      indices: indices.slice()
+    };
+  };
+  return Object.freeze({
+    addVertex: (position: unknown, normal?: unknown, uv?: unknown) => {
+      checkDeadline(deadlineAt);
+      ensureVertexCapacity();
+      const pos = coerceVec3(position, 'script mesh vertex position');
+      const n = normal === undefined ? undefined : normalize(coerceVec3(normal, 'script mesh vertex normal'));
+      const tex = uv === undefined ? undefined : coerceVec2(uv, 'script mesh vertex uv');
+      const index = positions.length;
+      positions.push(pos);
+      normals.push(n);
+      uvs.push(tex);
+      return index;
+    },
+    addTriangle: (a: unknown, b: unknown, c: unknown) => {
+      checkDeadline(deadlineAt);
+      ensureIndexCapacity(3);
+      indices.push(
+        validateVertexIndex(a, 'triangle.a'),
+        validateVertexIndex(b, 'triangle.b'),
+        validateVertexIndex(c, 'triangle.c')
+      );
+      return indices.length / 3;
+    },
+    addQuad: (a: unknown, b: unknown, c: unknown, d: unknown) => {
+      checkDeadline(deadlineAt);
+      ensureIndexCapacity(6);
+      const ia = validateVertexIndex(a, 'quad.a');
+      const ib = validateVertexIndex(b, 'quad.b');
+      const ic = validateVertexIndex(c, 'quad.c');
+      const id = validateVertexIndex(d, 'quad.d');
+      indices.push(ia, ib, ic, ia, ic, id);
+      return indices.length / 3;
+    },
+    build
+  });
+}
+
+function normalizeScriptMeshOutput(
+  output: unknown
+): Pick<MeshNode, 'positions' | 'normals' | 'uvs' | 'indices'> {
+  const built =
+    output && typeof output === 'object' && typeof (output as { build?: unknown }).build === 'function'
+      ? (output as { build: () => unknown }).build()
+      : output;
+  if (!built || typeof built !== 'object') {
+    throw new Error('script must return a mesh object or api.mesh().build() result');
+  }
+  const mesh = built as {
+    positions?: unknown;
+    normals?: unknown;
+    uvs?: unknown;
+    indices?: unknown;
+  };
+  const positions = readVec3Array(mesh.positions, 'script output positions');
+  const indices = readIndexArray(mesh.indices, 'script output indices');
+  if (!positions.length) {
+    throw new Error('script output positions must contain at least one vertex');
+  }
+  if (!indices.length) {
+    throw new Error('script output indices must contain at least one triangle');
+  }
+  if (indices.length % 3 !== 0) {
+    throw new Error('script output indices length must be divisible by 3 for triangle-list topology');
+  }
+  const normals =
+    mesh.normals === undefined ? undefined : readVec3Array(mesh.normals, 'script output normals');
+  const uvs = mesh.uvs === undefined ? undefined : readVec2Array(mesh.uvs, 'script output uvs');
+  if (normals && normals.length !== positions.length) {
+    throw new Error('script output normals must match positions length');
+  }
+  if (uvs && uvs.length !== positions.length) {
+    throw new Error('script output uvs must match positions length');
+  }
+  return {
+    positions,
+    normals,
+    uvs,
+    indices
+  };
+}
+
+function readVec3Array(value: unknown, name: string): Vec3[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${name} must be an array`);
+  }
+  if (value.length === 0) {
+    return [];
+  }
+  if (value.every((item) => isFiniteNumber(item))) {
+    if (value.length % 3 !== 0) {
+      throw new Error(`${name} flat array length must be divisible by 3`);
+    }
+    const result: Vec3[] = [];
+    for (let i = 0; i < value.length; i += 3) {
+      result.push([value[i], value[i + 1], value[i + 2]]);
+    }
+    return result;
+  }
+  return value.map((item, index) => coerceVec3(item, `${name}[${index}]`));
+}
+
+function readVec2Array(value: unknown, name: string): Vec2[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${name} must be an array`);
+  }
+  if (value.length === 0) {
+    return [];
+  }
+  if (value.every((item) => isFiniteNumber(item))) {
+    if (value.length % 2 !== 0) {
+      throw new Error(`${name} flat array length must be divisible by 2`);
+    }
+    const result: Vec2[] = [];
+    for (let i = 0; i < value.length; i += 2) {
+      result.push([value[i], value[i + 1]]);
+    }
+    return result;
+  }
+  return value.map((item, index) => coerceVec2(item, `${name}[${index}]`));
+}
+
+function readIndexArray(value: unknown, name: string): number[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${name} must be an array`);
+  }
+  return value.map((item, index) => {
+    if (!Number.isInteger(item) || item < 0) {
+      throw new Error(`${name}[${index}] must be a non-negative integer`);
+    }
+    return item;
+  });
+}
+
+function coerceVec3(value: unknown, name: string): Vec3 {
+  if (!isVec3(value)) {
+    throw new Error(`${name} must be [x, y, z]`);
+  }
+  return [value[0], value[1], value[2]];
+}
+
+function coerceVec2(value: unknown, name: string): Vec2 {
+  if (!Array.isArray(value) || value.length !== 2 || !isFiniteNumber(value[0]) || !isFiniteNumber(value[1])) {
+    throw new Error(`${name} must be [u, v]`);
+  }
+  return [value[0], value[1]];
+}
+
+function cloneJsonValue<T extends JsonValue>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneJsonValue(item)) as T;
+  }
+  if (value && typeof value === 'object') {
+    const result: { [key: string]: JsonValue } = {};
+    for (const [key, childValue] of Object.entries(value)) {
+      result[key] = cloneJsonValue(childValue);
+    }
+    return result as T;
+  }
+  return value;
 }
 
 function tessellateCsg(node: CsgNode, deadlineAt: number): MeshData {
