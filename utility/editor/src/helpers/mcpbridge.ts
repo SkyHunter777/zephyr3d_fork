@@ -1,8 +1,8 @@
 import type { Editor } from '../core/editor';
 import type { Camera } from '@zephyr3d/scene';
-import type { PropertyValue, SceneNode, Material } from '@zephyr3d/scene';
+import type { PropertyValue, Material } from '@zephyr3d/scene';
 import type { Primitive } from '@zephyr3d/scene';
-import { Mesh, Scene } from '@zephyr3d/scene';
+import { Mesh, Scene, SceneNode, ScriptAttachment } from '@zephyr3d/scene';
 import { getDevice, getEngine, OrthoCamera, PerspectiveCamera } from '@zephyr3d/scene';
 import { BlobReader, BlobWriter, configure, ZipWriter } from '@zip.js/zip.js';
 import {
@@ -16,7 +16,7 @@ import {
 } from '@zephyr3d/base';
 import { ProjectService } from '../core/services/project';
 import { isDesktopApp } from '../core/services/desktop';
-import { fileListFileName, libDir } from '../core/build/templates';
+import { fileListFileName, libDir, templateScript } from '../core/build/templates';
 import { SceneController } from '../controllers/scenecontroller';
 import { AddShapeCommand } from '../commands/scenecommands';
 import { eventBus } from '../core/eventbus';
@@ -27,6 +27,9 @@ import { buildPrimitiveGlbFromZmshContent } from './primitiveglb';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type TreeData = { files: { name: string; size: number }[]; subDirs: { [name: string]: TreeData } };
+type ScriptToolTarget = 'selected' | 'scene' | 'node';
+type ScriptAttachMode = 'replace_same_path' | 'append' | 'replace_all';
+type ScriptHostObject = Scene | SceneNode;
 type NodeClass =
   | 'SceneNode'
   | 'Mesh'
@@ -292,6 +295,285 @@ function getNode<T extends SceneNode>(editor: Editor, id: string): { node: T; er
 
 function getScene(editor: Editor): Scene {
   return getSceneController(editor)?.model?.scene ?? null;
+}
+
+function cloneScriptValue<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneScriptValue(item)) as T;
+  }
+  if (value && typeof value === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      result[key] = cloneScriptValue(item);
+    }
+    return result as T;
+  }
+  return value;
+}
+
+function normalizeScriptToolTarget(value: unknown): ScriptToolTarget {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return normalized === 'scene' || normalized === 'node' ? (normalized as ScriptToolTarget) : 'selected';
+}
+
+function normalizeScriptAttachMode(value: unknown): ScriptAttachMode {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return normalized === 'append' || normalized === 'replace_all'
+    ? (normalized as ScriptAttachMode)
+    : 'replace_same_path';
+}
+
+function guessScriptLanguage(path: string): 'typescript' | 'javascript' {
+  return PathUtils.extname(path).toLowerCase() === '.js' ? 'javascript' : 'typescript';
+}
+
+function normalizeScriptConfigInput(value: unknown): {
+  value: Record<string, unknown> | unknown[] | null;
+  err: string | null;
+} {
+  if (value == null) {
+    return { value: null, err: null };
+  }
+  if (Array.isArray(value)) {
+    return { value: cloneScriptValue(value), err: null };
+  }
+  if (typeof value === 'object') {
+    return { value: cloneScriptValue(value as Record<string, unknown>), err: null };
+  }
+  return {
+    value: null,
+    err: 'Script config must be an object, array, or null'
+  };
+}
+
+function normalizeScriptAssetPath(
+  rawPath: unknown,
+  options: { requireWritable?: boolean } = {}
+): { path: string | null; err: string | null } {
+  const text = typeof rawPath === 'string' ? rawPath.trim() : '';
+  if (!text) {
+    return { path: null, err: 'Script path is required' };
+  }
+  const normalized = ProjectService.VFS.normalizePath(text.startsWith('/') ? text : `/${text}`);
+  if (!(normalized === '/assets' || normalized.startsWith('/assets/'))) {
+    return {
+      path: null,
+      err: `Script path must stay under /assets, got ${normalized}`
+    };
+  }
+  const ext = PathUtils.extname(normalized).toLowerCase();
+  if (ext !== '.ts' && ext !== '.js') {
+    return {
+      path: null,
+      err: `Script path must end with .ts or .js, got ${normalized}`
+    };
+  }
+  if (options.requireWritable && normalized.startsWith('/assets/@builtins/')) {
+    return {
+      path: null,
+      err: `Script path must be writable and cannot be under /assets/@builtins: ${normalized}`
+    };
+  }
+  return { path: normalized, err: null };
+}
+
+function getSelectedSceneNodes(editor: Editor): SceneNode[] {
+  const controller = getSceneController(editor);
+  const view = controller?.getView?.();
+  if (!view || typeof view.getSelectedSceneNodes !== 'function') {
+    return [];
+  }
+  const nodes = view.getSelectedSceneNodes();
+  return Array.isArray(nodes) ? nodes.filter((node): node is SceneNode => node instanceof SceneNode) : [];
+}
+
+function serializeSelectedScriptNodes(scene: Scene, nodes: SceneNode[]) {
+  return nodes.map((node) => ({
+    id: node.persistentId,
+    name: node.name,
+    node_class: getNodeClassName(node),
+    is_root: node === scene.rootNode
+  }));
+}
+
+function serializeScriptHost(editor: Editor, hostType: 'scene' | 'node', host: ScriptHostObject) {
+  if (hostType === 'scene') {
+    const scene = host as Scene;
+    return {
+      type: 'scene' as const,
+      name: scene.name,
+      scene_path: getCurrentScenePath(editor) || null,
+      root_node_id: scene.rootNode.persistentId
+    };
+  }
+  const node = host as SceneNode;
+  return {
+    type: 'node' as const,
+    node_id: node.persistentId,
+    name: node.name,
+    node_class: getNodeClassName(node),
+    is_root: node.scene ? node === node.scene.rootNode : false
+  };
+}
+
+function serializeScriptAttachments(host: ScriptHostObject) {
+  return host.scripts.map((attachment, index) => ({
+    index,
+    script_path: attachment.script,
+    language: guessScriptLanguage(attachment.script),
+    config: cloneScriptValue(attachment.config ?? null)
+  }));
+}
+
+function cloneScriptAttachments(host: ScriptHostObject) {
+  return host.scripts.map(
+    (attachment) => new ScriptAttachment(attachment.script, cloneScriptValue(attachment.config ?? null) as any)
+  );
+}
+
+function resolveScriptHost(
+  editor: Editor,
+  target: ScriptToolTarget,
+  nodeId?: string
+): {
+  host: ScriptHostObject | null;
+  hostType: 'scene' | 'node' | null;
+  selectedNodes: SceneNode[];
+  err: string | null;
+} {
+  const scene = getScene(editor);
+  if (!scene) {
+    return {
+      host: null,
+      hostType: null,
+      selectedNodes: [],
+      err: 'No scene is currently opened; create or open a scene first'
+    };
+  }
+  const selectedNodes = getSelectedSceneNodes(editor);
+  if (target === 'scene') {
+    return {
+      host: scene,
+      hostType: 'scene',
+      selectedNodes,
+      err: null
+    };
+  }
+  if (target === 'node') {
+    if (!nodeId) {
+      return {
+        host: null,
+        hostType: null,
+        selectedNodes,
+        err: 'script target `node` requires node_id'
+      };
+    }
+    const node = getNode(editor, nodeId);
+    return {
+      host: node.err ? null : node.node,
+      hostType: node.err ? null : 'node',
+      selectedNodes,
+      err: node.err
+    };
+  }
+  if (selectedNodes.length === 0) {
+    return {
+      host: scene,
+      hostType: 'scene',
+      selectedNodes,
+      err: null
+    };
+  }
+  if (selectedNodes.length > 1) {
+    return {
+      host: null,
+      hostType: null,
+      selectedNodes,
+      err: 'Multiple scene nodes are selected; narrow the selection or pass target=`node` with node_id'
+    };
+  }
+  const selected = selectedNodes[0];
+  if (selected === scene.rootNode) {
+    return {
+      host: scene,
+      hostType: 'scene',
+      selectedNodes,
+      err: null
+    };
+  }
+  return {
+    host: selected,
+    hostType: 'node',
+    selectedNodes,
+    err: null
+  };
+}
+
+function createScriptAttachment(scriptPath: string, config: Record<string, unknown> | unknown[] | null) {
+  return new ScriptAttachment(scriptPath, cloneScriptValue(config) as any);
+}
+
+function applyScriptAttachmentToHost(
+  host: ScriptHostObject,
+  scriptPath: string,
+  mode: ScriptAttachMode,
+  config: Record<string, unknown> | unknown[] | null,
+  hasConfig: boolean
+) {
+  let attachments = cloneScriptAttachments(host);
+  const existingIndex = attachments.findIndex((item) => item.script === scriptPath);
+  const existingConfig = existingIndex >= 0 ? cloneScriptValue(attachments[existingIndex].config ?? null) : null;
+  const nextAttachment = (fallbackConfig: Record<string, unknown> | unknown[] | null) =>
+    createScriptAttachment(scriptPath, hasConfig ? config : fallbackConfig);
+  if (mode === 'replace_all') {
+    attachments = [nextAttachment(existingConfig)];
+  } else if (mode === 'append') {
+    attachments.push(nextAttachment(null));
+  } else if (existingIndex >= 0) {
+    attachments[existingIndex] = nextAttachment(existingConfig);
+  } else {
+    attachments.push(nextAttachment(null));
+  }
+  host.scripts = attachments;
+}
+
+function notifyScriptPropertiesChanged(sceneChanged: boolean) {
+  eventBus.dispatchEvent('refresh_properties');
+  if (sceneChanged) {
+    eventBus.dispatchEvent('scene_changed');
+  }
+}
+
+function buildScriptContextPayload(
+  editor: Editor,
+  scene: Scene,
+  host: ScriptHostObject | null,
+  hostType: 'scene' | 'node' | null,
+  selectedNodes: SceneNode[]
+) {
+  return {
+    project: editor.currentProject
+      ? {
+          id: editor.currentProject.uuid,
+          name: editor.currentProject.name,
+          path: editor.currentProject.path ?? null
+        }
+      : null,
+    scene: {
+      name: scene.name,
+      path: getCurrentScenePath(editor) || null,
+      root_node_id: scene.rootNode.persistentId
+    },
+    selected_nodes: serializeSelectedScriptNodes(scene, selectedNodes),
+    host: host && hostType ? serializeScriptHost(editor, hostType, host) : null,
+    attachments: host ? serializeScriptAttachments(host) : null,
+    recommended_script_directory: '/assets/scripts',
+    lifecycle: ['onCreated', 'onAttached', 'onUpdate', 'onDetached', 'onDestroy'],
+    script_base_class: 'RuntimeScript',
+    script_prop_decorator: 'scriptProp',
+    script_template_source: templateScript,
+    preferred_imports: ['@zephyr3d/scene', '@zephyr3d/base']
+  };
 }
 
 function getNodeClassName(node: SceneNode): NodeClass {
@@ -2209,6 +2491,407 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
       }
       return {
         propertyList: JSON.parse(JSON.stringify(getEngine().resourceManager.getPropertiesByClass(cls))),
+        err: null
+      };
+    }
+    case 'getScriptContext': {
+      const project = await ProjectService.getCurrentProjectInfo();
+      if (!project) {
+        return {
+          project: null,
+          scene: null,
+          selected_nodes: [],
+          host: null,
+          attachments: null,
+          recommended_script_directory: '/assets/scripts',
+          lifecycle: ['onCreated', 'onAttached', 'onUpdate', 'onDetached', 'onDestroy'],
+          script_base_class: 'RuntimeScript',
+          script_prop_decorator: 'scriptProp',
+          preferred_imports: ['@zephyr3d/scene', '@zephyr3d/base'],
+          err: 'No project is currently opened; create or open a project first'
+        };
+      }
+      const scene = getScene(editor);
+      if (!scene) {
+        return {
+          project: {
+            id: project.uuid,
+            name: project.name,
+            path: project.path ?? null
+          },
+          scene: null,
+          selected_nodes: [],
+          host: null,
+          attachments: null,
+          recommended_script_directory: '/assets/scripts',
+          lifecycle: ['onCreated', 'onAttached', 'onUpdate', 'onDetached', 'onDestroy'],
+          script_base_class: 'RuntimeScript',
+          script_prop_decorator: 'scriptProp',
+          preferred_imports: ['@zephyr3d/scene', '@zephyr3d/base'],
+          err: 'No scene is currently opened; create or open a scene first'
+        };
+      }
+      const target = normalizeScriptToolTarget(params.target);
+      const nodeId = typeof params.node_id === 'string' ? params.node_id.trim() : '';
+      const resolved = resolveScriptHost(editor, target, nodeId);
+      return {
+        ...buildScriptContextPayload(editor, scene, resolved.host, resolved.hostType, resolved.selectedNodes),
+        err: resolved.err
+      };
+    }
+    case 'listScriptAttachments': {
+      const project = await ProjectService.getCurrentProjectInfo();
+      if (!project) {
+        return {
+          host: null,
+          attachments: null,
+          selected_nodes: [],
+          err: 'No project is currently opened; create or open a project first'
+        };
+      }
+      const scene = getScene(editor);
+      if (!scene) {
+        return {
+          host: null,
+          attachments: null,
+          selected_nodes: [],
+          err: 'No scene is currently opened; create or open a scene first'
+        };
+      }
+      const target = normalizeScriptToolTarget(params.target);
+      const nodeId = typeof params.node_id === 'string' ? params.node_id.trim() : '';
+      const resolved = resolveScriptHost(editor, target, nodeId);
+      return {
+        host: resolved.host && resolved.hostType ? serializeScriptHost(editor, resolved.hostType, resolved.host) : null,
+        attachments: resolved.host ? serializeScriptAttachments(resolved.host) : null,
+        selected_nodes: serializeSelectedScriptNodes(scene, resolved.selectedNodes),
+        err: resolved.err
+      };
+    }
+    case 'readScriptSource': {
+      const info = await ProjectService.getCurrentProjectInfo();
+      if (!info) {
+        return {
+          path: null,
+          language: null,
+          content: null,
+          err: 'No project is currently opened; create or open a project first'
+        };
+      }
+      const normalizedPath = normalizeScriptAssetPath(params.path);
+      if (normalizedPath.err) {
+        return {
+          path: null,
+          language: null,
+          content: null,
+          err: normalizedPath.err
+        };
+      }
+      if (!(await ProjectService.VFS.exists(normalizedPath.path!))) {
+        return {
+          path: normalizedPath.path,
+          language: guessScriptLanguage(normalizedPath.path!),
+          content: null,
+          err: `Script asset file not found: ${normalizedPath.path}`
+        };
+      }
+      const content = (await ProjectService.VFS.readFile(normalizedPath.path!, { encoding: 'utf8' })) as string;
+      return {
+        path: normalizedPath.path,
+        language: guessScriptLanguage(normalizedPath.path!),
+        content,
+        err: null
+      };
+    }
+    case 'writeScriptSource': {
+      const info = await ProjectService.getCurrentProjectInfo();
+      if (!info) {
+        return {
+          path: null,
+          language: null,
+          created: null,
+          bytes: null,
+          err: 'No project is currently opened; create or open a project first'
+        };
+      }
+      const normalizedPath = normalizeScriptAssetPath(params.path, { requireWritable: true });
+      if (normalizedPath.err) {
+        return {
+          path: null,
+          language: null,
+          created: null,
+          bytes: null,
+          err: normalizedPath.err
+        };
+      }
+      if (typeof params.content !== 'string') {
+        return {
+          path: normalizedPath.path,
+          language: guessScriptLanguage(normalizedPath.path!),
+          created: null,
+          bytes: null,
+          err: 'writeScriptSource requires `content` as a string'
+        };
+      }
+      const overwrite = params.overwrite !== false;
+      const exists = await ProjectService.VFS.exists(normalizedPath.path!);
+      if (exists && !overwrite) {
+        return {
+          path: normalizedPath.path,
+          language: guessScriptLanguage(normalizedPath.path!),
+          created: false,
+          bytes: null,
+          err: `Script asset already exists and overwrite is false: ${normalizedPath.path}`
+        };
+      }
+      const dir = PathUtils.dirname(normalizedPath.path!);
+      if (dir && dir !== '.' && dir !== '/') {
+        await ProjectService.VFS.makeDirectory(dir, true);
+      }
+      await ProjectService.VFS.writeFile(normalizedPath.path!, params.content, { encoding: 'utf8', create: true });
+      await editor.syncCodeModelToFile(normalizedPath.path!, params.content, guessScriptLanguage(normalizedPath.path!));
+      (
+        getEngine().scriptingSystem.registry as {
+          invalidate?: (moduleId?: string) => void;
+        }
+      ).invalidate?.();
+      notifyScriptPropertiesChanged(false);
+      return {
+        path: normalizedPath.path,
+        language: guessScriptLanguage(normalizedPath.path!),
+        created: !exists,
+        bytes: new TextEncoder().encode(params.content).byteLength,
+        err: null
+      };
+    }
+    case 'diagnoseScriptSource': {
+      const info = await ProjectService.getCurrentProjectInfo();
+      if (!info) {
+        return {
+          path: null,
+          language: null,
+          diagnostics: null,
+          summary: null,
+          err: 'No project is currently opened; create or open a project first'
+        };
+      }
+      const normalizedPath = normalizeScriptAssetPath(params.path);
+      if (normalizedPath.err) {
+        return {
+          path: null,
+          language: null,
+          diagnostics: null,
+          summary: null,
+          err: normalizedPath.err
+        };
+      }
+      const diagnostics = await editor.runScriptDiagnostics(normalizedPath.path!);
+      return {
+        path: normalizedPath.path,
+        ...diagnostics
+      };
+    }
+    case 'attachScriptToNode': {
+      const info = await ProjectService.getCurrentProjectInfo();
+      if (!info) {
+        return {
+          host: null,
+          attachments: null,
+          err: 'No project is currently opened; create or open a project first'
+        };
+      }
+      const nodeId = typeof params.node_id === 'string' ? params.node_id.trim() : '';
+      if (!nodeId) {
+        return {
+          host: null,
+          attachments: null,
+          err: 'attachScriptToNode requires `node_id`, the persistent id of a scene node'
+        };
+      }
+      const node = getNode(editor, nodeId);
+      if (node.err) {
+        return {
+          host: null,
+          attachments: null,
+          err: node.err
+        };
+      }
+      const normalizedPath = normalizeScriptAssetPath(params.script_path, { requireWritable: true });
+      if (normalizedPath.err) {
+        return {
+          host: serializeScriptHost(editor, 'node', node.node),
+          attachments: serializeScriptAttachments(node.node),
+          err: normalizedPath.err
+        };
+      }
+      if (!(await ProjectService.VFS.exists(normalizedPath.path!))) {
+        return {
+          host: serializeScriptHost(editor, 'node', node.node),
+          attachments: serializeScriptAttachments(node.node),
+          err: `Script asset file not found: ${normalizedPath.path}`
+        };
+      }
+      const config = normalizeScriptConfigInput(params.config);
+      if (config.err) {
+        return {
+          host: serializeScriptHost(editor, 'node', node.node),
+          attachments: serializeScriptAttachments(node.node),
+          err: config.err
+        };
+      }
+      applyScriptAttachmentToHost(
+        node.node,
+        normalizedPath.path!,
+        normalizeScriptAttachMode(params.mode),
+        config.value,
+        Object.prototype.hasOwnProperty.call(params, 'config')
+      );
+      notifyScriptPropertiesChanged(true);
+      return {
+        host: serializeScriptHost(editor, 'node', node.node),
+        attachments: serializeScriptAttachments(node.node),
+        err: null
+      };
+    }
+    case 'attachScriptToScene': {
+      const info = await ProjectService.getCurrentProjectInfo();
+      if (!info) {
+        return {
+          host: null,
+          attachments: null,
+          err: 'No project is currently opened; create or open a project first'
+        };
+      }
+      const scene = getScene(editor);
+      if (!scene) {
+        return {
+          host: null,
+          attachments: null,
+          err: 'No scene is currently opened; create or open a scene first'
+        };
+      }
+      const normalizedPath = normalizeScriptAssetPath(params.script_path, { requireWritable: true });
+      if (normalizedPath.err) {
+        return {
+          host: serializeScriptHost(editor, 'scene', scene),
+          attachments: serializeScriptAttachments(scene),
+          err: normalizedPath.err
+        };
+      }
+      if (!(await ProjectService.VFS.exists(normalizedPath.path!))) {
+        return {
+          host: serializeScriptHost(editor, 'scene', scene),
+          attachments: serializeScriptAttachments(scene),
+          err: `Script asset file not found: ${normalizedPath.path}`
+        };
+      }
+      const config = normalizeScriptConfigInput(params.config);
+      if (config.err) {
+        return {
+          host: serializeScriptHost(editor, 'scene', scene),
+          attachments: serializeScriptAttachments(scene),
+          err: config.err
+        };
+      }
+      applyScriptAttachmentToHost(
+        scene,
+        normalizedPath.path!,
+        normalizeScriptAttachMode(params.mode),
+        config.value,
+        Object.prototype.hasOwnProperty.call(params, 'config')
+      );
+      notifyScriptPropertiesChanged(true);
+      return {
+        host: serializeScriptHost(editor, 'scene', scene),
+        attachments: serializeScriptAttachments(scene),
+        err: null
+      };
+    }
+    case 'detachScriptAttachment': {
+      const info = await ProjectService.getCurrentProjectInfo();
+      if (!info) {
+        return {
+          host: null,
+          attachments: null,
+          removed_count: 0,
+          err: 'No project is currently opened; create or open a project first'
+        };
+      }
+      const scene = getScene(editor);
+      if (!scene) {
+        return {
+          host: null,
+          attachments: null,
+          removed_count: 0,
+          err: 'No scene is currently opened; create or open a scene first'
+        };
+      }
+      const target = normalizeScriptToolTarget(params.target);
+      const nodeId = typeof params.node_id === 'string' ? params.node_id.trim() : '';
+      const resolved = resolveScriptHost(editor, target, nodeId);
+      if (resolved.err || !resolved.host || !resolved.hostType) {
+        return {
+          host: null,
+          attachments: null,
+          removed_count: 0,
+          err: resolved.err
+        };
+      }
+      const attachments = cloneScriptAttachments(resolved.host);
+      let removedCount = 0;
+      if (params.all === true && !Object.prototype.hasOwnProperty.call(params, 'script_path')) {
+        removedCount = attachments.length;
+        resolved.host.scripts = [];
+      } else if (Number.isInteger(params.index)) {
+        const index = Number(params.index);
+        if (index < 0 || index >= attachments.length) {
+          return {
+            host: serializeScriptHost(editor, resolved.hostType, resolved.host),
+            attachments: serializeScriptAttachments(resolved.host),
+            removed_count: 0,
+            err: `Script attachment index is out of range: ${index}`
+          };
+        }
+        attachments.splice(index, 1);
+        removedCount = 1;
+        resolved.host.scripts = attachments;
+      } else {
+        const normalizedPath = normalizeScriptAssetPath(params.script_path);
+        if (normalizedPath.err) {
+          return {
+            host: serializeScriptHost(editor, resolved.hostType, resolved.host),
+            attachments: serializeScriptAttachments(resolved.host),
+            removed_count: 0,
+            err:
+              typeof params.script_path === 'string' && params.script_path.trim()
+                ? normalizedPath.err
+                : 'detachScriptAttachment requires index, script_path, or all=true'
+          };
+        }
+        if (params.all === true) {
+          const nextAttachments = attachments.filter((attachment) => attachment.script !== normalizedPath.path);
+          removedCount = attachments.length - nextAttachments.length;
+          resolved.host.scripts = nextAttachments;
+        } else {
+          const index = attachments.findIndex((attachment) => attachment.script === normalizedPath.path);
+          if (index < 0) {
+            return {
+              host: serializeScriptHost(editor, resolved.hostType, resolved.host),
+              attachments: serializeScriptAttachments(resolved.host),
+              removed_count: 0,
+              err: `Script attachment not found for path: ${normalizedPath.path}`
+            };
+          }
+          attachments.splice(index, 1);
+          removedCount = 1;
+          resolved.host.scripts = attachments;
+        }
+      }
+      notifyScriptPropertiesChanged(true);
+      return {
+        host: serializeScriptHost(editor, resolved.hostType, resolved.host),
+        attachments: serializeScriptAttachments(resolved.host),
+        removed_count: removedCount,
         err: null
       };
     }

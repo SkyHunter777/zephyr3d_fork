@@ -3,6 +3,26 @@ import { HttpFS } from '@zephyr3d/base';
 import { ScriptRegistry } from './scriptregistry';
 import { applyRuntimeScriptConfig, RuntimeScript, type RuntimeScriptConfig } from './runtimescript';
 
+function resolveCreatedHook(instance: RuntimeScript<any>) {
+  if (instance.onCreated !== RuntimeScript.prototype.onCreated) {
+    return {
+      legacy: false,
+      hook: () => instance.onCreated()
+    };
+  }
+  const legacyHook = (instance as RuntimeScript<any> & { onCreate?: () => void | Promise<void> }).onCreate;
+  if (typeof legacyHook === 'function') {
+    return {
+      legacy: true,
+      hook: () => legacyHook.call(instance)
+    };
+  }
+  return {
+    legacy: false,
+    hook: () => instance.onCreated()
+  };
+}
+
 /**
  * A host object that supports disposal.
  *
@@ -151,7 +171,11 @@ export class ScriptingSystem {
       if (instance instanceof RuntimeScript) {
         applyRuntimeScriptConfig(instance, config);
         if (!this._scriptHosts.has(instance)) {
-          const P = instance.onCreated();
+          const createdHook = resolveCreatedHook(instance);
+          if (createdHook.legacy) {
+            console.warn(`Script '${id}' uses deprecated onCreate(); rename it to onCreated().`);
+          }
+          const P = createdHook.hook();
           if (P instanceof Promise) {
             await P;
           }

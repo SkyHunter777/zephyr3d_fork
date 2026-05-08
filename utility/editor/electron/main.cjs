@@ -31,6 +31,19 @@ const DEFAULT_MAX_ASSISTANT_TOOL_STEPS = Math.max(
   ) || 32
 );
 const MAX_ASSISTANT_IMAGE_BYTES = 10 * 1024 * 1024;
+const SCRIPTING_ASSISTANT_SYSTEM_PROMPT = [
+  'You are assisting with Zephyr3D runtime scene scripts.',
+  'Before creating, modifying, or attaching a script, inspect the current target with script_get_context or script_list_attachments.',
+  'Treat script_template_source returned by script_get_context as the canonical reference for lifecycle hooks, RuntimeScript usage, host binding, and scriptProp usage.',
+  'Follow the patterns already used in script_template_source unless the user explicitly asks for something different.',
+  'Prefer imports from @zephyr3d/scene and @zephyr3d/base instead of guessing local globals.',
+  'Before modifying an existing script file, read it first with script_read_source.',
+  'After creating or modifying a script file, run script_diagnostics on it before attaching it or concluding that the script is ready.',
+  'If script_diagnostics reports errors, fix them before attaching the script or finishing the task.',
+  'Do not call script_write_source and node_attach_script or scene_attach_script in the same tool batch; wait for script_diagnostics first.',
+  'Use script_write_source to create or update script assets under /assets, then use node_attach_script or scene_attach_script to attach them.',
+  'If script_get_context reports multiple selected nodes or another ambiguity, do not guess.'
+].join('\n');
 const ASSISTANT_READONLY_TOOLS = new Set([
   'editor_connect_info',
   'editor_wait_ready',
@@ -57,6 +70,10 @@ const ASSISTANT_READONLY_TOOLS = new Set([
   'node_get_children',
   'scene_get_selected_nodes',
   'camera_get_active',
+  'script_get_context',
+  'script_list_attachments',
+  'script_read_source',
+  'script_diagnostics',
   'model_generate_status',
   'editor_screenshot',
   'editor_console_logs'
@@ -939,6 +956,21 @@ function extractAssistantTextContent(content) {
   return '';
 }
 
+function isScriptAttachToolName(name) {
+  return name === 'node_attach_script' || name === 'scene_attach_script';
+}
+
+function getScriptWritePathFromToolResult(toolResult) {
+  const path = toolResult?.structuredContent?.path ?? toolResult?.path;
+  return typeof path === 'string' && path.trim() ? path.trim() : '';
+}
+
+function getScriptDiagnosticsErrorCount(toolResult) {
+  const summary = toolResult?.structuredContent?.summary ?? toolResult?.summary;
+  const count = Number(summary?.errorCount);
+  return Number.isFinite(count) ? count : 0;
+}
+
 async function runAssistantLoop(sessionId, run) {
   const session = findAssistantSession(sessionId);
   if (!session) {
@@ -948,7 +980,13 @@ async function runAssistantLoop(sessionId, run) {
   const tools = settings.toolCalling ? await listAssistantMcpTools() : [];
   const openAiTools = tools.map(convertMcpToolToOpenAiTool);
   const history = await readAssistantSessionMessages(sessionId);
-  const conversation = normalizeAssistantHistoryToChatMessages(history);
+  const conversation = [
+    {
+      role: 'system',
+      content: SCRIPTING_ASSISTANT_SYSTEM_PROMPT
+    },
+    ...normalizeAssistantHistoryToChatMessages(history)
+  ];
   const maxToolSteps = settings.maxToolSteps;
   for (let step = 0; maxToolSteps === null || step < maxToolSteps; step++) {
     assertAssistantRunActive(run, sessionId);
@@ -1001,7 +1039,8 @@ async function runAssistantLoop(sessionId, run) {
       content: textContent || '',
       tool_calls: toolCalls
     });
-    for (const toolCall of toolCalls) {
+    for (let toolIndex = 0; toolIndex < toolCalls.length; toolIndex++) {
+      const toolCall = toolCalls[toolIndex];
       assertAssistantRunActive(run, sessionId);
       const toolName = toolCall?.function?.name;
       if (!toolName) {
@@ -1021,6 +1060,33 @@ async function runAssistantLoop(sessionId, run) {
         tool_call_id: toolCall.id,
         content: toolContent
       });
+      if (toolName === 'script_write_source' && !toolResult?.isError) {
+        const path = getScriptWritePathFromToolResult(toolResult);
+        if (path) {
+          const diagnosticsResult = await callAssistantTool(
+            sessionId,
+            run,
+            'script_diagnostics',
+            JSON.stringify({ path }),
+            settings
+          );
+          const diagnosticsContent = JSON.stringify(
+            diagnosticsResult?.structuredContent ?? diagnosticsResult ?? null,
+            null,
+            2
+          );
+          conversation.push({
+            role: 'system',
+            content: `Automatic script_diagnostics result for ${path}:\n${diagnosticsContent}`
+          });
+          const hasLaterAttachTool = toolCalls
+            .slice(toolIndex + 1)
+            .some((call) => isScriptAttachToolName(call?.function?.name));
+          if (getScriptDiagnosticsErrorCount(diagnosticsResult) > 0 && hasLaterAttachTool) {
+            break;
+          }
+        }
+      }
     }
   }
   throw new Error(`Assistant exceeded the maximum tool step limit of ${maxToolSteps}`);

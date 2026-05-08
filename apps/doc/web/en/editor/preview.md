@@ -63,7 +63,7 @@ The **Project Settings** panel mainly includes the following options:
 
 - When **both Startup Script and Startup Scene are set**:
   1. When the app starts, it will **run the Startup Script first**;
-  2. The `onCreate` and `onAttached` lifecycle callbacks of the Startup Script will be **fully executed in order**;
+  2. The `onCreated` and `onAttached` lifecycle callbacks of the Startup Script will be **fully executed in order**;
   3. Only after these callbacks have completed will the engine load the specified **Startup Scene**;
   4. Once the Startup Scene has finished loading:
      - Any scripts bound to the Startup Scene (as **attached scripts** on scene nodes) will run with their normal lifecycles;
@@ -79,7 +79,7 @@ The **Project Settings** panel mainly includes the following options:
 > **Constraints:**
 >
 > - `Startup Scene` and `Startup Script` — **at least one of them must be configured**;
-> - If both are set, **Startup Script has higher priority**: its `onCreate` and `onAttached` callbacks run to completion before the Startup Scene is loaded;
+> - If both are set, **Startup Script has higher priority**: its `onCreated` and `onAttached` callbacks run to completion before the Startup Scene is loaded;
 > - Scripts attached to the Startup Scene can handle scene-level logic, or you can rely entirely on the Startup Script’s manual scene loading and control logic.
 
 ### 6. Target RHIs (Rendering Backends)

@@ -22,6 +22,10 @@ export class CodeEditor {
     this.baselineVersion = 0;
   }
 
+  get path() {
+    return this.fileName;
+  }
+
   get content(): Nullable<string> {
     if (this.editor) {
       return this.editor.getValue({
@@ -154,6 +158,26 @@ export class CodeEditor {
     if (this.editor) {
       this.editor.setValue(code);
     }
+  }
+
+  applyExternalContent(code: string, language?: string): void {
+    if (!this.editor) {
+      return;
+    }
+    const model = this.editor.getModel();
+    if (!model) {
+      return;
+    }
+    if (language) {
+      window.monaco.editor.setModelLanguage(model, language);
+    }
+    if (model.getValue() !== code) {
+      this.editor.setValue(code);
+    }
+    this.baselineVersion = model.getAlternativeVersionId();
+    this.dirty = false;
+    this.updateTitle();
+    this.updateStatusBar();
   }
   private addEditorStyles() {
     if (document.querySelector('#monaco-editor-styles')) {

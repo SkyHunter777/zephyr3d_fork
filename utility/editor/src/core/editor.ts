@@ -1192,6 +1192,184 @@ export class Editor {
     return this.isSystemPluginPath(path) ? SystemPluginService.VFS : ProjectService.VFS;
   }
 
+  private detectCodeLanguage(path: string) {
+    return path.endsWith('.ts')
+      ? 'typescript'
+      : path.endsWith('.js')
+        ? 'javascript'
+        : path.endsWith('.json')
+          ? 'json'
+          : path.endsWith('.html')
+            ? 'html'
+            : 'plaintext';
+  }
+
+  private flattenDiagnosticMessageText(messageText: any): string {
+    if (typeof messageText === 'string') {
+      return messageText;
+    }
+    if (!messageText || typeof messageText !== 'object') {
+      return String(messageText ?? '');
+    }
+    const lines = [String(messageText.messageText ?? '')];
+    if (Array.isArray(messageText.next)) {
+      for (const child of messageText.next) {
+        const text = this.flattenDiagnosticMessageText(child);
+        if (text) {
+          lines.push(text);
+        }
+      }
+    }
+    return lines.filter(Boolean).join('\n');
+  }
+
+  async syncCodeModelToFile(path: string, content: string, language?: string) {
+    const monaco = await this.waitForMonaco();
+    if (!monaco) {
+      return;
+    }
+    const nextLanguage = language ?? this.detectCodeLanguage(path);
+    if (this._codeEditor?.path === path) {
+      this._codeEditor.applyExternalContent(content, nextLanguage);
+      return;
+    }
+    const uri = monaco.Uri.parse(`file://${path}`);
+    const model = monaco.editor.getModel(uri);
+    if (!model) {
+      return;
+    }
+    if (model.getLanguageId() !== nextLanguage) {
+      monaco.editor.setModelLanguage(model, nextLanguage);
+    }
+    if (model.getValue() !== content) {
+      model.setValue(content);
+    }
+  }
+
+  async runScriptDiagnostics(path: string) {
+    const monaco = await this.waitForMonaco();
+    if (!monaco) {
+      return {
+        language: null,
+        diagnostics: null,
+        summary: null,
+        err: 'Monaco TypeScript runtime is not ready yet'
+      };
+    }
+    const vfs = this.getVFSForPath(path);
+    if (!(await vfs.exists(path))) {
+      return {
+        language: null,
+        diagnostics: null,
+        summary: null,
+        err: `Script file not found: ${path}`
+      };
+    }
+    const language = this.detectCodeLanguage(path);
+    if (language !== 'typescript' && language !== 'javascript') {
+      return {
+        language,
+        diagnostics: [],
+        summary: {
+          errorCount: 0,
+          warningCount: 0,
+          infoCount: 0,
+          hintCount: 0
+        },
+        err: null
+      };
+    }
+    await this.loadScriptDependencies(path);
+    if (this.isSystemPluginPath(path)) {
+      await this.loadSystemPluginDepTypes(path);
+    }
+    const content = (await vfs.readFile(path, { encoding: 'utf8' })) as string;
+    await this.syncCodeModelToFile(path, content, language);
+    const uri = monaco.Uri.parse(`file://${path}`);
+    let model = monaco.editor.getModel(uri);
+    let createdModel = false;
+    if (!model) {
+      model = monaco.editor.createModel(content, language, uri);
+      createdModel = true;
+    }
+    try {
+      const getWorkerFactory =
+        language === 'javascript'
+          ? monaco.languages.typescript.getJavaScriptWorker?.()
+          : monaco.languages.typescript.getTypeScriptWorker?.();
+      if (!getWorkerFactory) {
+        return {
+          language,
+          diagnostics: null,
+          summary: null,
+          err: 'TypeScript worker factory is not available'
+        };
+      }
+      const getWorker = await getWorkerFactory;
+      const worker = await getWorker(uri);
+      const fileName = uri.toString();
+      const allDiagnostics = (
+        await Promise.all([
+          worker.getSyntacticDiagnostics(fileName),
+          worker.getSemanticDiagnostics(fileName)
+        ])
+      ).flat();
+      const diagnostics = allDiagnostics
+        .map((item: any) => {
+          const start = typeof item.start === 'number' ? item.start : 0;
+          const end = start + (typeof item.length === 'number' ? item.length : 0);
+          const startPos = model.getPositionAt(start);
+          const endPos = model.getPositionAt(end);
+          const category = Number(item.category);
+          const severity =
+            category === 1
+              ? 'error'
+              : category === 0
+                ? 'warning'
+                : category === 2
+                  ? 'suggestion'
+                  : 'message';
+          return {
+            code: Number(item.code ?? 0),
+            severity,
+            message: this.flattenDiagnosticMessageText(item.messageText),
+            startLineNumber: startPos.lineNumber,
+            startColumn: startPos.column,
+            endLineNumber: endPos.lineNumber,
+            endColumn: endPos.column
+          };
+        })
+        .sort((a, b) =>
+          a.startLineNumber === b.startLineNumber
+            ? a.startColumn - b.startColumn
+            : a.startLineNumber - b.startLineNumber
+        );
+      const summary = {
+        errorCount: diagnostics.filter((item) => item.severity === 'error').length,
+        warningCount: diagnostics.filter((item) => item.severity === 'warning').length,
+        infoCount: diagnostics.filter((item) => item.severity === 'message').length,
+        hintCount: diagnostics.filter((item) => item.severity === 'suggestion').length
+      };
+      return {
+        language,
+        diagnostics,
+        summary,
+        err: null
+      };
+    } catch (err) {
+      return {
+        language,
+        diagnostics: null,
+        summary: null,
+        err: `${err}`
+      };
+    } finally {
+      if (createdModel) {
+        model.dispose();
+      }
+    }
+  }
+
   private async handleSaveCode(fileName: string, content: string) {
     try {
       if (this.isSystemPluginPath(fileName)) {

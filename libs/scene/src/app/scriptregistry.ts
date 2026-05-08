@@ -101,6 +101,29 @@ export class ScriptRegistry {
   }
 
   /**
+   * Invalidates cached built module output for one logical module id, or clears the full cache.
+   *
+   * Pass the same logical id shape that callers use with {@link ScriptRegistry.resolveRuntimeUrl},
+   * for example `/assets/scripts/foo.ts`, `/assets/scripts/foo.js`, or `/assets/scripts/foo`.
+   *
+   * @param moduleId - Optional logical module id to invalidate. Omit to clear the entire build cache.
+   */
+  invalidate(moduleId?: string) {
+    if (!moduleId) {
+      this._built.clear();
+      return;
+    }
+    const normalized = String(moduleId);
+    this._built.delete(normalized);
+    if (normalized.endsWith('.ts') || normalized.endsWith('.js')) {
+      this._built.delete(normalized.slice(0, -3));
+    } else {
+      this._built.delete(`${normalized}.ts`);
+      this._built.delete(`${normalized}.js`);
+    }
+  }
+
+  /**
    * Fetches raw source for a logical module id by probing known extensions.
    *
    * Search order:

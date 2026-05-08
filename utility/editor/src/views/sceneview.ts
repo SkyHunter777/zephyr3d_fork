@@ -788,6 +788,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
 
   public handleRefreshProperties() {
     this._propGrid.refresh();
+    this._scriptPanel.notifyScriptStructureChanged();
   }
 
   public createEditorCommands(): EditorCommands {

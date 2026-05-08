@@ -371,6 +371,17 @@ const COORDINATE_SYSTEM_SCHEMA_VALUES = ['editor', 'y_up', 'z_up'];
 const COORDINATE_REMAP_SCHEMA_VALUES = ['none', 'z_up_to_y_up', 'y_up_to_z_up'];
 const SURFACE_TYPE_SCHEMA_VALUES = ['bezier_patch'];
 const CURVE_TYPE_SCHEMA_VALUES = ['polyline', 'bezier', 'catmull_rom', 'nurbs'];
+const SCRIPT_TARGET_VALUES = ['selected', 'scene', 'node'];
+const SCRIPT_ATTACH_MODE_VALUES = ['replace_same_path', 'append', 'replace_all'];
+const SCRIPT_CONFIG_SCHEMA = {
+  oneOf: [
+    { type: 'object', additionalProperties: true },
+    { type: 'array', items: {} },
+    { type: 'null' }
+  ],
+  description:
+    'Optional JSON-serializable script config. Use an object for named scriptProp values or an array when the script expects one.'
+};
 
 function numberTupleSchema(length, description) {
   return {
@@ -1264,6 +1275,92 @@ const BASE_TOOLS = [
       }
     }
   },
+  {
+    name: 'script_get_context',
+    description:
+      'Get the current scripting target context, including current project, current scene, selected nodes, resolved host (scene or node), current script attachments, and Zephyr3D scripting conventions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          enum: SCRIPT_TARGET_VALUES,
+          description:
+            'Target host resolution mode. selected resolves the current selection, treating the scene root selection as the scene host.'
+        },
+        node_id: {
+          type: 'string',
+          description: 'Required only when target is node. Persistent id of the scene node.'
+        },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
+    name: 'script_list_attachments',
+    description:
+      'List script attachments for a scene or scene node host. Use target=selected to inspect the current editor selection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          enum: SCRIPT_TARGET_VALUES,
+          description:
+            'Target host resolution mode. selected resolves the current selection, treating the scene root selection as the scene host.'
+        },
+        node_id: {
+          type: 'string',
+          description: 'Required only when target is node. Persistent id of the scene node.'
+        },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
+    name: 'script_read_source',
+    description:
+      'Read a TypeScript or JavaScript script asset under /assets and return its text source.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: {
+        path: { type: 'string', description: 'Script asset VFS path under /assets, ending in .ts or .js.' },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
+    name: 'script_write_source',
+    description:
+      'Create or overwrite a TypeScript or JavaScript script asset under /assets. Parent directories are created automatically when needed.',
+    inputSchema: {
+      type: 'object',
+      required: ['path', 'content'],
+      properties: {
+        path: { type: 'string', description: 'Writable script asset VFS path under /assets, ending in .ts or .js.' },
+        content: { type: 'string', description: 'Full UTF-8 script source code.' },
+        overwrite: {
+          type: 'boolean',
+          description: 'When false, fail if the destination script already exists. Defaults to true.'
+        },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
+    name: 'script_diagnostics',
+    description:
+      'Run TypeScript or JavaScript diagnostics for a script asset under /assets and return structured errors and warnings with line and column information.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: {
+        path: { type: 'string', description: 'Script asset VFS path under /assets, ending in .ts or .js.' },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
   /*
   {
     name: 'asset_read_file',
@@ -1302,6 +1399,81 @@ const BASE_TOOLS = [
     }
   },
   */
+  {
+    name: 'node_attach_script',
+    description:
+      'Attach a script asset to a specific scene node by persistent node id. The default mode replace_same_path updates an existing attachment for the same script path instead of creating duplicates.',
+    inputSchema: {
+      type: 'object',
+      required: ['node_id', 'script_path'],
+      properties: {
+        node_id: { type: 'string', description: 'Persistent id of the scene node host.' },
+        script_path: { type: 'string', description: 'Writable script asset VFS path under /assets.' },
+        config: SCRIPT_CONFIG_SCHEMA,
+        mode: {
+          type: 'string',
+          enum: SCRIPT_ATTACH_MODE_VALUES,
+          description:
+            'replace_same_path updates a matching attachment, append always adds a new one, and replace_all replaces all current attachments on the host.'
+        },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
+    name: 'scene_attach_script',
+    description:
+      'Attach a script asset to the current scene host. The default mode replace_same_path updates an existing attachment for the same script path instead of creating duplicates.',
+    inputSchema: {
+      type: 'object',
+      required: ['script_path'],
+      properties: {
+        script_path: { type: 'string', description: 'Writable script asset VFS path under /assets.' },
+        config: SCRIPT_CONFIG_SCHEMA,
+        mode: {
+          type: 'string',
+          enum: SCRIPT_ATTACH_MODE_VALUES,
+          description:
+            'replace_same_path updates a matching attachment, append always adds a new one, and replace_all replaces all current attachments on the host.'
+        },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
+    name: 'script_detach',
+    description:
+      'Detach one or more script attachments from a scene or scene node host. Provide index, script_path, or all=true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          enum: SCRIPT_TARGET_VALUES,
+          description:
+            'Target host resolution mode. selected resolves the current selection, treating the scene root selection as the scene host.'
+        },
+        node_id: {
+          type: 'string',
+          description: 'Required only when target is node. Persistent id of the scene node.'
+        },
+        index: {
+          type: 'integer',
+          minimum: 0,
+          description: 'Optional zero-based attachment index to remove.'
+        },
+        script_path: {
+          type: 'string',
+          description: 'Optional script asset path to remove. Combine with all=true to remove all matching attachments.'
+        },
+        all: {
+          type: 'boolean',
+          description: 'When true, remove all attachments on the host, or all matching script_path attachments when script_path is also provided.'
+        },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
   {
     name: 'asset_create_material',
     description:
@@ -2051,6 +2223,19 @@ function normalizeGeneratedModelSpec(value, key = '') {
   return value;
 }
 
+function readFirstStringArg(args, keys) {
+  if (!args || typeof args !== 'object') {
+    return '';
+  }
+  for (const key of keys) {
+    const value = args[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
 function buildToolCatalog() {
   const publicTools = [];
   for (const tool of BASE_TOOLS) {
@@ -2185,6 +2370,73 @@ const handlers = {
     }
     return bridge.send('asset_read_directory', params, Number(args.timeout_ms ?? 10000));
   },
+  async script_get_context(args) {
+    const params = {
+      target: typeof args.target === 'string' && args.target.trim() ? args.target.trim() : 'selected'
+    };
+    if (typeof args.node_id === 'string' && args.node_id.trim()) {
+      params.node_id = args.node_id.trim();
+    }
+    return bridge.send('getScriptContext', params, Number(args.timeout_ms ?? 10000));
+  },
+  async script_list_attachments(args) {
+    const params = {
+      target: typeof args.target === 'string' && args.target.trim() ? args.target.trim() : 'selected'
+    };
+    if (typeof args.node_id === 'string' && args.node_id.trim()) {
+      params.node_id = args.node_id.trim();
+    }
+    return bridge.send('listScriptAttachments', params, Number(args.timeout_ms ?? 10000));
+  },
+  async script_read_source(args) {
+    const path = readFirstStringArg(args, ['path', 'script_path', 'scriptPath', 'file_path', 'filePath']);
+    if (!path) {
+      return { path: null, language: null, content: null, err: 'script_read_source requires path' };
+    }
+    return bridge.send('readScriptSource', { path }, Number(args.timeout_ms ?? 10000));
+  },
+  async script_write_source(args) {
+    const path = readFirstStringArg(args, ['path', 'script_path', 'scriptPath', 'file_path', 'filePath']);
+    if (!path) {
+      return {
+        path: null,
+        language: null,
+        created: null,
+        bytes: null,
+        err: 'script_write_source requires path'
+      };
+    }
+    if (typeof args.content !== 'string') {
+      return {
+        path,
+        language: null,
+        created: null,
+        bytes: null,
+        err: 'script_write_source requires content as a string'
+      };
+    }
+    const params = {
+      path,
+      content: args.content
+    };
+    if (Object.prototype.hasOwnProperty.call(args, 'overwrite')) {
+      params.overwrite = !!args.overwrite;
+    }
+    return bridge.send('writeScriptSource', params, Number(args.timeout_ms ?? 10000));
+  },
+  async script_diagnostics(args) {
+    const path = readFirstStringArg(args, ['path', 'script_path', 'scriptPath', 'file_path', 'filePath']);
+    if (!path) {
+      return {
+        path: null,
+        language: null,
+        diagnostics: null,
+        summary: null,
+        err: 'script_diagnostics requires path'
+      };
+    }
+    return bridge.send('diagnoseScriptSource', { path }, Number(args.timeout_ms ?? 10000));
+  },
   async asset_read_file(args) {
     const path = typeof args.path === 'string' ? args.path.trim() : '';
     if (!path) {
@@ -2247,6 +2499,64 @@ const handlers = {
       { src_path: srcPath, dst_path: dstPath },
       Number(args.timeout_ms ?? 10000)
     );
+  },
+  async node_attach_script(args) {
+    const nodeId = typeof args.node_id === 'string' ? args.node_id.trim() : '';
+    if (!nodeId) {
+      return { host: null, attachments: null, err: 'node_attach_script requires node_id' };
+    }
+    const scriptPath = readFirstStringArg(args, ['script_path', 'scriptPath', 'path', 'file_path', 'filePath']);
+    if (!scriptPath) {
+      return { host: null, attachments: null, err: 'node_attach_script requires script_path' };
+    }
+    const params = {
+      node_id: nodeId,
+      script_path: scriptPath
+    };
+    if (Object.prototype.hasOwnProperty.call(args, 'config')) {
+      params.config = args.config;
+    }
+    if (typeof args.mode === 'string' && args.mode.trim()) {
+      params.mode = args.mode.trim();
+    }
+    return bridge.send('attachScriptToNode', params, Number(args.timeout_ms ?? 10000));
+  },
+  async scene_attach_script(args) {
+    const scriptPath = readFirstStringArg(args, ['script_path', 'scriptPath', 'path', 'file_path', 'filePath']);
+    if (!scriptPath) {
+      return { host: null, attachments: null, err: 'scene_attach_script requires script_path' };
+    }
+    const params = {
+      script_path: scriptPath
+    };
+    if (Object.prototype.hasOwnProperty.call(args, 'config')) {
+      params.config = args.config;
+    }
+    if (typeof args.mode === 'string' && args.mode.trim()) {
+      params.mode = args.mode.trim();
+    }
+    return bridge.send('attachScriptToScene', params, Number(args.timeout_ms ?? 10000));
+  },
+  async script_detach(args) {
+    const params = {
+      target: typeof args.target === 'string' && args.target.trim() ? args.target.trim() : 'selected'
+    };
+    if (typeof args.node_id === 'string' && args.node_id.trim()) {
+      params.node_id = args.node_id.trim();
+    }
+    if (Number.isInteger(args.index)) {
+      params.index = args.index;
+    } else if (Object.prototype.hasOwnProperty.call(args, 'index')) {
+      return { host: null, attachments: null, removed_count: 0, err: 'script_detach index must be an integer' };
+    }
+    const scriptPath = readFirstStringArg(args, ['script_path', 'scriptPath', 'path', 'file_path', 'filePath']);
+    if (scriptPath) {
+      params.script_path = scriptPath;
+    }
+    if (Object.prototype.hasOwnProperty.call(args, 'all')) {
+      params.all = !!args.all;
+    }
+    return bridge.send('detachScriptAttachment', params, Number(args.timeout_ms ?? 10000));
   },
   async material_get_classes(args) {
     return bridge.send('getMaterialClasses', {}, Number(args.timeout_ms ?? 10000));
