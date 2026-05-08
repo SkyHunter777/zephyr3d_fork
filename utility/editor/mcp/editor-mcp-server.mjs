@@ -1331,6 +1331,22 @@ const BASE_TOOLS = [
     }
   },
   {
+    name: 'mesh_load_from_asset',
+    description:
+      'Instantiate a mesh prefab asset into the current scene. Accepts a .zprefab asset path and returns { node_id, err }.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Prefab asset VFS path under /assets, such as /assets/prefabs/foo.zprefab.'
+        },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
     name: 'mesh_create',
     description:
       'Create a mesh node in the current scene from an existing primitive and material asset. Returns { mesh_id, err }.',
@@ -2159,6 +2175,13 @@ const handlers = {
       params.dest_path = args.dest_path.trim();
     }
     return bridge.send('primitive_export_glb', params, Number(args.timeout_ms ?? 30000));
+  },
+  async mesh_load_from_asset(args) {
+    const path = typeof args.path === 'string' ? args.path.trim() : '';
+    if (!path) {
+      return { node_id: null, err: 'mesh_load_from_asset requires the path' };
+    }
+    return bridge.send('mesh_load_from_asset', { path }, Number(args.timeout_ms ?? 10000));
   },
   async mesh_create(args) {
     const primitivePath = typeof args.primitive_path === 'string' ? args.primitive_path.trim() : '';

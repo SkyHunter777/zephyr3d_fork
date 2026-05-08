@@ -116,9 +116,7 @@ export class ElectronFS extends VFS {
 
   private globToRegExp(pattern: string): RegExp {
     const source = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\0');
-    return new RegExp(
-      `^${source.replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\0/g, '.*')}$`
-    );
+    return new RegExp(`^${source.replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\0/g, '.*')}$`);
   }
 }
 

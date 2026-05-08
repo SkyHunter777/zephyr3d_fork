@@ -5,7 +5,15 @@ import type { Primitive } from '@zephyr3d/scene';
 import { Mesh, Scene } from '@zephyr3d/scene';
 import { getDevice, getEngine, OrthoCamera, PerspectiveCamera } from '@zephyr3d/scene';
 import { BlobReader, BlobWriter, configure, ZipWriter } from '@zip.js/zip.js';
-import { base64ToUint8Array, DRef, PathUtils, Quaternion, uint8ArrayToBase64, Vector3 } from '@zephyr3d/base';
+import {
+  base64ToUint8Array,
+  DRef,
+  guessMimeType,
+  PathUtils,
+  Quaternion,
+  uint8ArrayToBase64,
+  Vector3
+} from '@zephyr3d/base';
 import { ProjectService } from '../core/services/project';
 import { isDesktopApp } from '../core/services/desktop';
 import { fileListFileName, libDir } from '../core/build/templates';
@@ -1223,6 +1231,59 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
         };
       }
       return cancelGeneratedModelJob(jobId);
+    }
+    case 'mesh_load_from_asset': {
+      try {
+        const info = await ProjectService.getCurrentProjectInfo();
+        if (!info) {
+          return {
+            node_id: null,
+            err: 'No project is currently opened; create or open a project first'
+          };
+        }
+        const scene = getScene(editor);
+        if (!scene) {
+          return {
+            node_id: null,
+            err: 'No scene is currently opened; create or open a scene before loading a mesh'
+          };
+        }
+        if (typeof params.path !== 'string' || !params.path) {
+          return {
+            node_id: null,
+            err: 'mesh_load_from_asset requires `path`, the asset file VFS path under /assets'
+          };
+        }
+        const stat = await ProjectService.VFS.stat(params.path);
+        if (!stat) {
+          return {
+            node_id: null,
+            err: `Asset file not found: ${params.path}`
+          };
+        }
+        if (!stat.isFile) {
+          return {
+            node_id: null,
+            err: `Asset path is not a file: ${params.path}`
+          };
+        }
+        if (guessMimeType(params.path) !== 'application/vnd.zephyr3d.prefab+json') {
+          return {
+            node_id: null,
+            err: `Unsupported asset type for mesh_load_from_asset, expected a .zprefab prefab JSON file: ${params.path}`
+          };
+        }
+        const node = await getEngine().resourceManager.instantiatePrefab(scene.rootNode, params.path);
+        return {
+          node_id: node.persistentId,
+          err: null
+        };
+      } catch (err) {
+        return {
+          node_id: null,
+          err: `${err}`
+        };
+      }
     }
     case 'mesh_create': {
       const primitiveRef = new DRef<Primitive>();
