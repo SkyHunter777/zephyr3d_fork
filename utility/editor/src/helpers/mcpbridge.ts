@@ -574,29 +574,23 @@ async function exportCurrentProjectToMemory(editor: Editor): Promise<{
   };
 }
 
-function getSceneStats(scene: any): JsonValue {
+function getSceneStats(scene: Scene): JsonValue {
   if (!scene) {
     return null;
   }
   let nodeCount = 0;
   let drawableCount = 0;
   let lightCount = 0;
-  try {
-    scene.rootNode?.traverse?.({
-      visit(target: any) {
-        nodeCount++;
-        if (target?.isDrawable?.()) {
-          drawableCount++;
-        }
-        if (target?.isPunctualLight?.()) {
-          lightCount++;
-        }
-        return true;
-      }
-    });
-  } catch {
-    // Traversal is best-effort; tests can still use eval for detailed checks.
-  }
+  scene.rootNode?.iterate((target) => {
+    nodeCount++;
+    if (target.isMesh()) {
+      drawableCount++;
+    }
+    if (target.isLight()) {
+      lightCount++;
+    }
+    return true;
+  });
   return {
     nodeCount,
     drawableCount,
