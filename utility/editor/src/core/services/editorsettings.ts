@@ -4,7 +4,8 @@ export type EditorGlobalSettings = DesktopGlobalSettings;
 
 const defaultGlobalSettings: EditorGlobalSettings = {
   mcp: null,
-  defaultRHI: 'webgpu'
+  defaultRHI: 'webgpu',
+  llm: null
 };
 
 export class EditorSettingsService {
@@ -26,5 +27,15 @@ export class EditorSettingsService {
   static async toggleDevTools(): Promise<boolean> {
     const desktop = getDesktopAPI();
     return desktop?.settings ? await desktop.settings.toggleDevTools() : false;
+  }
+
+  static async setLlmApiKey(provider: NonNullable<EditorGlobalSettings['llm']>['provider'], apiKey: string) {
+    const desktop = getDesktopAPI();
+    return desktop?.settings ? await desktop.settings.setLlmApiKey(provider, apiKey) : false;
+  }
+
+  static async clearLlmApiKey(provider: NonNullable<EditorGlobalSettings['llm']>['provider']) {
+    const desktop = getDesktopAPI();
+    return desktop?.settings ? await desktop.settings.clearLlmApiKey(provider) : false;
   }
 }

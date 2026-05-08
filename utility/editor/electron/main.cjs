@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, net, protocol, shell } = require('electron');
+const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, net, protocol, safeStorage, shell } = require('electron');
 const http = require('http');
 const fs = require('fs/promises');
 const path = require('path');
@@ -8,14 +8,67 @@ const { Worker } = require('worker_threads');
 const FS_CHANNEL = 'zephyr-editor:fs';
 const LOG_CHANNEL = 'zephyr-editor:log';
 const SETTINGS_CHANNEL = 'zephyr-editor:settings';
+const ASSISTANT_EVENT_CHANNEL = 'zephyr-editor:assistant-event';
 const EDITOR_PROTOCOL = 'zephyr-editor';
 const MCP_HTTP_PATH = '/mcp';
 const DEFAULT_MCP_SERVICE_PORT = Number(process.env.ZEPHYR_EDITOR_MCP_SERVER_PORT || 47231);
 const MAX_MCP_HTTP_BODY_BYTES = 16 * 1024 * 1024;
 const MCP_CONFIG_FILE = 'mcp-config.json';
 const EDITOR_GLOBAL_CONFIG_FILE = 'editor-config.json';
+const LLM_SECRETS_FILE = 'llm-secrets.json';
 const DEFAULT_EDITOR_RHI = 'webgpu';
 const SUPPORTED_EDITOR_RHIS = new Set(['webgpu', 'webgl2', 'webgl']);
+const ASSISTANT_STORAGE_DIR = 'assistant';
+const ASSISTANT_SESSIONS_FILE = 'sessions.json';
+const DEFAULT_LLM_BASE_URL = 'https://api.openai.com/v1';
+const DEFAULT_LLM_MODEL = 'gpt-4.1-mini';
+const DEFAULT_OPENAI_COMPAT_CHAT_PATH = '/chat/completions';
+const DEFAULT_MAX_ASSISTANT_TOOL_STEPS = Math.max(
+  1,
+  Number.parseInt(
+    process.env.ZEPHYR_EDITOR_MAX_ASSISTANT_TOOL_STEPS || '32',
+    10
+  ) || 32
+);
+const MAX_ASSISTANT_IMAGE_BYTES = 10 * 1024 * 1024;
+const ASSISTANT_READONLY_TOOLS = new Set([
+  'editor_connect_info',
+  'editor_wait_ready',
+  'editor_status',
+  'project_list',
+  'project_get_current',
+  'asset_get_root',
+  'asset_get_builtin_primitives',
+  'asset_get_builtin_materials',
+  'asset_read_directory',
+  'asset_read_file',
+  'material_get_classes',
+  'material_get_property_list',
+  'material_get_properties',
+  'mesh_get_material',
+  'mesh_get_primitive',
+  'node_get_classes',
+  'scene_get_property_list',
+  'node_get_property_list',
+  'node_get_class',
+  'node_get_local_transform',
+  'scene_get_root_node',
+  'node_get_parent',
+  'node_get_children',
+  'scene_get_selected_nodes',
+  'camera_get_active',
+  'model_generate_status',
+  'editor_screenshot',
+  'editor_console_logs'
+]);
+const IMAGE_FILE_MIME_TYPES = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp'
+};
 
 let mcpWorker = null;
 let mcpBridgeInfo = null;
@@ -31,8 +84,24 @@ let mcpServiceConfig = {
   port: DEFAULT_MCP_SERVICE_PORT
 };
 let editorGlobalConfig = {
-  defaultRHI: DEFAULT_EDITOR_RHI
+  defaultRHI: DEFAULT_EDITOR_RHI,
+  llm: {
+    provider: 'openai',
+    baseUrl: DEFAULT_LLM_BASE_URL,
+    model: DEFAULT_LLM_MODEL,
+    temperature: 0.2,
+    maxOutputTokens: 4096,
+    maxToolSteps: DEFAULT_MAX_ASSISTANT_TOOL_STEPS,
+    toolCalling: true,
+    requireToolApproval: true
+  }
 };
+let llmSecrets = {
+  providers: {}
+};
+let assistantSessions = [];
+const assistantRuns = new Map();
+const assistantPendingToolApprovals = new Map();
 
 function editorWebPreferences() {
   return {
@@ -128,6 +197,71 @@ function sanitizeEditorRHI(value) {
   return SUPPORTED_EDITOR_RHIS.has(normalized) ? normalized : DEFAULT_EDITOR_RHI;
 }
 
+function sanitizeLlmProvider(value) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return normalized === 'anthropic' || normalized === 'custom' ? normalized : 'openai';
+}
+
+function sanitizeLlmBaseUrl(value, provider = 'openai') {
+  const fallback = provider === 'openai' ? DEFAULT_LLM_BASE_URL : '';
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized) {
+    return fallback;
+  }
+  try {
+    const url = new URL(normalized);
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return fallback;
+  }
+}
+
+function sanitizeLlmModel(value) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized || DEFAULT_LLM_MODEL;
+}
+
+function sanitizeLlmTemperature(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return 0.2;
+  }
+  return Math.max(0, Math.min(2, num));
+}
+
+function sanitizeLlmMaxOutputTokens(value) {
+  const num = Number(value);
+  if (!Number.isInteger(num)) {
+    return 4096;
+  }
+  return Math.max(128, Math.min(65536, num));
+}
+
+function sanitizeLlmMaxToolSteps(value) {
+  if (value === null) {
+    return null;
+  }
+  const num = Number(value);
+  if (!Number.isInteger(num)) {
+    return DEFAULT_MAX_ASSISTANT_TOOL_STEPS;
+  }
+  return Math.max(1, Math.min(1000000, num));
+}
+
+function sanitizeLlmSettings(value) {
+  const provider = sanitizeLlmProvider(value?.provider);
+  return {
+    provider,
+    baseUrl: sanitizeLlmBaseUrl(value?.baseUrl, provider),
+    model: sanitizeLlmModel(value?.model),
+    temperature: sanitizeLlmTemperature(value?.temperature),
+    maxOutputTokens: sanitizeLlmMaxOutputTokens(value?.maxOutputTokens),
+    maxToolSteps: sanitizeLlmMaxToolSteps(value?.maxToolSteps),
+    toolCalling: value?.toolCalling !== false,
+    requireToolApproval: value?.requireToolApproval !== false
+  };
+}
+
 function editorGlobalConfigPath() {
   return path.join(app.getPath('userData'), EDITOR_GLOBAL_CONFIG_FILE);
 }
@@ -139,7 +273,8 @@ async function loadEditorGlobalConfig() {
     .then((text) => JSON.parse(text))
     .catch(() => null);
   editorGlobalConfig = {
-    defaultRHI: sanitizeEditorRHI(loaded?.defaultRHI)
+    defaultRHI: sanitizeEditorRHI(loaded?.defaultRHI),
+    llm: sanitizeLlmSettings(loaded?.llm)
   };
 }
 
@@ -147,6 +282,837 @@ async function saveEditorGlobalConfig() {
   const filePath = editorGlobalConfigPath();
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, `${JSON.stringify(editorGlobalConfig, null, 2)}\n`, 'utf8');
+}
+
+function llmSecretsPath() {
+  return path.join(app.getPath('userData'), LLM_SECRETS_FILE);
+}
+
+function assistantStorageDirPath() {
+  return path.join(app.getPath('userData'), ASSISTANT_STORAGE_DIR);
+}
+
+function assistantSessionsPath() {
+  return path.join(assistantStorageDirPath(), ASSISTANT_SESSIONS_FILE);
+}
+
+function assistantSessionMessagesPath(sessionId) {
+  return path.join(assistantStorageDirPath(), `${sessionId}.messages.json`);
+}
+
+function encryptSecret(text) {
+  if (!text) {
+    return '';
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    return Buffer.from(text, 'utf8').toString('base64');
+  }
+  return safeStorage.encryptString(text).toString('base64');
+}
+
+function decryptSecret(payload) {
+  if (!payload) {
+    return '';
+  }
+  const buffer = Buffer.from(String(payload), 'base64');
+  if (!safeStorage.isEncryptionAvailable()) {
+    return buffer.toString('utf8');
+  }
+  try {
+    return safeStorage.decryptString(buffer);
+  } catch {
+    return '';
+  }
+}
+
+async function loadLlmSecrets() {
+  const filePath = llmSecretsPath();
+  const loaded = await fs
+    .readFile(filePath, 'utf8')
+    .then((text) => JSON.parse(text))
+    .catch(() => null);
+  llmSecrets = {
+    providers: loaded?.providers && typeof loaded.providers === 'object' ? loaded.providers : {}
+  };
+}
+
+async function saveLlmSecrets() {
+  const filePath = llmSecretsPath();
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, `${JSON.stringify(llmSecrets, null, 2)}\n`, 'utf8');
+}
+
+function hasLlmApiKeyConfigured(provider) {
+  const record = llmSecrets.providers?.[sanitizeLlmProvider(provider)];
+  return !!(record && typeof record.apiKey === 'string' && decryptSecret(record.apiKey));
+}
+
+async function setLlmApiKey(provider, apiKey) {
+  const normalizedProvider = sanitizeLlmProvider(provider);
+  const normalizedKey = typeof apiKey === 'string' ? apiKey.trim() : '';
+  if (!normalizedKey) {
+    throw new Error('API key must not be empty');
+  }
+  llmSecrets.providers[normalizedProvider] = {
+    apiKey: encryptSecret(normalizedKey),
+    updatedAt: new Date().toISOString()
+  };
+  await saveLlmSecrets();
+  return true;
+}
+
+async function clearLlmApiKey(provider) {
+  const normalizedProvider = sanitizeLlmProvider(provider);
+  delete llmSecrets.providers[normalizedProvider];
+  await saveLlmSecrets();
+  return true;
+}
+
+function getLlmApiKey(provider) {
+  const normalizedProvider = sanitizeLlmProvider(provider);
+  const record = llmSecrets.providers?.[normalizedProvider];
+  return record?.apiKey ? decryptSecret(record.apiKey) : '';
+}
+
+async function ensureAssistantStorageDir() {
+  await fs.mkdir(assistantStorageDirPath(), { recursive: true });
+}
+
+function sanitizeAssistantSessionSummary(value) {
+  return {
+    id: typeof value?.id === 'string' ? value.id : `as_${Date.now().toString(36)}`,
+    title:
+      typeof value?.title === 'string' && value.title.trim()
+        ? value.title.trim()
+        : 'New Session',
+    createdAt: typeof value?.createdAt === 'string' ? value.createdAt : new Date().toISOString(),
+    updatedAt: typeof value?.updatedAt === 'string' ? value.updatedAt : new Date().toISOString(),
+    messageCount: Number.isInteger(value?.messageCount) ? value.messageCount : 0,
+    active: !!value?.active
+  };
+}
+
+function guessImageMimeType(filePath) {
+  const ext = path.extname(typeof filePath === 'string' ? filePath : '').toLowerCase();
+  return IMAGE_FILE_MIME_TYPES[ext] || 'application/octet-stream';
+}
+
+function sanitizeAssistantAttachment(value) {
+  const mimeType = typeof value?.mimeType === 'string' ? value.mimeType.trim() : '';
+  const dataUrl = typeof value?.dataUrl === 'string' ? value.dataUrl.trim() : '';
+  if (!mimeType.startsWith('image/')) {
+    return null;
+  }
+  if (!dataUrl.startsWith(`data:${mimeType};base64,`)) {
+    return null;
+  }
+  return {
+    id:
+      typeof value?.id === 'string' && value.id.trim()
+        ? value.id.trim()
+        : `att_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    name:
+      typeof value?.name === 'string' && value.name.trim()
+        ? value.name.trim()
+        : `image_${Date.now().toString(36)}`,
+    mimeType,
+    dataUrl
+  };
+}
+
+function sanitizeAssistantMessage(value) {
+  const role = ['system', 'user', 'assistant', 'tool'].includes(value?.role) ? value.role : 'assistant';
+  const status = ['pending', 'complete', 'error'].includes(value?.status) ? value.status : 'complete';
+  const attachments = Array.isArray(value?.attachments)
+    ? value.attachments.map(sanitizeAssistantAttachment).filter(Boolean)
+    : [];
+  return {
+    id: typeof value?.id === 'string' ? value.id : `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    role,
+    content: typeof value?.content === 'string' ? value.content : String(value?.content ?? ''),
+    attachments,
+    createdAt: typeof value?.createdAt === 'string' ? value.createdAt : new Date().toISOString(),
+    status
+  };
+}
+
+async function loadAssistantSessions() {
+  await ensureAssistantStorageDir();
+  const loaded = await fs
+    .readFile(assistantSessionsPath(), 'utf8')
+    .then((text) => JSON.parse(text))
+    .catch(() => []);
+  assistantSessions = Array.isArray(loaded) ? loaded.map(sanitizeAssistantSessionSummary) : [];
+}
+
+async function saveAssistantSessions() {
+  await ensureAssistantStorageDir();
+  await fs.writeFile(assistantSessionsPath(), `${JSON.stringify(assistantSessions, null, 2)}\n`, 'utf8');
+}
+
+async function readAssistantSessionMessages(sessionId) {
+  const normalizedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+  if (!normalizedSessionId) {
+    throw new Error('sessionId is required');
+  }
+  await ensureAssistantStorageDir();
+  const loaded = await fs
+    .readFile(assistantSessionMessagesPath(normalizedSessionId), 'utf8')
+    .then((text) => JSON.parse(text))
+    .catch(() => []);
+  return Array.isArray(loaded) ? loaded.map(sanitizeAssistantMessage) : [];
+}
+
+async function writeAssistantSessionMessages(sessionId, messages) {
+  const normalizedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+  if (!normalizedSessionId) {
+    throw new Error('sessionId is required');
+  }
+  await ensureAssistantStorageDir();
+  await fs.writeFile(
+    assistantSessionMessagesPath(normalizedSessionId),
+    `${JSON.stringify(messages, null, 2)}\n`,
+    'utf8'
+  );
+}
+
+function sendAssistantEvent(payload) {
+  if (!mainWindowRef || mainWindowRef.isDestroyed()) {
+    return;
+  }
+  mainWindowRef.webContents.send(ASSISTANT_EVENT_CHANNEL, payload);
+}
+
+function getAssistantRun(sessionId) {
+  return assistantRuns.get(sessionId) ?? null;
+}
+
+function setAssistantRun(sessionId, run) {
+  assistantRuns.set(sessionId, run);
+}
+
+function clearAssistantRun(sessionId) {
+  assistantRuns.delete(sessionId);
+}
+
+function clearPendingAssistantToolApproval(callId, approved = false, emitResolved = false) {
+  const pending = assistantPendingToolApprovals.get(callId);
+  if (!pending) {
+    return false;
+  }
+  assistantPendingToolApprovals.delete(callId);
+  if (emitResolved) {
+    sendAssistantEvent({
+      type: 'tool_call_approval_resolved',
+      sessionId: pending.sessionId,
+      callId,
+      approved
+    });
+  }
+  return pending;
+}
+
+function findAssistantSession(sessionId) {
+  return assistantSessions.find((session) => session.id === sessionId) ?? null;
+}
+
+async function createAssistantSession(title) {
+  const session = sanitizeAssistantSessionSummary({
+    id: `as_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    title: typeof title === 'string' && title.trim() ? title.trim() : 'New Session',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    messageCount: 0,
+    active: false
+  });
+  assistantSessions.unshift(session);
+  await saveAssistantSessions();
+  await writeAssistantSessionMessages(session.id, []);
+  sendAssistantEvent({ type: 'session_updated', session });
+  return session;
+}
+
+async function listAssistantSessions() {
+  return assistantSessions.slice();
+}
+
+function createAssistantMessage(role, content, status = 'complete', options = {}) {
+  const normalizedContent = typeof content === 'string' ? content : String(content ?? '');
+  const attachments = Array.isArray(options.attachments)
+    ? options.attachments.map(sanitizeAssistantAttachment).filter(Boolean)
+    : [];
+  if (!normalizedContent.trim() && !attachments.length && status !== 'pending') {
+    throw new Error('Assistant message content must not be empty');
+  }
+  return sanitizeAssistantMessage({
+    id: options.id,
+    role,
+    content: normalizedContent,
+    attachments,
+    createdAt: options.createdAt,
+    status
+  });
+}
+
+function emitAssistantMessageStarted(sessionId, message) {
+  sendAssistantEvent({ type: 'message_started', sessionId, message });
+}
+
+function emitAssistantMessageDelta(sessionId, messageId, delta, content) {
+  if (!delta) {
+    return;
+  }
+  sendAssistantEvent({
+    type: 'message_delta',
+    sessionId,
+    messageId,
+    delta,
+    content
+  });
+}
+
+function emitAssistantMessageCompleted(sessionId, messageId, content, status = 'complete') {
+  sendAssistantEvent({
+    type: 'message_completed',
+    sessionId,
+    messageId,
+    content,
+    status
+  });
+}
+
+async function appendAssistantMessage(sessionId, role, content, status = 'complete', options = {}) {
+  const session = findAssistantSession(sessionId);
+  if (!session) {
+    throw new Error(`Unknown assistant session: ${sessionId}`);
+  }
+  const messages = await readAssistantSessionMessages(sessionId);
+  const message = createAssistantMessage(role, content, status, options);
+  messages.push(message);
+  await writeAssistantSessionMessages(sessionId, messages);
+  session.updatedAt = new Date().toISOString();
+  session.messageCount = messages.length;
+  await saveAssistantSessions();
+  sendAssistantEvent({ type: 'message_added', sessionId, message });
+  sendAssistantEvent({ type: 'session_updated', session });
+  return message;
+}
+
+function assertAssistantRunActive(run, sessionId) {
+  if (!run || run.cancelled || run.sessionId !== sessionId) {
+    throw new Error('Assistant run was cancelled');
+  }
+}
+
+function getOpenAiCompatibleChatUrl(provider, baseUrl) {
+  const normalizedProvider = sanitizeLlmProvider(provider);
+  if (normalizedProvider === 'anthropic') {
+    throw new Error('Anthropic provider is not implemented yet in the embedded assistant');
+  }
+  const normalizedBaseUrl = sanitizeLlmBaseUrl(baseUrl, normalizedProvider);
+  if (!normalizedBaseUrl) {
+    throw new Error('LLM base URL is not configured');
+  }
+  return normalizedBaseUrl.endsWith('/chat/completions')
+    ? normalizedBaseUrl
+    : `${normalizedBaseUrl}${DEFAULT_OPENAI_COMPAT_CHAT_PATH}`;
+}
+
+async function callEmbeddedMcp(method, params) {
+  const rpcResponse = await sendRpcToMcpWorker({
+    jsonrpc: '2.0',
+    id: `assistant_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    method,
+    params
+  });
+  if (rpcResponse?.error) {
+    throw new Error(rpcResponse.error.message || String(rpcResponse.error));
+  }
+  return rpcResponse?.result ?? null;
+}
+
+async function listAssistantMcpTools() {
+  const result = await callEmbeddedMcp('tools/list', {});
+  const tools = Array.isArray(result?.tools) ? result.tools : [];
+  return tools.filter((tool) => typeof tool?.name === 'string' && tool.name.trim());
+}
+
+function convertMcpToolToOpenAiTool(tool) {
+  return {
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description ?? '',
+      parameters: tool.inputSchema ?? { type: 'object', properties: {} }
+    }
+  };
+}
+
+async function waitForAssistantToolApproval(sessionId, callId, tool, args) {
+  return await new Promise((resolve, reject) => {
+    assistantPendingToolApprovals.set(callId, {
+      sessionId,
+      tool,
+      args,
+      resolve,
+      reject
+    });
+    sendAssistantEvent({
+      type: 'tool_call_approval_requested',
+      sessionId,
+      callId,
+      tool,
+      args
+    });
+  });
+}
+
+async function callAssistantTool(sessionId, run, name, rawArguments, settings) {
+  const normalizedName = typeof name === 'string' ? name.trim() : '';
+  if (!normalizedName) {
+    throw new Error('Tool name is required');
+  }
+  let parsedArguments = {};
+  if (typeof rawArguments === 'string' && rawArguments.trim()) {
+    try {
+      parsedArguments = JSON.parse(rawArguments);
+    } catch (err) {
+      throw new Error(`Tool arguments for ${name} are not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } else if (rawArguments && typeof rawArguments === 'object') {
+    parsedArguments = rawArguments;
+  }
+  const callId = `tool_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  if (settings.requireToolApproval && !ASSISTANT_READONLY_TOOLS.has(normalizedName)) {
+    const approved = await waitForAssistantToolApproval(sessionId, callId, normalizedName, parsedArguments);
+    assertAssistantRunActive(run, sessionId);
+    if (!approved) {
+      throw new Error(`Tool approval was denied for ${normalizedName}`);
+    }
+  }
+  sendAssistantEvent({
+    type: 'tool_call_started',
+    sessionId,
+    callId,
+    tool: normalizedName,
+    args: parsedArguments
+  });
+  const result = await callEmbeddedMcp('tools/call', {
+    name: normalizedName,
+    arguments: parsedArguments
+  });
+  const isError = !!result?.isError;
+  sendAssistantEvent({
+    type: 'tool_call_finished',
+    sessionId,
+    callId,
+    tool: normalizedName,
+    result,
+    isError
+  });
+  assertAssistantRunActive(run, sessionId);
+  return result;
+}
+
+function normalizeAssistantHistoryToChatMessages(messages) {
+  return messages
+    .filter(
+      (message) =>
+        ['system', 'user', 'assistant'].includes(message.role) &&
+        (message.content || message.attachments?.length)
+    )
+    .map((message) => {
+      const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+      if (message.role === 'user' && attachments.length) {
+        const content = [];
+        if (message.content) {
+          content.push({
+            type: 'text',
+            text: message.content
+          });
+        }
+        for (const attachment of attachments) {
+          content.push({
+            type: 'image_url',
+            image_url: {
+              url: attachment.dataUrl
+            }
+          });
+        }
+        return {
+          role: message.role,
+          content
+        };
+      }
+      return {
+        role: message.role,
+        content: message.content
+      };
+    });
+}
+
+function extractOpenAiTextDelta(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === 'string') {
+          return item;
+        }
+        if (item?.type === 'text' && typeof item.text === 'string') {
+          return item.text;
+        }
+        return '';
+      })
+      .join('');
+  }
+  if (content?.type === 'text' && typeof content.text === 'string') {
+    return content.text;
+  }
+  return '';
+}
+
+function mergeOpenAiStreamToolCall(target, delta) {
+  const index = Number.isInteger(delta?.index) ? delta.index : target.length;
+  while (target.length <= index) {
+    target.push({
+      id: '',
+      type: 'function',
+      function: {
+        name: '',
+        arguments: ''
+      }
+    });
+  }
+  const current = target[index];
+  if (typeof delta?.id === 'string' && delta.id) {
+    current.id = delta.id;
+  }
+  if (typeof delta?.type === 'string' && delta.type) {
+    current.type = delta.type;
+  }
+  if (typeof delta?.function?.name === 'string' && delta.function.name) {
+    current.function.name += delta.function.name;
+  }
+  if (typeof delta?.function?.arguments === 'string' && delta.function.arguments) {
+    current.function.arguments += delta.function.arguments;
+  }
+}
+
+function processOpenAiStreamEventBlock(block, message, callbacks) {
+  const normalized = block.replace(/\r/g, '');
+  const dataLines = normalized
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trim());
+  if (!dataLines.length) {
+    return false;
+  }
+  const data = dataLines.join('\n');
+  if (!data || data === '[DONE]') {
+    return data === '[DONE]';
+  }
+  const payload = JSON.parse(data);
+  const choice = payload?.choices?.[0];
+  const delta = choice?.delta ?? {};
+  if (typeof delta.role === 'string' && delta.role) {
+    message.role = delta.role;
+  }
+  const textDelta = extractOpenAiTextDelta(delta.content);
+  if (textDelta) {
+    message.content += textDelta;
+    callbacks?.onTextDelta?.(textDelta, message.content);
+  }
+  if (Array.isArray(delta.tool_calls)) {
+    for (const toolCallDelta of delta.tool_calls) {
+      mergeOpenAiStreamToolCall(message.tool_calls, toolCallDelta);
+    }
+  }
+  return false;
+}
+
+async function readOpenAiCompatibleChatStream(response, callbacks) {
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    throw new Error('Streaming response body is not readable');
+  }
+  const decoder = new TextDecoder();
+  const message = {
+    role: 'assistant',
+    content: '',
+    tool_calls: []
+  };
+  let buffer = '';
+  let finished = false;
+  while (!finished) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.search(/\r?\n\r?\n/);
+    while (boundary >= 0) {
+      const block = buffer.slice(0, boundary);
+      const separatorLength = buffer.startsWith('\r\n\r\n', boundary) ? 4 : 2;
+      buffer = buffer.slice(boundary + separatorLength);
+      finished = processOpenAiStreamEventBlock(block, message, callbacks);
+      if (finished) {
+        break;
+      }
+      boundary = buffer.search(/\r?\n\r?\n/);
+    }
+  }
+  buffer += decoder.decode();
+  const tail = buffer.trim();
+  if (tail && !finished) {
+    processOpenAiStreamEventBlock(tail, message, callbacks);
+  }
+  return {
+    role: message.role,
+    content: message.content,
+    tool_calls: message.tool_calls.filter((toolCall) => toolCall?.function?.name)
+  };
+}
+
+async function invokeOpenAiCompatibleChat(settings, messages, tools, signal, callbacks) {
+  const apiKey = getLlmApiKey(settings.provider);
+  if (!apiKey) {
+    throw new Error(`No API key configured for provider ${settings.provider}`);
+  }
+  const response = await fetch(getOpenAiCompatibleChatUrl(settings.provider, settings.baseUrl), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: settings.model,
+      temperature: settings.temperature,
+      max_tokens: settings.maxOutputTokens,
+      messages,
+      stream: true,
+      tools: settings.toolCalling ? tools : undefined,
+      tool_choice: settings.toolCalling && tools.length ? 'auto' : undefined
+    }),
+    signal
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const message =
+      payload?.error?.message ||
+      payload?.message ||
+      `LLM request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('text/event-stream')) {
+    return await readOpenAiCompatibleChatStream(response, callbacks);
+  }
+  const payload = await response.json().catch(() => null);
+  const choice = payload?.choices?.[0]?.message;
+  if (!choice) {
+    throw new Error('LLM response did not include a message choice');
+  }
+  return choice;
+}
+
+function extractAssistantTextContent(content) {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === 'string') {
+          return item;
+        }
+        if (item?.type === 'text' && typeof item.text === 'string') {
+          return item.text;
+        }
+        return '';
+      })
+      .join('')
+      .trim();
+  }
+  return '';
+}
+
+async function runAssistantLoop(sessionId, run) {
+  const session = findAssistantSession(sessionId);
+  if (!session) {
+    throw new Error(`Unknown assistant session: ${sessionId}`);
+  }
+  const settings = sanitizeLlmSettings(editorGlobalConfig.llm);
+  const tools = settings.toolCalling ? await listAssistantMcpTools() : [];
+  const openAiTools = tools.map(convertMcpToolToOpenAiTool);
+  const history = await readAssistantSessionMessages(sessionId);
+  const conversation = normalizeAssistantHistoryToChatMessages(history);
+  const maxToolSteps = settings.maxToolSteps;
+  for (let step = 0; maxToolSteps === null || step < maxToolSteps; step++) {
+    assertAssistantRunActive(run, sessionId);
+    const streamedMessage = createAssistantMessage('assistant', '', 'pending');
+    let hasStreamedText = false;
+    let streamedContent = '';
+    let message;
+    try {
+      message = await invokeOpenAiCompatibleChat(
+        settings,
+        conversation,
+        openAiTools,
+        run.abortController.signal,
+        {
+          onTextDelta(delta, content) {
+            if (!hasStreamedText) {
+              hasStreamedText = true;
+              emitAssistantMessageStarted(sessionId, streamedMessage);
+            }
+            streamedContent = content;
+            emitAssistantMessageDelta(sessionId, streamedMessage.id, delta, content);
+          }
+        }
+      );
+    } catch (err) {
+      if (hasStreamedText && streamedContent.trim()) {
+        emitAssistantMessageCompleted(sessionId, streamedMessage.id, streamedContent, 'error');
+      }
+      throw err;
+    }
+    const textContent = extractAssistantTextContent(message.content);
+    if (textContent) {
+      if (!hasStreamedText) {
+        emitAssistantMessageStarted(sessionId, streamedMessage);
+        emitAssistantMessageDelta(sessionId, streamedMessage.id, textContent, textContent);
+      }
+      emitAssistantMessageCompleted(sessionId, streamedMessage.id, textContent, 'complete');
+      await appendAssistantMessage(sessionId, 'assistant', textContent, 'complete', {
+        id: streamedMessage.id,
+        createdAt: streamedMessage.createdAt
+      });
+      conversation.push({ role: 'assistant', content: textContent });
+    }
+    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    if (!toolCalls.length) {
+      return;
+    }
+    conversation.push({
+      role: 'assistant',
+      content: textContent || '',
+      tool_calls: toolCalls
+    });
+    for (const toolCall of toolCalls) {
+      assertAssistantRunActive(run, sessionId);
+      const toolName = toolCall?.function?.name;
+      if (!toolName) {
+        throw new Error('LLM tool call is missing function name');
+      }
+      const toolResult = await callAssistantTool(
+        sessionId,
+        run,
+        toolName,
+        toolCall.function.arguments,
+        settings
+      );
+      const toolContent = JSON.stringify(toolResult?.structuredContent ?? toolResult ?? null, null, 2);
+      await appendAssistantMessage(sessionId, 'tool', `[${toolName}]\n${toolContent}`, toolResult?.isError ? 'error' : 'complete');
+      conversation.push({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: toolContent
+      });
+    }
+  }
+  throw new Error(`Assistant exceeded the maximum tool step limit of ${maxToolSteps}`);
+}
+
+async function cancelAssistantRun(sessionId) {
+  const run = getAssistantRun(sessionId);
+  let cancelled = false;
+  if (run) {
+    run.cancelled = true;
+    run.abortController.abort();
+    cancelled = true;
+  }
+  for (const [callId, pending] of assistantPendingToolApprovals) {
+    if (pending.sessionId === sessionId) {
+      assistantPendingToolApprovals.delete(callId);
+      pending.reject(new Error('Assistant run was cancelled during tool approval'));
+      sendAssistantEvent({
+        type: 'tool_call_approval_resolved',
+        sessionId,
+        callId,
+        approved: false
+      });
+      cancelled = true;
+    }
+  }
+  return cancelled;
+}
+
+async function approveAssistantToolCall(sessionId, callId) {
+  const pending = assistantPendingToolApprovals.get(callId);
+  if (!pending || pending.sessionId !== sessionId) {
+    return false;
+  }
+  clearPendingAssistantToolApproval(callId, true, true);
+  pending.resolve(true);
+  return true;
+}
+
+async function rejectAssistantToolCall(sessionId, callId) {
+  const pending = assistantPendingToolApprovals.get(callId);
+  if (!pending || pending.sessionId !== sessionId) {
+    return false;
+  }
+  clearPendingAssistantToolApproval(callId, false, true);
+  pending.reject(new Error('Tool approval was denied by the user'));
+  return true;
+}
+
+async function sendAssistantMessage(sessionId, content, attachments) {
+  if (getAssistantRun(sessionId)) {
+    throw new Error('An assistant run is already active for this session');
+  }
+  const userMessage = await appendAssistantMessage(sessionId, 'user', content, 'complete', {
+    attachments
+  });
+  const session = findAssistantSession(sessionId);
+  session.active = true;
+  session.updatedAt = new Date().toISOString();
+  await saveAssistantSessions();
+  sendAssistantEvent({ type: 'run_state', sessionId, active: true, error: null });
+  sendAssistantEvent({ type: 'session_updated', session });
+  const run = {
+    sessionId,
+    cancelled: false,
+    abortController: new AbortController()
+  };
+  setAssistantRun(sessionId, run);
+  let finalError = null;
+  try {
+    await runAssistantLoop(sessionId, run);
+    return userMessage;
+  } catch (err) {
+    finalError =
+      run.cancelled || err?.name === 'AbortError'
+        ? 'Assistant run was cancelled'
+        : err instanceof Error
+          ? err.message
+          : String(err);
+    await appendAssistantMessage(sessionId, 'assistant', finalError, 'error');
+    sendAssistantEvent({ type: 'run_state', sessionId, active: false, error: finalError });
+    throw err;
+  } finally {
+    clearAssistantRun(sessionId);
+    session.active = false;
+    session.updatedAt = new Date().toISOString();
+    await saveAssistantSessions();
+    if (!finalError) {
+      sendAssistantEvent({ type: 'run_state', sessionId, active: false, error: null });
+    }
+    sendAssistantEvent({ type: 'session_updated', session });
+  }
 }
 
 function getConfiguredMcpServiceUrl(port = mcpServiceConfig.port) {
@@ -165,7 +1131,11 @@ function getGlobalSettingsPayload() {
       running: isMcpServiceRunning(),
       url: getConfiguredMcpServiceUrl()
     },
-    defaultRHI: sanitizeEditorRHI(editorGlobalConfig.defaultRHI)
+    defaultRHI: sanitizeEditorRHI(editorGlobalConfig.defaultRHI),
+    llm: {
+      ...sanitizeLlmSettings(editorGlobalConfig.llm),
+      apiKeyConfigured: hasLlmApiKeyConfigured(editorGlobalConfig.llm?.provider)
+    }
   };
 }
 
@@ -205,8 +1175,11 @@ async function applyGlobalSettings(nextSettings) {
   }
   if (Object.prototype.hasOwnProperty.call(nextSettings ?? {}, 'defaultRHI')) {
     editorGlobalConfig.defaultRHI = sanitizeEditorRHI(nextSettings.defaultRHI);
-    await saveEditorGlobalConfig();
   }
+  if (Object.prototype.hasOwnProperty.call(nextSettings ?? {}, 'llm')) {
+    editorGlobalConfig.llm = sanitizeLlmSettings(nextSettings.llm);
+  }
+  await saveEditorGlobalConfig();
   return getGlobalSettingsPayload();
 }
 
@@ -1147,6 +2120,41 @@ async function dispatchFS(operation, args) {
     }
     return path.resolve(result.filePaths[0]);
   }
+  if (operation === 'pickFile') {
+    const filters = Array.isArray(args.options?.filters)
+      ? args.options.filters
+          .filter((filter) => filter && typeof filter.name === 'string' && Array.isArray(filter.extensions))
+          .map((filter) => ({
+            name: filter.name,
+            extensions: filter.extensions
+              .map((ext) => String(ext || '').replace(/^\./, '').trim().toLowerCase())
+              .filter(Boolean)
+          }))
+          .filter((filter) => filter.extensions.length > 0)
+      : [];
+    const result = await dialog.showOpenDialog(mainWindowRef ?? undefined, {
+      title: args.options?.title || 'Select File',
+      defaultPath: args.options?.defaultPath,
+      buttonLabel: args.options?.buttonLabel,
+      properties: ['openFile'],
+      filters
+    });
+    if (result.canceled || result.filePaths.length < 1) {
+      return null;
+    }
+    const pickedPath = path.resolve(result.filePaths[0]);
+    const buffer = await fs.readFile(pickedPath);
+    if (buffer.byteLength > MAX_ASSISTANT_IMAGE_BYTES) {
+      throw new Error(`Selected file is too large (${buffer.byteLength} bytes). Limit is ${MAX_ASSISTANT_IMAGE_BYTES} bytes.`);
+    }
+    return {
+      name: path.basename(pickedPath),
+      path: pickedPath,
+      size: buffer.byteLength,
+      mimeType: guessImageMimeType(pickedPath),
+      dataBase64: buffer.toString('base64')
+    };
+  }
   const root = await getScopeRoot(args.scope);
   switch (operation) {
     case 'makeDirectory': {
@@ -1279,6 +2287,24 @@ ipcMain.handle(SETTINGS_CHANNEL, async (_event, payload) => {
       mainWindowRef.webContents.openDevTools({ mode: 'detach' });
       return true;
     }
+    case 'setLlmApiKey':
+      return await setLlmApiKey(payload.args.provider, payload.args.apiKey);
+    case 'clearLlmApiKey':
+      return await clearLlmApiKey(payload.args.provider);
+    case 'createAssistantSession':
+      return await createAssistantSession(payload.args.title);
+    case 'listAssistantSessions':
+      return await listAssistantSessions();
+    case 'getAssistantSessionMessages':
+      return await readAssistantSessionMessages(payload.args.sessionId);
+    case 'sendAssistantMessage':
+      return await sendAssistantMessage(payload.args.sessionId, payload.args.content, payload.args.attachments);
+    case 'cancelAssistantRun':
+      return await cancelAssistantRun(payload.args.sessionId);
+    case 'approveAssistantToolCall':
+      return await approveAssistantToolCall(payload.args.sessionId, payload.args.callId);
+    case 'rejectAssistantToolCall':
+      return await rejectAssistantToolCall(payload.args.sessionId, payload.args.callId);
     default:
       throw new Error(`Unknown settings operation: ${payload.operation}`);
   }
@@ -1294,6 +2320,8 @@ app.whenReady()
   .then(async () => {
     await loadMcpServiceConfig();
     await loadEditorGlobalConfig();
+    await loadLlmSecrets();
+    await loadAssistantSessions();
     registerEditorProtocol();
     await startEmbeddedMcpWorker();
     rebuildApplicationMenu();

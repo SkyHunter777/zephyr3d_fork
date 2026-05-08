@@ -147,9 +147,17 @@ export class SceneController extends BaseController<SceneModel, SceneView> {
       case 'EDITOR_SETTINGS': {
         try {
           const settings = await EditorSettingsService.getGlobalSettings();
-          const newSettings = await DlgEditorSettings.editEditorSettings('Editor Settings', settings, 520);
+          const dlg = new DlgEditorSettings('Editor Settings', settings, 520);
+          const newSettings = await dlg.showModal();
           if (newSettings) {
             await EditorSettingsService.saveGlobalSettings(newSettings);
+            if (newSettings.llm) {
+              if (dlg.shouldClearApiKey) {
+                await EditorSettingsService.clearLlmApiKey(newSettings.llm.provider);
+              } else if (dlg.pendingApiKey.trim()) {
+                await EditorSettingsService.setLlmApiKey(newSettings.llm.provider, dlg.pendingApiKey);
+              }
+            }
           }
         } catch (err) {
           await DlgMessage.messageBox('Error', `Failed to save editor settings: ${err}`);

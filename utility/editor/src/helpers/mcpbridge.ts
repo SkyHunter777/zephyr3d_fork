@@ -2697,6 +2697,30 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
         err: null
       };
     }
+    case 'getSelectedNodes': {
+      const project = await ProjectService.getCurrentProjectInfo();
+      if (!project) {
+        return {
+          nodes: null,
+          err: 'No project is currently opened; create or open a project first'
+        };
+      }
+      const scene = getScene(editor);
+      if (!scene) {
+        return {
+          nodes: null,
+          err: 'No scene is currently opened; create or open a scene first'
+        };
+      }
+      const nodes = getSceneController(editor)
+        .getView()
+        .getSelectedSceneNodes()
+        .map((node) => node.persistentId);
+      return {
+        nodes,
+        err: null
+      };
+    }
     case 'getSceneRootNode': {
       const project = await ProjectService.getCurrentProjectInfo();
       if (!project) {

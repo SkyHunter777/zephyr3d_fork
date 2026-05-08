@@ -26,6 +26,18 @@ export type DesktopDirectoryPickOptions = {
   buttonLabel?: string;
 };
 
+export type DesktopFilePickFilter = {
+  name: string;
+  extensions: string[];
+};
+
+export type DesktopFilePickOptions = {
+  title?: string;
+  defaultPath?: string;
+  buttonLabel?: string;
+  filters?: DesktopFilePickFilter[];
+};
+
 export type DesktopFileMetadata = {
   name: string;
   path: string;
@@ -33,6 +45,14 @@ export type DesktopFileMetadata = {
   type: 'file' | 'directory';
   created: string;
   modified: string;
+};
+
+export type DesktopPickedFile = {
+  name: string;
+  path: string;
+  size: number;
+  mimeType: string;
+  dataBase64: string;
 };
 
 export type DesktopFileStat = {
@@ -51,10 +71,114 @@ export type DesktopMcpSettings = {
   url: string;
 };
 
+export type DesktopLlmProvider = 'openai' | 'anthropic' | 'custom';
+
+export type DesktopLlmSettings = {
+  provider: DesktopLlmProvider;
+  baseUrl: string;
+  model: string;
+  apiKeyConfigured: boolean;
+  temperature: number;
+  maxOutputTokens: number;
+  maxToolSteps: number | null;
+  toolCalling: boolean;
+  requireToolApproval: boolean;
+};
+
 export type DesktopGlobalSettings = {
   mcp: DesktopMcpSettings | null;
   defaultRHI: 'webgpu' | 'webgl2' | 'webgl';
+  llm: DesktopLlmSettings | null;
 };
+
+export type DesktopAssistantSessionSummary = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  active: boolean;
+};
+
+export type DesktopAssistantAttachment = {
+  id: string;
+  name: string;
+  mimeType: string;
+  dataUrl: string;
+};
+
+export type DesktopAssistantMessage = {
+  id: string;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  attachments?: DesktopAssistantAttachment[];
+  createdAt: string;
+  status?: 'pending' | 'complete' | 'error';
+};
+
+export type DesktopAssistantEvent =
+  | {
+      type: 'session_updated';
+      session: DesktopAssistantSessionSummary;
+    }
+  | {
+      type: 'message_started';
+      sessionId: string;
+      message: DesktopAssistantMessage;
+    }
+  | {
+      type: 'message_delta';
+      sessionId: string;
+      messageId: string;
+      delta: string;
+      content: string;
+    }
+  | {
+      type: 'message_completed';
+      sessionId: string;
+      messageId: string;
+      content: string;
+      status: 'pending' | 'complete' | 'error';
+    }
+  | {
+      type: 'message_added';
+      sessionId: string;
+      message: DesktopAssistantMessage;
+    }
+  | {
+      type: 'tool_call_approval_requested';
+      sessionId: string;
+      callId: string;
+      tool: string;
+      args: unknown;
+    }
+  | {
+      type: 'tool_call_approval_resolved';
+      sessionId: string;
+      callId: string;
+      approved: boolean;
+    }
+  | {
+      type: 'tool_call_started';
+      sessionId: string;
+      callId: string;
+      tool: string;
+      args: unknown;
+    }
+  | {
+      type: 'tool_call_finished';
+      sessionId: string;
+      callId: string;
+      tool: string;
+      result: unknown;
+      isError: boolean;
+    }
+  | {
+      type: 'run_state';
+      sessionId: string;
+      active: boolean;
+      error?: string | null;
+    };
 
 export type ZephyrEditorDesktopAPI = {
   platform: string;
@@ -66,6 +190,7 @@ export type ZephyrEditorDesktopAPI = {
   fs: {
     makeDirectory(scope: DesktopFSScope, path: string, recursive?: boolean): Promise<void>;
     pickDirectory(options?: DesktopDirectoryPickOptions): Promise<string | null>;
+    pickFile(options?: DesktopFilePickOptions): Promise<DesktopPickedFile | null>;
     readDirectory(
       scope: DesktopFSScope,
       path: string,
@@ -99,6 +224,20 @@ export type ZephyrEditorDesktopAPI = {
     saveGlobalSettings(settings: Partial<DesktopGlobalSettings>): Promise<DesktopGlobalSettings>;
     copyMcpServiceUrl(): Promise<string>;
     toggleDevTools(): Promise<boolean>;
+    setLlmApiKey(provider: DesktopLlmProvider, apiKey: string): Promise<boolean>;
+    clearLlmApiKey(provider: DesktopLlmProvider): Promise<boolean>;
+    createAssistantSession(title?: string): Promise<DesktopAssistantSessionSummary>;
+    listAssistantSessions(): Promise<DesktopAssistantSessionSummary[]>;
+    getAssistantSessionMessages(sessionId: string): Promise<DesktopAssistantMessage[]>;
+    sendAssistantMessage(
+      sessionId: string,
+      content: string,
+      attachments?: DesktopAssistantAttachment[]
+    ): Promise<DesktopAssistantMessage>;
+    cancelAssistantRun(sessionId: string): Promise<boolean>;
+    approveAssistantToolCall(sessionId: string, callId: string): Promise<boolean>;
+    rejectAssistantToolCall(sessionId: string, callId: string): Promise<boolean>;
+    onAssistantEvent(listener: (event: DesktopAssistantEvent) => void): () => void;
   };
 };
 

@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const FS_CHANNEL = 'zephyr-editor:fs';
 const LOG_CHANNEL = 'zephyr-editor:log';
 const SETTINGS_CHANNEL = 'zephyr-editor:settings';
+const ASSISTANT_EVENT_CHANNEL = 'zephyr-editor:assistant-event';
 
 function invokeFS(operation, args) {
   return ipcRenderer.invoke(FS_CHANNEL, { operation, args });
@@ -22,6 +23,7 @@ contextBridge.exposeInMainWorld('zephyrEditorDesktop', {
   fs: {
     makeDirectory: (scope, path, recursive) => invokeFS('makeDirectory', { scope, path, recursive }),
     pickDirectory: (options) => invokeFS('pickDirectory', { options }),
+    pickFile: (options) => invokeFS('pickFile', { options }),
     readDirectory: (scope, path, options) => invokeFS('readDirectory', { scope, path, options }),
     deleteDirectory: (scope, path, recursive) => invokeFS('deleteDirectory', { scope, path, recursive }),
     readFile: (scope, path, options) => invokeFS('readFile', { scope, path, options }),
@@ -37,7 +39,29 @@ contextBridge.exposeInMainWorld('zephyrEditorDesktop', {
     getGlobalSettings: () => invokeSettings('getGlobalSettings', {}),
     saveGlobalSettings: (settings) => invokeSettings('saveGlobalSettings', { settings }),
     copyMcpServiceUrl: () => invokeSettings('copyMcpServiceUrl', {}),
-    toggleDevTools: () => invokeSettings('toggleDevTools', {})
+    toggleDevTools: () => invokeSettings('toggleDevTools', {}),
+    setLlmApiKey: (provider, apiKey) => invokeSettings('setLlmApiKey', { provider, apiKey }),
+    clearLlmApiKey: (provider) => invokeSettings('clearLlmApiKey', { provider }),
+    createAssistantSession: (title) => invokeSettings('createAssistantSession', { title }),
+    listAssistantSessions: () => invokeSettings('listAssistantSessions', {}),
+    getAssistantSessionMessages: (sessionId) => invokeSettings('getAssistantSessionMessages', { sessionId }),
+    sendAssistantMessage: (sessionId, content, attachments) =>
+      invokeSettings('sendAssistantMessage', { sessionId, content, attachments }),
+    cancelAssistantRun: (sessionId) => invokeSettings('cancelAssistantRun', { sessionId }),
+    approveAssistantToolCall: (sessionId, callId) =>
+      invokeSettings('approveAssistantToolCall', { sessionId, callId }),
+    rejectAssistantToolCall: (sessionId, callId) =>
+      invokeSettings('rejectAssistantToolCall', { sessionId, callId }),
+    onAssistantEvent: (listener) => {
+      if (typeof listener !== 'function') {
+        return () => {};
+      }
+      const handler = (_event, payload) => listener(payload);
+      ipcRenderer.on(ASSISTANT_EVENT_CHANNEL, handler);
+      return () => {
+        ipcRenderer.removeListener(ASSISTANT_EVENT_CHANNEL, handler);
+      };
+    }
   }
 });
 

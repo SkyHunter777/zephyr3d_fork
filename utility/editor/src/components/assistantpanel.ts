@@ -1,0 +1,705 @@
+import { Disposable } from '@zephyr3d/base';
+import { ImGui } from '@zephyr3d/imgui';
+import { customTextInput, CustomInputTextFlags } from './textinput';
+import { AssistantService } from '../core/services/assistant';
+import type {
+  DesktopAssistantAttachment,
+  DesktopAssistantEvent,
+  DesktopAssistantMessage,
+  DesktopAssistantSessionSummary
+} from '../core/services/desktop';
+
+type PendingApproval = {
+  callId: string;
+  tool: string;
+  args: unknown;
+};
+
+type ToolTimelineState = 'awaiting_approval' | 'approved' | 'rejected' | 'running' | 'succeeded' | 'failed';
+
+type ToolTimelineEntry = {
+  callId: string;
+  tool: string;
+  args: unknown;
+  result?: unknown;
+  state: ToolTimelineState;
+  updatedAt: string;
+};
+
+type VirtualItemLayout = {
+  width: number;
+  height: number;
+};
+
+export class AssistantPanel extends Disposable {
+  private static readonly MAX_RENDER_TEXT_CHARS = 12000;
+  private _sessions: DesktopAssistantSessionSummary[];
+  private _selectedSessionId: string;
+  private _messages: DesktopAssistantMessage[];
+  private _input: [string];
+  private _status: string;
+  private _pendingAttachments: DesktopAssistantAttachment[];
+  private _unsubscribe: () => void;
+  private _pendingApprovals: Map<string, PendingApproval[]>;
+  private _messageDrafts: Map<string, Map<string, DesktopAssistantMessage>>;
+  private _toolTimeline: Map<string, ToolTimelineEntry[]>;
+  private _conversationContentRevision: number;
+  private _pendingConversationScrollRevision: number | null;
+  private _messageLayoutCache: Map<string, VirtualItemLayout>;
+  private _timelineLayoutCache: Map<string, VirtualItemLayout>;
+
+  constructor() {
+    super();
+    this._sessions = [];
+    this._selectedSessionId = '';
+    this._messages = [];
+    this._input = [''];
+    this._status = '';
+    this._pendingAttachments = [];
+    this._unsubscribe = () => {};
+    this._pendingApprovals = new Map();
+    this._messageDrafts = new Map();
+    this._toolTimeline = new Map();
+    this._conversationContentRevision = 0;
+    this._pendingConversationScrollRevision = null;
+    this._messageLayoutCache = new Map();
+    this._timelineLayoutCache = new Map();
+    if (AssistantService.isAvailable()) {
+      this._unsubscribe = AssistantService.onEvent((event) => {
+        void this.handleAssistantEvent(event);
+      });
+      void this.initialize();
+    }
+  }
+
+  render() {
+    if (!AssistantService.isAvailable()) {
+      ImGui.TextDisabled('Assistant is only available in the desktop editor runtime.');
+      return;
+    }
+
+    this.renderToolbar();
+
+    if (this._status) {
+      ImGui.TextWrapped(this._status);
+      ImGui.Separator();
+    }
+
+    const leftWidth = 220;
+    const timelineWidth = 280;
+    const bodyHeight = -ImGui.GetFrameHeightWithSpacing() * 3 - 8;
+
+    if (ImGui.BeginChild('##AssistantSessions', new ImGui.ImVec2(leftWidth, bodyHeight), true)) {
+      for (const session of this._sessions) {
+        const label = `${session.title}${session.active ? ' *' : ''}##${session.id}`;
+        if (ImGui.Selectable(label, session.id === this._selectedSessionId)) {
+          void this.selectSession(session.id);
+        }
+      }
+    }
+    ImGui.EndChild();
+
+    ImGui.SameLine();
+
+    const conversationWidth = Math.max(
+      240,
+      ImGui.GetContentRegionAvail().x - timelineWidth - ImGui.GetStyle().ItemSpacing.x
+    );
+    if (ImGui.BeginChild('##AssistantConversation', new ImGui.ImVec2(conversationWidth, bodyHeight), true)) {
+      this.renderMessages();
+    }
+    ImGui.EndChild();
+
+    ImGui.SameLine();
+
+    if (ImGui.BeginChild('##AssistantTimeline', new ImGui.ImVec2(0, bodyHeight), true)) {
+      this.renderToolTimeline();
+    }
+    ImGui.EndChild();
+
+    this.renderComposer();
+  }
+
+  protected onDispose() {
+    super.onDispose();
+    this._unsubscribe();
+  }
+
+  private async initialize() {
+    await this.reloadSessions();
+    if (!this._selectedSessionId && this._sessions.length > 0) {
+      await this.selectSession(this._sessions[0].id);
+    }
+  }
+
+  private async reloadSessions() {
+    this._sessions = await AssistantService.listSessions();
+    if (
+      this._selectedSessionId &&
+      !this._sessions.find((session) => session.id === this._selectedSessionId)
+    ) {
+      this._selectedSessionId = '';
+      this._messages = [];
+    }
+  }
+
+  private async selectSession(sessionId: string) {
+    this._selectedSessionId = sessionId;
+    this._messages = await AssistantService.getSessionMessages(sessionId);
+    this._pendingAttachments = [];
+    this.markConversationContentAppended(sessionId);
+  }
+
+  private renderToolbar() {
+    if (ImGui.Button('New Session')) {
+      void this.createSession();
+    }
+    ImGui.SameLine();
+    if (ImGui.Button('Refresh')) {
+      void this.reloadAndRefreshCurrentSession();
+    }
+    ImGui.SameLine();
+    const active = this.currentSession?.active;
+    if (ImGui.Button('Cancel Run') && active) {
+      void this.cancelCurrentRun();
+    }
+  }
+
+  private renderMessages() {
+    if (!this._selectedSessionId) {
+      ImGui.TextDisabled('Create or select a session to start chatting.');
+      return;
+    }
+    if (ImGui.BeginChild('##AssistantMessages', new ImGui.ImVec2(-1, -1), false)) {
+      const messages = this.currentConversationMessages;
+      const pending = this.currentPendingApprovals;
+      if (messages.length === 0) {
+        if (pending.length === 0) {
+          ImGui.TextDisabled('No messages yet.');
+        }
+      } else {
+        const layout = this.computeVirtualListLayout(messages, (message, wrapWidth) =>
+          this.measureMessageHeight(message, wrapWidth)
+        );
+        if (layout.topPadding > 0) {
+          ImGui.Dummy(new ImGui.ImVec2(0, layout.topPadding));
+        }
+        for (let i = layout.startIndex; i < layout.endIndex; i++) {
+          this.renderMessageItem(messages[i]);
+        }
+        if (layout.bottomPadding > 0) {
+          ImGui.Dummy(new ImGui.ImVec2(0, layout.bottomPadding));
+        }
+      }
+      this.renderPendingApprovalRows(pending);
+      ImGui.Dummy(new ImGui.ImVec2(0, 1));
+      if (
+        this._pendingConversationScrollRevision !== null &&
+        this._conversationContentRevision >= this._pendingConversationScrollRevision
+      ) {
+        ImGui.SetScrollHereY(1.0);
+        this._pendingConversationScrollRevision = null;
+      }
+    }
+    ImGui.EndChild();
+  }
+
+  private renderToolTimeline() {
+    if (!this._selectedSessionId) {
+      ImGui.TextDisabled('Tool activity will appear here.');
+      return;
+    }
+    ImGui.Text('Tool Timeline');
+    const timeline = this.currentToolTimeline;
+    if (timeline.length === 0) {
+      ImGui.Separator();
+      ImGui.TextDisabled('No tool calls in this session yet.');
+      return;
+    }
+    const layout = this.computeVirtualListLayout(timeline, (entry, wrapWidth) =>
+      this.measureTimelineEntryHeight(entry, wrapWidth)
+    );
+    if (layout.topPadding > 0) {
+      ImGui.Dummy(new ImGui.ImVec2(0, layout.topPadding));
+    }
+    for (let i = layout.startIndex; i < layout.endIndex; i++) {
+      this.renderTimelineEntry(timeline[i]);
+    }
+    if (layout.bottomPadding > 0) {
+      ImGui.Dummy(new ImGui.ImVec2(0, layout.bottomPadding));
+    }
+  }
+
+  private renderComposer() {
+    const canSend = !!this._selectedSessionId && !this.currentSession?.active;
+    const buttonWidth = 110;
+    ImGui.SetNextItemWidth(-buttonWidth * 2 - ImGui.GetStyle().ItemSpacing.x * 2);
+    const submitted = customTextInput(
+      '##AssistantPrompt',
+      this._input,
+      this._selectedSessionId ? 'Ask the assistant...' : 'Create a session first',
+      CustomInputTextFlags.EnterReturnsTrue
+    );
+    ImGui.SameLine();
+    if (ImGui.Button('Attach Image')) {
+      void this.pickImageAttachment();
+    }
+    ImGui.SameLine();
+    if (ImGui.Button('Send') || (submitted && canSend)) {
+      if (canSend) {
+        void this.sendCurrentInput();
+      }
+    }
+    if (this._pendingAttachments.length > 0) {
+      for (const attachment of this._pendingAttachments) {
+        ImGui.TextWrapped(`Image: ${attachment.name}`);
+        ImGui.SameLine();
+        if (ImGui.SmallButton(`Remove##${attachment.id}`)) {
+          this._pendingAttachments = this._pendingAttachments.filter((item) => item.id !== attachment.id);
+        }
+      }
+    }
+  }
+
+  private async createSession() {
+    try {
+      const session = await AssistantService.createSession(`Session ${this._sessions.length + 1}`);
+      if (session) {
+        await this.reloadSessions();
+        await this.selectSession(session.id);
+      }
+    } catch (err) {
+      this._status = `Create session failed: ${err}`;
+    }
+  }
+
+  private async reloadAndRefreshCurrentSession() {
+    try {
+      const current = this._selectedSessionId;
+      await this.reloadSessions();
+      if (current) {
+        await this.selectSession(current);
+      }
+    } catch (err) {
+      this._status = `Reload sessions failed: ${err}`;
+    }
+  }
+
+  private async cancelCurrentRun() {
+    if (!this._selectedSessionId) {
+      return;
+    }
+    try {
+      await AssistantService.cancelRun(this._selectedSessionId);
+    } catch (err) {
+      this._status = `Cancel run failed: ${err}`;
+    }
+  }
+
+  private async approveToolCall(callId: string) {
+    if (!this._selectedSessionId) {
+      return;
+    }
+    try {
+      await AssistantService.approveToolCall(this._selectedSessionId, callId);
+    } catch (err) {
+      this._status = `Approve tool call failed: ${err}`;
+    }
+  }
+
+  private async rejectToolCall(callId: string) {
+    if (!this._selectedSessionId) {
+      return;
+    }
+    try {
+      await AssistantService.rejectToolCall(this._selectedSessionId, callId);
+    } catch (err) {
+      this._status = `Reject tool call failed: ${err}`;
+    }
+  }
+
+  private async sendCurrentInput() {
+    const text = this._input[0].trim();
+    if ((!text && this._pendingAttachments.length === 0) || !this._selectedSessionId) {
+      return;
+    }
+    const attachments = this._pendingAttachments.slice();
+    this._input[0] = '';
+    this._pendingAttachments = [];
+    this._status = '';
+    try {
+      await AssistantService.sendMessage(this._selectedSessionId, text, attachments);
+    } catch (err) {
+      this._pendingAttachments = attachments;
+      this._status = `Send failed: ${err}`;
+    }
+  }
+
+  private async pickImageAttachment() {
+    try {
+      const attachment = await AssistantService.pickImageAttachment();
+      if (!attachment) {
+        return;
+      }
+      this._pendingAttachments = [...this._pendingAttachments, attachment];
+    } catch (err) {
+      this._status = `Attach image failed: ${err}`;
+    }
+  }
+
+  private async handleAssistantEvent(event: DesktopAssistantEvent) {
+    switch (event.type) {
+      case 'session_updated': {
+        const index = this._sessions.findIndex((session) => session.id === event.session.id);
+        if (index >= 0) {
+          this._sessions[index] = event.session;
+        } else {
+          this._sessions.unshift(event.session);
+        }
+        break;
+      }
+      case 'message_started':
+        this.upsertDraftMessage(event.sessionId, event.message);
+        this.markConversationContentAppended(event.sessionId);
+        break;
+      case 'message_delta':
+        this.updateDraftMessage(event.sessionId, event.messageId, {
+          content: event.content,
+          status: 'pending'
+        });
+        this.invalidateMessageLayout(event.sessionId, event.messageId);
+        this.markConversationContentAppended(event.sessionId);
+        break;
+      case 'message_completed':
+        this.updateDraftMessage(event.sessionId, event.messageId, {
+          content: event.content,
+          status: event.status
+        });
+        this.invalidateMessageLayout(event.sessionId, event.messageId);
+        this.markConversationContentAppended(event.sessionId);
+        break;
+      case 'message_added':
+        this.removeDraftMessage(event.sessionId, event.message.id);
+        this.invalidateMessageLayout(event.sessionId, event.message.id);
+        if (event.sessionId === this._selectedSessionId) {
+          if (!this._messages.find((message) => message.id === event.message.id)) {
+            this._messages.push(event.message);
+          }
+        }
+        this.markConversationContentAppended(event.sessionId);
+        break;
+      case 'tool_call_approval_requested': {
+        const pending = this._pendingApprovals.get(event.sessionId) ?? [];
+        if (!pending.find((item) => item.callId === event.callId)) {
+          pending.push({
+            callId: event.callId,
+            tool: event.tool,
+            args: event.args
+          });
+          this._pendingApprovals.set(event.sessionId, pending);
+        }
+        this.markConversationContentAppended(event.sessionId);
+        this.upsertToolTimelineEntry(event.sessionId, {
+          callId: event.callId,
+          tool: event.tool,
+          args: event.args,
+          state: 'awaiting_approval'
+        });
+        break;
+      }
+      case 'tool_call_approval_resolved': {
+        const pending = this._pendingApprovals.get(event.sessionId) ?? [];
+        this._pendingApprovals.set(
+          event.sessionId,
+          pending.filter((item) => item.callId !== event.callId)
+        );
+        this.patchToolTimelineEntry(event.sessionId, event.callId, {
+          state: event.approved ? 'approved' : 'rejected'
+        });
+        if (!event.approved) {
+          this._status = 'Tool approval was rejected.';
+        }
+        break;
+      }
+      case 'tool_call_started':
+        this.upsertToolTimelineEntry(event.sessionId, {
+          callId: event.callId,
+          tool: event.tool,
+          args: event.args,
+          state: 'running'
+        });
+        break;
+      case 'tool_call_finished':
+        this.patchToolTimelineEntry(event.sessionId, event.callId, {
+          tool: event.tool,
+          result: event.result,
+          state: event.isError ? 'failed' : 'succeeded'
+        });
+        break;
+      case 'run_state':
+        if (event.error) {
+          this._status = event.error;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  private get currentSession() {
+    return this._sessions.find((session) => session.id === this._selectedSessionId) ?? null;
+  }
+
+  private get currentPendingApprovals() {
+    return this._pendingApprovals.get(this._selectedSessionId) ?? [];
+  }
+
+  private get currentConversationMessages() {
+    const messages = this._messages.filter((message) => message.role !== 'tool');
+    const drafts = Array.from(this._messageDrafts.get(this._selectedSessionId)?.values() ?? []).filter(
+      (message) => message.role !== 'tool'
+    );
+    return [...messages, ...drafts].sort((a, b) =>
+      a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt)
+    );
+  }
+
+  private get currentToolTimeline() {
+    return this._toolTimeline.get(this._selectedSessionId) ?? [];
+  }
+
+  private upsertDraftMessage(sessionId: string, message: DesktopAssistantMessage) {
+    const drafts = this._messageDrafts.get(sessionId) ?? new Map<string, DesktopAssistantMessage>();
+    drafts.set(message.id, { ...message });
+    this._messageDrafts.set(sessionId, drafts);
+    this.invalidateMessageLayout(sessionId, message.id);
+  }
+
+  private updateDraftMessage(sessionId: string, messageId: string, patch: Partial<DesktopAssistantMessage>) {
+    const drafts = this._messageDrafts.get(sessionId);
+    const current = drafts?.get(messageId);
+    if (!drafts || !current) {
+      return;
+    }
+    drafts.set(messageId, {
+      ...current,
+      ...patch
+    });
+    this.invalidateMessageLayout(sessionId, messageId);
+  }
+
+  private removeDraftMessage(sessionId: string, messageId: string) {
+    this._messageDrafts.get(sessionId)?.delete(messageId);
+    this.invalidateMessageLayout(sessionId, messageId);
+  }
+
+  private upsertToolTimelineEntry(
+    sessionId: string,
+    entry: Omit<ToolTimelineEntry, 'updatedAt'> & { updatedAt?: string }
+  ) {
+    const timeline = this._toolTimeline.get(sessionId) ?? [];
+    const next: ToolTimelineEntry = {
+      ...entry,
+      updatedAt: entry.updatedAt ?? new Date().toISOString()
+    };
+    const index = timeline.findIndex((item) => item.callId === entry.callId);
+    if (index >= 0) {
+      timeline[index] = {
+        ...timeline[index],
+        ...next
+      };
+    } else {
+      timeline.push(next);
+    }
+    this._toolTimeline.set(sessionId, timeline);
+    this.invalidateTimelineLayout(sessionId, entry.callId);
+  }
+
+  private patchToolTimelineEntry(sessionId: string, callId: string, patch: Partial<ToolTimelineEntry>) {
+    const timeline = this._toolTimeline.get(sessionId) ?? [];
+    const index = timeline.findIndex((item) => item.callId === callId);
+    if (index >= 0) {
+      timeline[index] = {
+        ...timeline[index],
+        ...patch,
+        updatedAt: new Date().toISOString()
+      };
+      this._toolTimeline.set(sessionId, timeline);
+      this.invalidateTimelineLayout(sessionId, callId);
+    }
+  }
+
+  private formatToolTimelineState(state: ToolTimelineState) {
+    switch (state) {
+      case 'awaiting_approval':
+        return 'awaiting approval';
+      case 'approved':
+        return 'approved';
+      case 'rejected':
+        return 'rejected';
+      case 'running':
+        return 'running';
+      case 'succeeded':
+        return 'succeeded';
+      case 'failed':
+        return 'failed';
+    }
+  }
+
+  private markConversationContentAppended(sessionId: string) {
+    if (sessionId === this._selectedSessionId) {
+      this._conversationContentRevision++;
+      this._pendingConversationScrollRevision = this._conversationContentRevision;
+    }
+  }
+
+  private renderMessageItem(message: DesktopAssistantMessage) {
+    ImGui.Separator();
+    ImGui.Text(`${message.role}${message.status === 'error' ? ' (error)' : ''}`);
+    ImGui.TextWrapped(this.getMessageRenderText(message));
+  }
+
+  private renderPendingApprovalRows(pending: readonly PendingApproval[]) {
+    for (const item of pending) {
+      ImGui.Separator();
+      ImGui.AlignTextToFramePadding();
+      ImGui.Text(`Tool approval required: ${this.getRenderText(item.tool)}.`);
+      ImGui.SameLine();
+      if (ImGui.Button(`Approve##${item.callId}`)) {
+        void this.approveToolCall(item.callId);
+      }
+      ImGui.SameLine();
+      if (ImGui.SmallButton(`Reject##${item.callId}`)) {
+        void this.rejectToolCall(item.callId);
+      }
+    }
+  }
+
+  private renderTimelineEntry(entry: ToolTimelineEntry) {
+    ImGui.Separator();
+    ImGui.Text(`${entry.tool} [${this.formatToolTimelineState(entry.state)}]`);
+    ImGui.TextWrapped(this.getRenderJson(entry.args ?? {}));
+    if (entry.result !== undefined) {
+      ImGui.TextWrapped(this.getRenderJson(entry.result));
+    }
+  }
+
+  private computeVirtualListLayout<T>(
+    items: readonly T[],
+    measureHeight: (item: T, wrapWidth: number) => number
+  ) {
+    const wrapWidth = Math.max(1, ImGui.GetContentRegionAvail().x);
+    const viewportHeight = Math.max(1, ImGui.GetContentRegionAvail().y);
+    const scrollY = ImGui.GetScrollY();
+    const viewportEnd = scrollY + viewportHeight;
+    const offsets = new Array<number>(items.length + 1);
+    offsets[0] = 0;
+    for (let i = 0; i < items.length; i++) {
+      offsets[i + 1] = offsets[i] + Math.max(1, measureHeight(items[i], wrapWidth));
+    }
+    let startIndex = 0;
+    while (startIndex < items.length && offsets[startIndex + 1] < scrollY) {
+      startIndex++;
+    }
+    let endIndex = startIndex;
+    while (endIndex < items.length && offsets[endIndex] < viewportEnd) {
+      endIndex++;
+    }
+    const overscan = 2;
+    startIndex = Math.max(0, startIndex - overscan);
+    endIndex = Math.min(items.length, endIndex + overscan);
+    return {
+      startIndex,
+      endIndex,
+      topPadding: offsets[startIndex],
+      bottomPadding: offsets[items.length] - offsets[endIndex]
+    };
+  }
+
+  private measureMessageHeight(message: DesktopAssistantMessage, wrapWidth: number) {
+    const key = this.getMessageLayoutKey(this._selectedSessionId, message.id);
+    const cached = this._messageLayoutCache.get(key);
+    if (cached && Math.abs(cached.width - wrapWidth) < 1) {
+      return cached.height;
+    }
+    const style = ImGui.GetStyle();
+    const separatorHeight = 1 + style.ItemSpacing.y * 2;
+    const titleHeight = ImGui.GetTextLineHeightWithSpacing();
+    const contentHeight = Math.max(
+      1,
+      ImGui.CalcTextSize(this.getMessageRenderText(message), null, false, wrapWidth).y
+    );
+    const height = separatorHeight + titleHeight + contentHeight + style.ItemSpacing.y;
+    this._messageLayoutCache.set(key, { width: wrapWidth, height });
+    return height;
+  }
+
+  private measureTimelineEntryHeight(entry: ToolTimelineEntry, wrapWidth: number) {
+    const key = this.getTimelineLayoutKey(this._selectedSessionId, entry.callId);
+    const cached = this._timelineLayoutCache.get(key);
+    if (cached && Math.abs(cached.width - wrapWidth) < 1) {
+      return cached.height;
+    }
+    const style = ImGui.GetStyle();
+    const separatorHeight = 1 + style.ItemSpacing.y * 2;
+    const titleHeight = ImGui.GetTextLineHeightWithSpacing();
+    const argsHeight = Math.max(
+      1,
+      ImGui.CalcTextSize(this.getRenderJson(entry.args ?? {}), null, false, wrapWidth).y
+    );
+    const resultHeight =
+      entry.result === undefined
+        ? 0
+        : Math.max(1, ImGui.CalcTextSize(this.getRenderJson(entry.result), null, false, wrapWidth).y);
+    const height = separatorHeight + titleHeight + argsHeight + resultHeight + style.ItemSpacing.y * 2;
+    this._timelineLayoutCache.set(key, { width: wrapWidth, height });
+    return height;
+  }
+
+  private getRenderText(text: string) {
+    return this.truncateRenderText(text ?? '');
+  }
+
+  private getMessageRenderText(message: DesktopAssistantMessage) {
+    const parts: string[] = [];
+    if (message.content) {
+      parts.push(message.content);
+    }
+    for (const attachment of message.attachments ?? []) {
+      parts.push(`[Image] ${attachment.name}`);
+    }
+    return this.truncateRenderText(parts.join('\n'));
+  }
+
+  private getRenderJson(value: unknown) {
+    try {
+      return this.truncateRenderText(JSON.stringify(value, null, 2) ?? '');
+    } catch (err) {
+      return this.truncateRenderText(String(err));
+    }
+  }
+
+  private truncateRenderText(text: string) {
+    if (text.length <= AssistantPanel.MAX_RENDER_TEXT_CHARS) {
+      return text;
+    }
+    const remaining = text.length - AssistantPanel.MAX_RENDER_TEXT_CHARS;
+    return `${text.slice(0, AssistantPanel.MAX_RENDER_TEXT_CHARS)}\n...[truncated ${remaining} chars in panel]`;
+  }
+
+  private invalidateMessageLayout(sessionId: string, messageId: string) {
+    this._messageLayoutCache.delete(this.getMessageLayoutKey(sessionId, messageId));
+  }
+
+  private invalidateTimelineLayout(sessionId: string, callId: string) {
+    this._timelineLayoutCache.delete(this.getTimelineLayoutKey(sessionId, callId));
+  }
+
+  private getMessageLayoutKey(sessionId: string, messageId: string) {
+    return `${sessionId}:${messageId}`;
+  }
+
+  private getTimelineLayoutKey(sessionId: string, callId: string) {
+    return `${sessionId}:${callId}`;
+  }
+}

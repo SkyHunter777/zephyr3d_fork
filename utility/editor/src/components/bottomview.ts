@@ -4,15 +4,18 @@ import { VFSRenderer } from './vfsrenderer';
 import { ImGui } from '@zephyr3d/imgui';
 import { renderLogView } from './logview';
 import type { Editor } from '../core/editor';
+import { AssistantPanel } from './assistantpanel';
 
 export class BottomView extends Disposable {
   private readonly _panel: DockPannel;
   private _renderer: VFSRenderer;
+  private readonly _assistantPanel: AssistantPanel | null;
 
   constructor(vfs: VFS, left: number, top: number, width: number, height: number, editor?: Editor) {
     super();
     this._renderer = new VFSRenderer(vfs, [], 200, { editor });
     this._panel = new DockPannel(left, top, width, height, 8, 0, 99999, ResizeDirection.Top, 200, 600);
+    this._assistantPanel = editor ? new AssistantPanel() : null;
   }
 
   get panel() {
@@ -32,6 +35,10 @@ export class BottomView extends Disposable {
           renderLogView();
           ImGui.EndTabItem();
         }
+        if (this._assistantPanel && ImGui.BeginTabItem('Assistant##AssistantView')) {
+          this._assistantPanel.render();
+          ImGui.EndTabItem();
+        }
         ImGui.EndTabBar();
       }
     }
@@ -40,5 +47,6 @@ export class BottomView extends Disposable {
   protected onDispose() {
     super.onDispose();
     this._renderer.dispose();
+    this._assistantPanel?.dispose();
   }
 }

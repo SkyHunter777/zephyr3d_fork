@@ -1726,6 +1726,16 @@ const BASE_TOOLS = [
     }
   },
   {
+    name: 'scene_get_selected_nodes',
+    description: 'Get the currently selected scene node ids. Returns { nodes, err }.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
     name: 'camera_get_active',
     description:
       'Get the active scene camera in world space. Returns camera metadata, world transform, direction vectors, and controller view center when available.',
@@ -2467,6 +2477,9 @@ const handlers = {
       return { subNodes: null, err: 'node_get_children requires the parent node id' };
     }
     return bridge.send('getSubNodes', { parent }, Number(args.timeout_ms ?? 10000));
+  },
+  async scene_get_selected_nodes(args) {
+    return bridge.send('getSelectedNodes', {}, Number(args.timeout_ms ?? 10000));
   },
   async camera_get_active(args) {
     return bridge.send('camera_get_active', {}, Number(args.timeout_ms ?? 10000));
