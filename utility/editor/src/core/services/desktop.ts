@@ -197,6 +197,7 @@ export type ZephyrEditorDesktopAPI = {
   };
   fs: {
     makeDirectory(scope: DesktopFSScope, path: string, recursive?: boolean): Promise<void>;
+    revealPath(scope: DesktopFSScope, path: string): Promise<void>;
     pickDirectory(options?: DesktopDirectoryPickOptions): Promise<string | null>;
     pickFile(options?: DesktopFilePickOptions): Promise<DesktopPickedFile | null>;
     readDirectory(

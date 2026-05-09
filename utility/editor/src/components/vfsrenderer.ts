@@ -32,6 +32,8 @@ import type { Editor } from '../core/editor';
 import type { RuntimeEditorAssetContext, RuntimeEditorMenuContext } from '../core/plugin';
 import type { PropertyAccessor } from '@zephyr3d/scene';
 import { AssetThumbnailService, ImageAssetThumbnailProvider } from './assetthumbnail';
+import { getDesktopAPI } from '../core/services/desktop';
+import { ElectronFS } from '../core/services/electronfs';
 
 export type FileInfo = {
   meta: FileMetadata;
@@ -373,6 +375,12 @@ export class ContentListView extends ListView<{}, FileInfo | DirectoryInfo> {
             this.renderer.openFile(item.meta.path, mimeType);
           }
         }
+        if (this.renderer.canRevealInFileManager(item)) {
+          ImGui.Separator();
+          if (ImGui.MenuItem(this.renderer.revealInFileManagerLabel)) {
+            this.renderer.revealItemInFileManager(item);
+          }
+        }
         ImGui.Separator();
         if (ImGui.MenuItem('Rename')) {
           this.renderer.renameSelectedItem();
@@ -423,6 +431,12 @@ export class DirTreeView extends TreeView<{}, DirectoryInfo> {
   }
   protected onDrawContextMenu(dir: DirectoryInfo) {
     this._renderer.renderPluginContextMenu('asset-directory', dir);
+    if (this._renderer.canRevealInFileManager(dir)) {
+      if (ImGui.MenuItem(this._renderer.revealInFileManagerLabel)) {
+        this._renderer.revealItemInFileManager(dir);
+      }
+      ImGui.Separator();
+    }
     if (ImGui.BeginMenu('Create New##VFSCreate')) {
       if (ImGui.MenuItem('Folder...##VFSCreateFolder')) {
         DlgPromptName.promptName('Create Folder', 'NewFolder').then((name) => {
@@ -586,6 +600,9 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   }
   get currentDirContent() {
     return this._currentDirContent;
+  }
+  get revealInFileManagerLabel() {
+    return getDesktopAPI()?.platform === 'win32' ? 'Show in Explorer' : 'Reveal in File Manager';
   }
   render() {
     if (
@@ -1225,6 +1242,31 @@ export class VFSRenderer extends makeObservable(Disposable)<{
         });
       }
     }
+  }
+
+  canRevealInFileManager(item: DirectoryInfo | FileInfo | null | undefined) {
+    if (!item || !(this._vfs instanceof ElectronFS) || !getDesktopAPI()?.fs?.revealPath) {
+      return false;
+    }
+    const targetPath = this.getItemPath(item);
+    if (this.isMountedVirtualAssetPath(targetPath)) {
+      return false;
+    }
+    return true;
+  }
+
+  revealItemInFileManager(item: DirectoryInfo | FileInfo) {
+    if (!this.canRevealInFileManager(item)) {
+      return;
+    }
+    const targetPath = 'subDir' in item ? item.path : item.meta.path;
+    void (this._vfs as ElectronFS).revealPath(targetPath).catch((err) => {
+      DlgMessage.messageBox('Error', `Reveal path failed: ${err}`);
+    });
+  }
+
+  private isMountedVirtualAssetPath(path: string) {
+    return this._vfs.isParentOf('/assets/@builtins', path);
   }
 
   renameItem(item: DirectoryInfo | FileInfo) {

@@ -34,6 +34,10 @@ export class ElectronFS extends VFS {
     await this.api().makeDirectory(this.scope, path, recursive);
   }
 
+  async revealPath(path: string) {
+    await this.api().revealPath(this.scope, path);
+  }
+
   protected async _readDirectory(path: string, options?: ListOptions) {
     const entries = await this.api().readDirectory(this.scope, path, {
       recursive: !!options?.recursive

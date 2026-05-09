@@ -2380,6 +2380,19 @@ async function dispatchFS(operation, args) {
       await fs.mkdir(target, { recursive: !!args.recursive });
       return null;
     }
+    case 'revealPath': {
+      const { target } = toPhysicalPath(root, args.path);
+      const stat = await fs.stat(target);
+      if (stat.isDirectory()) {
+        const errorMessage = await shell.openPath(target);
+        if (errorMessage) {
+          throw new Error(errorMessage);
+        }
+        return null;
+      }
+      shell.showItemInFolder(target);
+      return null;
+    }
     case 'readDirectory': {
       const results = [];
       await readDirectoryRecursive(root, args.path, !!args.options?.recursive, results);
