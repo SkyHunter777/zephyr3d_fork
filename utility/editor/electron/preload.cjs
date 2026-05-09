@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const FS_CHANNEL = 'zephyr-editor:fs';
+const FS_EVENT_CHANNEL = 'zephyr-editor:fs-event';
 const LOG_CHANNEL = 'zephyr-editor:log';
 const SETTINGS_CHANNEL = 'zephyr-editor:settings';
 const ASSISTANT_EVENT_CHANNEL = 'zephyr-editor:assistant-event';
@@ -33,7 +34,19 @@ contextBridge.exposeInMainWorld('zephyrEditorDesktop', {
     stat: (scope, path) => invokeFS('stat', { scope, path }),
     move: (scope, sourcePath, targetPath, options) =>
       invokeFS('move', { scope, sourcePath, targetPath, options }),
-    deleteScope: (scope) => invokeFS('deleteScope', { scope })
+    deleteScope: (scope) => invokeFS('deleteScope', { scope }),
+    watch: (scope, path) => invokeFS('watch', { scope, path }),
+    unwatch: (watchId) => invokeFS('unwatch', { watchId }),
+    onChange: (listener) => {
+      if (typeof listener !== 'function') {
+        return () => {};
+      }
+      const handler = (_event, payload) => listener(payload);
+      ipcRenderer.on(FS_EVENT_CHANNEL, handler);
+      return () => {
+        ipcRenderer.removeListener(FS_EVENT_CHANNEL, handler);
+      };
+    }
   },
   settings: {
     getGlobalSettings: () => invokeSettings('getGlobalSettings', {}),

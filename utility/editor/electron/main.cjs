@@ -1,11 +1,13 @@
 const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, net, protocol, safeStorage, shell } = require('electron');
 const http = require('http');
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { Worker } = require('worker_threads');
 
 const FS_CHANNEL = 'zephyr-editor:fs';
+const FS_EVENT_CHANNEL = 'zephyr-editor:fs-event';
 const LOG_CHANNEL = 'zephyr-editor:log';
 const SETTINGS_CHANNEL = 'zephyr-editor:settings';
 const ASSISTANT_EVENT_CHANNEL = 'zephyr-editor:assistant-event';
@@ -119,6 +121,9 @@ let llmSecrets = {
 let assistantSessions = [];
 const assistantRuns = new Map();
 const assistantPendingToolApprovals = new Map();
+let nextFsWatchId = 1;
+const fsWatchers = new Map();
+const fsWatchersBySender = new Map();
 
 function editorWebPreferences() {
   return {
@@ -2173,6 +2178,153 @@ function bufferToArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 }
 
+function normalizeWatchEventPath(root, filename) {
+  const name = typeof filename === 'string' ? filename : filename?.toString?.() || '';
+  if (!name) {
+    return '/';
+  }
+  const relative = name.replace(/\\/g, '/');
+  try {
+    return toPhysicalPath(root, relative).normalized;
+  } catch {
+    return '/';
+  }
+}
+
+function trackWatcherOwnership(senderId, watchId) {
+  let watchIds = fsWatchersBySender.get(senderId);
+  if (!watchIds) {
+    watchIds = new Set();
+    fsWatchersBySender.set(senderId, watchIds);
+  }
+  watchIds.add(watchId);
+}
+
+function untrackWatcherOwnership(senderId, watchId) {
+  const watchIds = fsWatchersBySender.get(senderId);
+  if (!watchIds) {
+    return;
+  }
+  watchIds.delete(watchId);
+  if (watchIds.size === 0) {
+    fsWatchersBySender.delete(senderId);
+  }
+}
+
+async function stopFSWatch(watchId) {
+  const watcherState = fsWatchers.get(watchId);
+  if (!watcherState) {
+    return false;
+  }
+  fsWatchers.delete(watchId);
+  untrackWatcherOwnership(watcherState.senderId, watchId);
+  if (watcherState.flushTimer) {
+    clearTimeout(watcherState.flushTimer);
+  }
+  if (watcherState.watcher) {
+    watcherState.watcher.close();
+  }
+  return true;
+}
+
+async function stopFSWatchesForSender(senderId) {
+  const watchIds = fsWatchersBySender.get(senderId);
+  if (!watchIds || watchIds.size === 0) {
+    return;
+  }
+  await Promise.all(Array.from(watchIds, (watchId) => stopFSWatch(watchId)));
+}
+
+function isWatchPathRelevant(watchPath, changedPath) {
+  const normalizedWatchPath = normalizeVFSPath(watchPath || '/');
+  const normalizedChangedPath = normalizeVFSPath(changedPath || '/');
+  if (normalizedWatchPath === '/' || normalizedChangedPath === '/') {
+    return true;
+  }
+  return (
+    normalizedChangedPath === normalizedWatchPath ||
+    normalizedChangedPath.startsWith(`${normalizedWatchPath}/`) ||
+    normalizedWatchPath.startsWith(`${normalizedChangedPath}/`)
+  );
+}
+
+async function createFSWatch(sender, scope, watchPath) {
+  const root = await getScopeRoot(scope);
+  const normalizedWatchPath = normalizeVFSPath(watchPath || '/');
+  const watchId = `fswatch_${nextFsWatchId++}`;
+  const watcherState = {
+    id: watchId,
+    root,
+    scope,
+    watchPath: normalizedWatchPath,
+    sender,
+    senderId: sender.id,
+    pendingPath: normalizedWatchPath,
+    flushTimer: null,
+    watcher: null
+  };
+  const emitChange = () => {
+    watcherState.flushTimer = null;
+    if (sender.isDestroyed()) {
+      void stopFSWatch(watchId);
+      return;
+    }
+    sender.send(FS_EVENT_CHANNEL, {
+      watchId,
+      scope,
+      path: watcherState.pendingPath || normalizedWatchPath,
+      type: 'modified',
+      itemType: 'directory'
+    });
+    watcherState.pendingPath = normalizedWatchPath;
+  };
+  const scheduleChange = (changedPath) => {
+    if (!isWatchPathRelevant(normalizedWatchPath, changedPath)) {
+      return;
+    }
+    if (
+      changedPath === '/' ||
+      normalizedWatchPath === '/' ||
+      watcherState.pendingPath === '/' ||
+      watcherState.pendingPath === normalizedWatchPath
+    ) {
+      watcherState.pendingPath = normalizedWatchPath === '/' ? '/' : changedPath || normalizedWatchPath;
+    } else if (
+      watcherState.pendingPath &&
+      watcherState.pendingPath !== changedPath &&
+      watcherState.pendingPath !== normalizedWatchPath
+    ) {
+      watcherState.pendingPath = normalizedWatchPath;
+    } else {
+      watcherState.pendingPath = changedPath || normalizedWatchPath;
+    }
+    if (watcherState.flushTimer) {
+      clearTimeout(watcherState.flushTimer);
+    }
+    watcherState.flushTimer = setTimeout(emitChange, 120);
+  };
+  try {
+    watcherState.watcher = fsSync.watch(root, { recursive: true }, (_eventType, filename) => {
+      scheduleChange(normalizeWatchEventPath(root, filename));
+    });
+    watcherState.watcher.on('error', (error) => {
+      console.warn(`Filesystem watcher error for ${scope}: ${error?.message || error}`);
+      scheduleChange(normalizedWatchPath);
+    });
+  } catch (error) {
+    console.warn(`Create filesystem watcher failed for ${scope}: ${error?.message || error}`);
+    scheduleChange(normalizedWatchPath);
+  }
+  fsWatchers.set(watchId, watcherState);
+  if (!fsWatchersBySender.has(sender.id)) {
+    sender.once('destroyed', () => {
+      void stopFSWatchesForSender(sender.id);
+    });
+  }
+  trackWatcherOwnership(sender.id, watchId);
+  return watchId;
+}
+
 async function dispatchFS(operation, args) {
   if (operation === 'pickDirectory') {
     const result = await dialog.showOpenDialog(mainWindowRef ?? undefined, {
@@ -2324,6 +2476,13 @@ async function dispatchFS(operation, args) {
 ipcMain.handle(FS_CHANNEL, async (_event, payload) => {
   if (!payload || typeof payload.operation !== 'string' || !payload.args) {
     throw new Error('Invalid filesystem request');
+  }
+  if (payload.operation === 'watch') {
+    return await createFSWatch(_event.sender, payload.args.scope, payload.args.path);
+  }
+  if (payload.operation === 'unwatch') {
+    await stopFSWatch(payload.args.watchId);
+    return null;
   }
   return await dispatchFS(payload.operation, payload.args);
 });

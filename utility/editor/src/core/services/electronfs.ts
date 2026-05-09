@@ -9,6 +9,7 @@ import type {
 import { VFS, VFSError } from '@zephyr3d/base';
 import {
   getDesktopAPI,
+  type DesktopFSChangeEvent,
   type DesktopFileMetadata,
   type DesktopFileStat,
   type DesktopFSScope
@@ -16,10 +17,17 @@ import {
 
 export class ElectronFS extends VFS {
   private readonly scope: DesktopFSScope;
+  private _watchId: string | null;
+  private _watchStart: Promise<void> | null;
+  private _disposeFsChangeListener: (() => void) | null;
 
   constructor(scope: DesktopFSScope, readonly = false) {
     super(readonly);
     this.scope = scope;
+    this._watchId = null;
+    this._watchStart = null;
+    this._disposeFsChangeListener = null;
+    this.startWatchingExternalChanges();
   }
 
   protected async _makeDirectory(path: string, recursive: boolean) {
@@ -71,6 +79,10 @@ export class ElectronFS extends VFS {
     await this.api().move(this.scope, sourcePath, targetPath, options);
   }
 
+  protected async onClose() {
+    await this.stopWatchingExternalChanges();
+  }
+
   private api() {
     const api = getDesktopAPI()?.fs;
     if (!api) {
@@ -117,6 +129,53 @@ export class ElectronFS extends VFS {
   private globToRegExp(pattern: string): RegExp {
     const source = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\0');
     return new RegExp(`^${source.replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\0/g, '.*')}$`);
+  }
+
+  private startWatchingExternalChanges() {
+    const api = getDesktopAPI()?.fs;
+    if (!api?.watch || !api?.onChange) {
+      return;
+    }
+    this._disposeFsChangeListener = api.onChange((event) => {
+      this.handleExternalChange(event);
+    });
+    this._watchStart = api
+      .watch(this.scope, '/')
+      .then((watchId) => {
+        this._watchId = watchId;
+      })
+      .catch((err) => {
+        console.warn(`Start filesystem watch failed for ${this.scope}: ${err}`);
+        this._disposeFsChangeListener?.();
+        this._disposeFsChangeListener = null;
+      });
+  }
+
+  private async stopWatchingExternalChanges() {
+    const api = getDesktopAPI()?.fs;
+    const watchStart = this._watchStart;
+    this._watchStart = null;
+    if (watchStart) {
+      await watchStart.catch(() => undefined);
+    }
+    if (this._disposeFsChangeListener) {
+      this._disposeFsChangeListener();
+      this._disposeFsChangeListener = null;
+    }
+    const watchId = this._watchId;
+    this._watchId = null;
+    if (watchId && api?.unwatch) {
+      await api.unwatch(watchId).catch((err) => {
+        console.warn(`Stop filesystem watch failed for ${this.scope}: ${err}`);
+      });
+    }
+  }
+
+  private handleExternalChange(event: DesktopFSChangeEvent) {
+    if (!this._watchId || !event || event.watchId !== this._watchId || event.scope !== this.scope) {
+      return;
+    }
+    this.onChange(event.type, this.normalizePath(event.path), event.itemType);
   }
 }
 

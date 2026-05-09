@@ -502,6 +502,11 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   private _isDragOverNavigation = false;
   private _isDragOverContent = false;
   private _pendingRevealAssetPath: string | null = null;
+  private _forceNavRefresh = false;
+  private _reloadTimer: ReturnType<typeof setTimeout> | null = null;
+  private _reloadQueued = false;
+  private _reloadQueuedPreserveSelection = false;
+  private _reloadingFileSystem = false;
   private readonly _options: VFSRendererOptions = null;
 
   constructor(vfs: VFS, fileFilter: string[] = [], treePanelWidth = 200, options?: VFSRendererOptions) {
@@ -597,7 +602,9 @@ export class VFSRenderer extends makeObservable(Disposable)<{
           this.renderNavigationDropHighlight();
         }
         if (this._filesystem) {
-          this._nav.render(false);
+          const forceNavRefresh = this._forceNavRefresh;
+          this._forceNavRefresh = false;
+          this._nav.render(forceNavRefresh);
           //this.renderDir(this._filesystem);
         }
       }
@@ -1215,15 +1222,34 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     this.refreshFileView();
   }
 
-  refreshFileView() {
+  refreshFileView(preserveSelection = false, selectedItemPaths?: string[]) {
+    const pathsToRestore = preserveSelection ? (selectedItemPaths ?? this.getSelectedItemPaths()) : [];
     if (!this.selectedDir) {
       this._currentDirContent = [];
+      this._contentView.deselectAll();
       return;
     }
 
     this._currentDirContent = [...this.selectedDir.subDir, ...this.selectedDir.files];
     this.sortContent();
+    if (pathsToRestore.length > 0) {
+      const pathSet = new Set(pathsToRestore.map((path) => this._vfs.normalizePath(path)));
+      const itemsToRestore = this._currentDirContent.filter((item) => pathSet.has(this.getItemPath(item)));
+      this._contentView.deselectAll();
+      if (itemsToRestore.length > 0) {
+        this._contentView.selectItems(itemsToRestore);
+      }
+      return;
+    }
     this._contentView.deselectAll();
+  }
+
+  private getSelectedItemPaths() {
+    return [...this.selectedItems].map((item) => this.getItemPath(item));
+  }
+
+  private getItemPath(item: FileInfo | DirectoryInfo) {
+    return this._vfs.normalizePath('subDir' in item ? item.path : item.meta.path);
   }
 
   private revealAsset(path: string) {
@@ -1343,6 +1369,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   async loadFileSystem() {
     const rootDir = await this.loadDirectoryInfo(this._options.rootDir);
     this._filesystem = rootDir;
+    this._forceNavRefresh = true;
 
     if (this.selectedDir) {
       const newSelectedDir = this.findDirectoryByPath(this._filesystem, this.selectedDir.path);
@@ -1357,6 +1384,37 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     }
 
     this.dispatchEvent('loaded');
+  }
+
+  private queueFileSystemReload(preserveSelection = false) {
+    this._reloadQueued = true;
+    this._reloadQueuedPreserveSelection = this._reloadQueuedPreserveSelection || preserveSelection;
+    if (this._reloadTimer) {
+      clearTimeout(this._reloadTimer);
+    }
+    this._reloadTimer = setTimeout(() => {
+      this._reloadTimer = null;
+      void this.flushFileSystemReload();
+    }, 120);
+  }
+
+  private async flushFileSystemReload() {
+    if (this._reloadingFileSystem || !this._reloadQueued) {
+      return;
+    }
+    this._reloadingFileSystem = true;
+    try {
+      while (this._reloadQueued) {
+        const preserveSelection = this._reloadQueuedPreserveSelection;
+        this._reloadQueued = false;
+        this._reloadQueuedPreserveSelection = false;
+        const selectedItemPaths = preserveSelection ? this.getSelectedItemPaths() : [];
+        await this.loadFileSystem();
+        this.refreshFileView(preserveSelection, selectedItemPaths);
+      }
+    } finally {
+      this._reloadingFileSystem = false;
+    }
   }
 
   private findDirectoryByPath(root: DirectoryInfo, path: string): DirectoryInfo | null {
@@ -1754,15 +1812,28 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     return stats;
   }
 
-  onVFSChanged(type: 'created' | 'deleted' | 'moved' | 'modified') {
-    if (type !== 'modified') {
-      this.loadFileSystem().then(() => {
-        this.refreshFileView();
-      });
+  onVFSChanged(
+    _type: 'created' | 'deleted' | 'moved' | 'modified',
+    path: string,
+    _itemType: 'file' | 'directory'
+  ) {
+    const rootPath = this._vfs.normalizePath(this._options.rootDir || '/');
+    const changedPath = this._vfs.normalizePath(path || '/');
+    if (
+      changedPath !== '/' &&
+      !this._vfs.isParentOf(rootPath, changedPath) &&
+      !this._vfs.isParentOf(changedPath, rootPath)
+    ) {
+      return;
     }
+    this.queueFileSystemReload(true);
   }
   protected onDispose() {
     super.onDispose();
+    if (this._reloadTimer) {
+      clearTimeout(this._reloadTimer);
+      this._reloadTimer = null;
+    }
     this._vfs.off('changed', this.onVFSChanged, this);
     eventBus.off('reveal_asset', this.revealAsset, this);
     if (this._options.allowDrop) {

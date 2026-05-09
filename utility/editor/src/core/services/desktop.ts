@@ -64,6 +64,14 @@ export type DesktopFileStat = {
   accessed?: string;
 };
 
+export type DesktopFSChangeEvent = {
+  watchId: string;
+  scope: DesktopFSScope;
+  path: string;
+  type: 'created' | 'deleted' | 'moved' | 'modified';
+  itemType: 'file' | 'directory';
+};
+
 export type DesktopMcpSettings = {
   enabled: boolean;
   port: number;
@@ -218,6 +226,9 @@ export type ZephyrEditorDesktopAPI = {
       options?: DesktopFSMoveOptions
     ): Promise<void>;
     deleteScope(scope: DesktopFSScope): Promise<void>;
+    watch(scope: DesktopFSScope, path?: string): Promise<string>;
+    unwatch(watchId: string): Promise<void>;
+    onChange(listener: (event: DesktopFSChangeEvent) => void): () => void;
   };
   settings: {
     getGlobalSettings(): Promise<DesktopGlobalSettings>;
