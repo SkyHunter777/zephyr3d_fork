@@ -31,6 +31,7 @@ import { DialogRenderer } from './modal';
 import type { Editor } from '../core/editor';
 import type { RuntimeEditorAssetContext, RuntimeEditorMenuContext } from '../core/plugin';
 import type { PropertyAccessor } from '@zephyr3d/scene';
+import { AssetThumbnailService, ImageAssetThumbnailProvider } from './assetthumbnail';
 
 export type FileInfo = {
   meta: FileMetadata;
@@ -236,6 +237,14 @@ export class ContentListView extends ListView<{}, FileInfo | DirectoryInfo> {
   }
   get renderer() {
     return (this._data as VFSContentData).renderer;
+  }
+  protected renderGridContent(
+    item: FileInfo | DirectoryInfo,
+    _index: number,
+    min: ImGui.ImVec2,
+    max: ImGui.ImVec2
+  ): boolean {
+    return 'subDir' in item ? false : this.renderer.renderFileThumbnail(item, min, max);
   }
   protected postRenderItem(item: FileInfo | DirectoryInfo): void {
     super.postRenderItem(item);
@@ -494,6 +503,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   private readonly _treePanel: DockPannel;
   private _nav: DirTreeView;
   private _contentView: ContentListView;
+  private readonly _thumbnailService: AssetThumbnailService;
   private _filesystem: DirectoryInfo;
   private _fileFilter: string[];
   private _currentDirContent: (FileInfo | DirectoryInfo)[] = [];
@@ -515,6 +525,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     this._vfs = vfs;
     this._vfs.on('changed', this.onVFSChanged, this);
     this._treePanel = new DockPannel(0, 0, treePanelWidth, -1, 8, 200, 500, ResizeDirection.Right, 0, 99999);
+    this._thumbnailService = new AssetThumbnailService([new ImageAssetThumbnailProvider()], 256, 2);
     this._filesystem = null;
     this._fileFilter = fileFilter?.slice() ?? [];
     this._options = {
@@ -874,6 +885,48 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     } else {
       eventBus.dispatchEvent('action', 'EDIT_CODE', path, mimeType);
     }
+  }
+
+  renderFileThumbnail(file: FileInfo, min: ImGui.ImVec2, max: ImGui.ImVec2) {
+    const mimeType = this._vfs.guessMIMEType(file.meta.path);
+    const thumbnail = this._thumbnailService.request({
+      vfs: this._vfs,
+      path: file.meta.path,
+      mimeType,
+      meta: file.meta,
+      thumbnailSize: Math.max(max.x - min.x, max.y - min.y)
+    });
+    if (thumbnail.status !== 'ready' || !thumbnail.texture) {
+      return false;
+    }
+
+    const drawList = ImGui.GetWindowDrawList();
+    const backgroundColor = ImGui.GetColorU32(new ImGui.ImVec4(0.14, 0.14, 0.14, 1));
+    drawList.AddRectFilled(min, max, backgroundColor, 4);
+
+    const boundsWidth = Math.max(1, max.x - min.x);
+    const boundsHeight = Math.max(1, max.y - min.y);
+    const aspectRatio = thumbnail.aspectRatio > 0 ? thumbnail.aspectRatio : 1;
+    let drawWidth = boundsWidth;
+    let drawHeight = drawWidth / aspectRatio;
+    if (drawHeight > boundsHeight) {
+      drawHeight = boundsHeight;
+      drawWidth = drawHeight * aspectRatio;
+    }
+
+    const inset = 1;
+    const clipMin = new ImGui.ImVec2(min.x + inset, min.y + inset);
+    const clipMax = new ImGui.ImVec2(max.x - inset, max.y - inset);
+    const offsetX = Math.round((boundsWidth - drawWidth) * 0.5);
+    const offsetY = Math.round((boundsHeight - drawHeight) * 0.5);
+    const alignedWidth = Math.min(Math.round(drawWidth), Math.max(1, clipMax.x - clipMin.x));
+    const alignedHeight = Math.min(Math.round(drawHeight), Math.max(1, clipMax.y - clipMin.y));
+    const drawMin = new ImGui.ImVec2(min.x + offsetX, min.y + offsetY);
+    const drawMax = new ImGui.ImVec2(drawMin.x + alignedWidth, drawMin.y + alignedHeight);
+    drawList.PushClipRect(clipMin, clipMax, true);
+    drawList.AddImage(thumbnail.texture.get(), drawMin, drawMax);
+    drawList.PopClipRect();
+    return true;
   }
 
   private sortContent() {
@@ -1813,12 +1866,17 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   }
 
   onVFSChanged(
-    _type: 'created' | 'deleted' | 'moved' | 'modified',
+    type: 'created' | 'deleted' | 'moved' | 'modified',
     path: string,
-    _itemType: 'file' | 'directory'
+    itemType: 'file' | 'directory'
   ) {
     const rootPath = this._vfs.normalizePath(this._options.rootDir || '/');
     const changedPath = this._vfs.normalizePath(path || '/');
+    if (type === 'moved' || changedPath === '/') {
+      this._thumbnailService.clear();
+    } else if (this._vfs.isParentOf(rootPath, changedPath)) {
+      this._thumbnailService.invalidate(changedPath, itemType === 'directory');
+    }
     if (
       changedPath !== '/' &&
       !this._vfs.isParentOf(rootPath, changedPath) &&
@@ -1834,6 +1892,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       clearTimeout(this._reloadTimer);
       this._reloadTimer = null;
     }
+    this._thumbnailService.dispose();
     this._vfs.off('changed', this.onVFSChanged, this);
     eventBus.off('reveal_asset', this.revealAsset, this);
     if (this._options.allowDrop) {

@@ -36,7 +36,7 @@ function textureToListName(tex: BaseTexture) {
 export function renderTextureViewer() {
   const textureList = getDevice().getGPUObjects().textures;
   const textureNameList = textureList
-    .filter((tex) => !tex.isTexture3D())
+    .filter((tex) => !tex.isTexture3D() && !tex.name.startsWith('!!'))
     .sort((a, b) => a.uid - b.uid)
     .map((tex) => textureToListName(tex));
   if (textureNameList.length > 0) {

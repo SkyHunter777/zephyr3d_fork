@@ -240,18 +240,41 @@ export class ListView<P extends EventMap, T = unknown> extends Observable<P> {
     if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGui.MouseButton.Left)) {
       this.handleItemDoubleClick(item);
     }
+    const iconRectMin = ImGui.GetItemRectMin();
+    const iconRectMax = ImGui.GetItemRectMax();
     this.postRenderItem(item);
 
     // Draw emoji centered in the icon rect
     const drawList = ImGui.GetWindowDrawList();
-    const iconMin = ImGui.GetItemRectMin();
-    const emojiStr = convertEmojiString(icon);
-    const emojiSize = ImGui.CalcTextSize(emojiStr);
-    const emojiPos = new ImGui.ImVec2(
-      iconMin.x + (width - emojiSize.x) * 0.5,
-      iconMin.y + (iconSize - emojiSize.y) * 0.5
-    );
-    drawList.AddText(emojiPos, ImGui.GetColorU32(ImGui.Col.Text), emojiStr);
+    const contentPadding = 4;
+    const contentMin = new ImGui.ImVec2(iconRectMin.x + contentPadding, iconRectMin.y + contentPadding);
+    const contentMax = new ImGui.ImVec2(iconRectMax.x - contentPadding, iconRectMax.y - contentPadding);
+    const renderedCustomContent = this.renderGridContent(item, index, contentMin, contentMax, isSelected);
+    if (!renderedCustomContent) {
+      const emojiStr = convertEmojiString(icon);
+      const emojiSize = ImGui.CalcTextSize(emojiStr);
+      const emojiPos = new ImGui.ImVec2(
+        iconRectMin.x + (iconRectMax.x - iconRectMin.x - emojiSize.x) * 0.5,
+        iconRectMin.y + (iconRectMax.y - iconRectMin.y - emojiSize.y) * 0.5
+      );
+      drawList.AddText(emojiPos, ImGui.GetColorU32(ImGui.Col.Text), emojiStr);
+    } else {
+      const borderColor = ImGui.GetColorU32(
+        isSelected
+          ? ImGui.Col.HeaderActive
+          : ImGui.IsItemHovered()
+            ? ImGui.Col.HeaderHovered
+            : ImGui.Col.Border
+      );
+      drawList.AddRect(
+        contentMin,
+        contentMax,
+        borderColor,
+        4,
+        ImGui.DrawCornerFlags.None,
+        isSelected ? 2 : 1
+      );
+    }
 
     // Name text, wrapped to the cell width
     ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + width);
@@ -449,6 +472,15 @@ export class ListView<P extends EventMap, T = unknown> extends Observable<P> {
     this.onSelectionChanged();
   }
   protected handleItemDoubleClick(_item: T) {}
+  protected renderGridContent(
+    _item: T,
+    _index: number,
+    _min: ImGui.ImVec2,
+    _max: ImGui.ImVec2,
+    _selected: boolean
+  ): boolean {
+    return false;
+  }
   protected renderDetailLeadingContent(_item: T, _index: number): boolean {
     return false;
   }
