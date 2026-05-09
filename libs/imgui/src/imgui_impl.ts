@@ -218,6 +218,18 @@ function window_on_gamepaddisconnected(event: any /* GamepadEvent */) {
   console.info('Gamepad disconnected at index %d: %s.', event.gamepad.index, event.gamepad.id);
 }
 
+function shouldPreserveMouseStateOnCanvasBlur(event: FocusEvent) {
+  const next = event.relatedTarget;
+  if (!(next instanceof HTMLElement)) {
+    return false;
+  }
+  const hiddenTextBridge =
+    (next.tagName === 'INPUT' || next.tagName === 'TEXTAREA') &&
+    next.tabIndex < 0 &&
+    next.getAttribute('aria-hidden') === 'true';
+  return hiddenTextBridge;
+}
+
 function canvas_on_blur(_event: FocusEvent) {
   const io = ImGui.GetIO();
   io.KeyCtrl = false;
@@ -227,11 +239,13 @@ function canvas_on_blur(_event: FocusEvent) {
   for (let i = 0; i < io.KeysDown.length; ++i) {
     io.KeysDown[i] = false;
   }
-  for (let i = 0; i < io.MouseDown.length; ++i) {
-    io.MouseDown[i] = false;
+  if (!shouldPreserveMouseStateOnCanvasBlur(_event)) {
+    for (let i = 0; i < io.MouseDown.length; ++i) {
+      io.MouseDown[i] = false;
+    }
+    leftMouseDown = false;
+    releasePointerLock();
   }
-  leftMouseDown = false;
-  releasePointerLock();
 }
 
 const key_code_to_index: Record<string, number> = {
@@ -628,6 +642,7 @@ export function Init(device: AbstractDevice, glyphSize: number) {
 
   // Setup back-end capabilities flags
   io.BackendFlags |= ImGui.BackendFlags.HasMouseCursors; // We can honor GetMouseCursor() values (optional)
+  io.BackendFlags |= ImGui.BackendFlags.RendererHasVtxOffset;
 
   // Keyboard mapping. ImGui will use those indices to peek into the io.KeyDown[] array.
   io.KeyMap[ImGui.Key.Tab] = 9;
@@ -1044,8 +1059,6 @@ export function RenderDrawData(draw_data: ImGui.DrawData | null = ImGui.GetDrawD
     const vx = draw_list.VtxBuffer;
     const ix = draw_list.IdxBuffer;
     const ixU16 = new Uint16Array(ix.buffer.slice(ix.byteOffset, ix.byteOffset + ix.byteLength));
-    let indexOffset = 0;
-
     draw_list.IterateDrawCmds((draw_cmd: ImGui.DrawCmd) => {
       if (draw_cmd.UserCallback !== null) {
         // User callback (registered via ImDrawList::AddCallback)
@@ -1064,15 +1077,17 @@ export function RenderDrawData(draw_data: ImGui.DrawData | null = ImGui.GetDrawD
           const scissorY = renderer!.device.deviceYToScreen(fb_height - clip_rect.w);
           const scissorW = renderer!.device.deviceXToScreen(clip_rect.z - clip_rect.x);
           const scissorH = renderer!.device.deviceYToScreen(clip_rect.w - clip_rect.y);
-          renderer!.stream(vx, ixU16, indexOffset, draw_cmd.ElemCount, draw_cmd.TextureId, [
-            scissorX,
-            scissorY,
-            scissorW,
-            scissorH
-          ]);
+          renderer!.stream(
+            vx,
+            ixU16,
+            draw_cmd.VtxOffset,
+            draw_cmd.IdxOffset,
+            draw_cmd.ElemCount,
+            draw_cmd.TextureId,
+            [scissorX, scissorY, scissorW, scissorH]
+          );
         }
       }
-      indexOffset += draw_cmd.ElemCount;
     });
   });
   renderer!.device.setScissor(scissorOld);

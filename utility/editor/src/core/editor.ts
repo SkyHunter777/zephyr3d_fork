@@ -1309,10 +1309,7 @@ export class Editor {
       const worker = await getWorker(uri);
       const fileName = uri.toString();
       const allDiagnostics = (
-        await Promise.all([
-          worker.getSyntacticDiagnostics(fileName),
-          worker.getSemanticDiagnostics(fileName)
-        ])
+        await Promise.all([worker.getSyntacticDiagnostics(fileName), worker.getSemanticDiagnostics(fileName)])
       ).flat();
       const diagnostics = allDiagnostics
         .map((item: any) => {
@@ -1322,13 +1319,7 @@ export class Editor {
           const endPos = model.getPositionAt(end);
           const category = Number(item.category);
           const severity =
-            category === 1
-              ? 'error'
-              : category === 0
-                ? 'warning'
-                : category === 2
-                  ? 'suggestion'
-                  : 'message';
+            category === 1 ? 'error' : category === 0 ? 'warning' : category === 2 ? 'suggestion' : 'message';
           return {
             code: Number(item.code ?? 0),
             severity,

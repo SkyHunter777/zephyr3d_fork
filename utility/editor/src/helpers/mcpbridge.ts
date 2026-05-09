@@ -427,7 +427,8 @@ function serializeScriptAttachments(host: ScriptHostObject) {
 
 function cloneScriptAttachments(host: ScriptHostObject) {
   return host.scripts.map(
-    (attachment) => new ScriptAttachment(attachment.script, cloneScriptValue(attachment.config ?? null) as any)
+    (attachment) =>
+      new ScriptAttachment(attachment.script, cloneScriptValue(attachment.config ?? null) as any)
   );
 }
 
@@ -522,7 +523,8 @@ function applyScriptAttachmentToHost(
 ) {
   let attachments = cloneScriptAttachments(host);
   const existingIndex = attachments.findIndex((item) => item.script === scriptPath);
-  const existingConfig = existingIndex >= 0 ? cloneScriptValue(attachments[existingIndex].config ?? null) : null;
+  const existingConfig =
+    existingIndex >= 0 ? cloneScriptValue(attachments[existingIndex].config ?? null) : null;
   const nextAttachment = (fallbackConfig: Record<string, unknown> | unknown[] | null) =>
     createScriptAttachment(scriptPath, hasConfig ? config : fallbackConfig);
   if (mode === 'replace_all') {
@@ -2562,7 +2564,10 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
       const nodeId = typeof params.node_id === 'string' ? params.node_id.trim() : '';
       const resolved = resolveScriptHost(editor, target, nodeId);
       return {
-        host: resolved.host && resolved.hostType ? serializeScriptHost(editor, resolved.hostType, resolved.host) : null,
+        host:
+          resolved.host && resolved.hostType
+            ? serializeScriptHost(editor, resolved.hostType, resolved.host)
+            : null,
         attachments: resolved.host ? serializeScriptAttachments(resolved.host) : null,
         selected_nodes: serializeSelectedScriptNodes(scene, resolved.selectedNodes),
         err: resolved.err
@@ -2595,7 +2600,9 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           err: `Script asset file not found: ${normalizedPath.path}`
         };
       }
-      const content = (await ProjectService.VFS.readFile(normalizedPath.path!, { encoding: 'utf8' })) as string;
+      const content = (await ProjectService.VFS.readFile(normalizedPath.path!, {
+        encoding: 'utf8'
+      })) as string;
       return {
         path: normalizedPath.path,
         language: guessScriptLanguage(normalizedPath.path!),
@@ -2648,8 +2655,15 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
       if (dir && dir !== '.' && dir !== '/') {
         await ProjectService.VFS.makeDirectory(dir, true);
       }
-      await ProjectService.VFS.writeFile(normalizedPath.path!, params.content, { encoding: 'utf8', create: true });
-      await editor.syncCodeModelToFile(normalizedPath.path!, params.content, guessScriptLanguage(normalizedPath.path!));
+      await ProjectService.VFS.writeFile(normalizedPath.path!, params.content, {
+        encoding: 'utf8',
+        create: true
+      });
+      await editor.syncCodeModelToFile(
+        normalizedPath.path!,
+        params.content,
+        guessScriptLanguage(normalizedPath.path!)
+      );
       (
         getEngine().scriptingSystem.registry as {
           invalidate?: (moduleId?: string) => void;
@@ -2869,7 +2883,9 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           };
         }
         if (params.all === true) {
-          const nextAttachments = attachments.filter((attachment) => attachment.script !== normalizedPath.path);
+          const nextAttachments = attachments.filter(
+            (attachment) => attachment.script !== normalizedPath.path
+          );
           removedCount = attachments.length - nextAttachments.length;
           resolved.host.scripts = nextAttachments;
         } else {

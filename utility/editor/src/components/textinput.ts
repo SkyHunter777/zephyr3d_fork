@@ -67,6 +67,7 @@ const graphemeSegmenter =
 
 let hiddenTextarea: HTMLTextAreaElement | null = null;
 let activeControlId: number | null = null;
+let selectionVisibleControlId: number | null = null;
 let lastProcessedFrame = -1;
 
 function normalizeText(text: string) {
@@ -84,6 +85,34 @@ function hasFlag(flags: CustomInputTextFlags, flag: CustomInputTextFlags) {
 
 function normalizeFlags(flags: CustomInputTextFlags | undefined) {
   return (flags ?? CustomInputTextFlags.None) as CustomInputTextFlags;
+}
+
+function isAllowedReadOnlyKey(ev: KeyboardEvent) {
+  const key = ev.key;
+  if (
+    key === 'ArrowLeft' ||
+    key === 'ArrowRight' ||
+    key === 'ArrowUp' ||
+    key === 'ArrowDown' ||
+    key === 'Home' ||
+    key === 'End' ||
+    key === 'PageUp' ||
+    key === 'PageDown' ||
+    key === 'Shift' ||
+    key === 'Control' ||
+    key === 'Alt' ||
+    key === 'Meta'
+  ) {
+    return true;
+  }
+  const cmdDown = ev.ctrlKey || ev.metaKey;
+  if (cmdDown && !ev.altKey) {
+    const lowerKey = key.toLowerCase();
+    if (lowerKey === 'a' || lowerKey === 'c') {
+      return true;
+    }
+  }
+  return false;
 }
 
 function filterInputText(text: string, flags: CustomInputTextFlags, multiline: boolean) {
@@ -148,8 +177,26 @@ function ensureHiddenTextarea() {
   hiddenTextarea.style.zIndex = '-1';
   hiddenTextarea.addEventListener('blur', () => {
     if (document.activeElement !== hiddenTextarea) {
+      if (activeControlId !== null) {
+        const state = controlStates.get(activeControlId);
+        if (state) {
+          state.lastSelectionStart = hiddenTextarea.selectionStart ?? 0;
+          state.lastSelectionEnd = hiddenTextarea.selectionEnd ?? state.lastSelectionStart;
+          selectionVisibleControlId =
+            state.lastSelectionStart !== state.lastSelectionEnd ? activeControlId : null;
+        }
+      }
       activeControlId = null;
       moveTextareaOffscreen();
+    }
+  });
+  hiddenTextarea.addEventListener('beforeinput', (ev) => {
+    const state = activeControlId !== null ? controlStates.get(activeControlId) : null;
+    if (!state) {
+      return;
+    }
+    if (hasFlag(state.flags, CustomInputTextFlags.ReadOnly)) {
+      ev.preventDefault();
     }
   });
   hiddenTextarea.addEventListener('keydown', (ev) => {
@@ -175,6 +222,10 @@ function ensureHiddenTextarea() {
       } else {
         blurHiddenTextarea();
       }
+      return;
+    }
+    if (readOnly && !isAllowedReadOnlyKey(ev)) {
+      ev.preventDefault();
       return;
     }
     if (ev.key === 'Enter') {
@@ -255,13 +306,12 @@ function measureTextWidth(text: string) {
   if (!text) {
     return 0;
   }
-  const displayText = convertEmojiString(text);
-  const cached = widthCache.get(displayText);
+  const cached = widthCache.get(text);
   if (cached !== undefined) {
     return cached;
   }
-  const width = imGuiCalcTextSize(displayText).x;
-  widthCache.set(displayText, width);
+  const width = imGuiCalcTextSize(text).x;
+  widthCache.set(text, width);
   return width;
 }
 
@@ -416,6 +466,23 @@ function getCaretX(line: LineLayout, index: number) {
   return line.width;
 }
 
+function getSelectedDisplayRun(line: LineLayout, start: number, end: number) {
+  let x0 = 0;
+  let text = '';
+  let started = false;
+  for (const grapheme of line.graphemes) {
+    if (grapheme.end <= start || grapheme.start >= end) {
+      continue;
+    }
+    if (!started) {
+      x0 = grapheme.x0;
+      started = true;
+    }
+    text += grapheme.displayText;
+  }
+  return started ? { x0, text } : null;
+}
+
 function indexFromPoint(layout: TextLayout, x: number, y: number) {
   const lineIndex = clamp(Math.floor(y / layout.lineHeight), 0, layout.lines.length - 1);
   const line = layout.lines[lineIndex];
@@ -485,7 +552,7 @@ function updateScrollForCaret(
   const caretX = getCaretX(line, caretIndex);
   const caretY = lineIndex * layout.lineHeight;
   const rightMargin = Math.max(8, innerWidth * 0.15);
-  const bottomMargin = layout.lineHeight;
+  const bottomMargin = Math.max(0, innerHeight - layout.lineHeight);
   if (caretX < state.scrollX) {
     state.scrollX = caretX;
   } else if (caretX > state.scrollX + innerWidth - rightMargin) {
@@ -631,7 +698,6 @@ export function customTextInput(
 
   ImGui.InvisibleButton(`##custom_text_input_${id}`, size, 0);
   const hovered = ImGui.IsItemHovered();
-  const itemActive = ImGui.IsItemActive();
   const clicked = ImGui.IsItemClicked(ImGui.MouseButton.Left);
   const rectMin = ImGui.GetItemRectMin();
   const rectMax = ImGui.GetItemRectMax();
@@ -641,7 +707,11 @@ export function customTextInput(
   const innerHeight = Math.max(1, clipMax.y - clipMin.y);
   const textarea = ensureHiddenTextarea();
   const active = activeControlId === id && document.activeElement === textarea;
+  const mouseDown = ImGui.IsMouseDown(ImGui.MouseButton.Left);
   textarea.readOnly = readOnly;
+  if (hovered || active) {
+    ImGui.SetMouseCursor(ImGui.MouseCursor.TextInput);
+  }
 
   let changed = false;
   const submitted = state.submitRequested;
@@ -672,6 +742,7 @@ export function customTextInput(
       )
     );
     activeControlId = id;
+    selectionVisibleControlId = id;
     state.dragAnchor = initialIndex;
     state.dragging = true;
     state.blinkStartTime = ImGui.GetTime();
@@ -686,17 +757,11 @@ export function customTextInput(
       focusHiddenTextarea(content[0], initialIndex, initialIndex);
       updateScrollForCaret(state, layout, initialIndex, innerWidth, innerHeight);
     }
+    state.scrollX = clamp(state.scrollX, 0, maxScrollX);
+    state.scrollY = clamp(state.scrollY, 0, maxScrollY);
   }
 
-  if (activeControlId === id && itemActive && ImGui.IsMouseDown(ImGui.MouseButton.Left)) {
-    const selectionIndex = setSelectionFromMouse(
-      state,
-      layout,
-      clipMin,
-      state.scrollX,
-      state.scrollY,
-      state.dragging
-    );
+  if (activeControlId === id && state.dragging) {
     if (multiline) {
       const mouse = ImGui.GetMousePos();
       const dt = ImGui.GetIO().DeltaTime || 1 / 60;
@@ -711,10 +776,20 @@ export function customTextInput(
         state.scrollX = clamp(state.scrollX + dt * 320, 0, maxScrollX);
       }
     }
+    const selectionIndex = setSelectionFromMouse(
+      state,
+      layout,
+      clipMin,
+      state.scrollX,
+      state.scrollY,
+      state.dragging
+    );
     updateScrollForCaret(state, layout, selectionIndex, innerWidth, innerHeight);
+    state.scrollX = clamp(state.scrollX, 0, maxScrollX);
+    state.scrollY = clamp(state.scrollY, 0, maxScrollY);
   }
 
-  if (!ImGui.IsMouseDown(ImGui.MouseButton.Left)) {
+  if (!mouseDown) {
     state.dragging = false;
   }
 
@@ -724,6 +799,8 @@ export function customTextInput(
       state.scrollY = clamp(state.scrollY - wheel * lineHeight * 3, 0, maxScrollY);
     }
   }
+  state.scrollX = clamp(state.scrollX, 0, maxScrollX);
+  state.scrollY = clamp(state.scrollY, 0, maxScrollY);
 
   const drawList = ImGui.GetWindowDrawList();
   const bgColor = ImGui.GetColorU32(hovered ? ImGui.Col.FrameBgHovered : ImGui.Col.FrameBg);
@@ -747,23 +824,27 @@ export function customTextInput(
       state.lastSelectionStart = selection.start;
       state.lastSelectionEnd = selection.end;
     }
-    if (selectionStart !== selectionEnd) {
-      for (let i = 0; i < layout.lines.length; i++) {
-        const line = layout.lines[i];
-        const localStart = clamp(selectionStart, line.start, line.end);
-        const localEnd = clamp(selectionEnd, line.start, line.end);
-        if (localStart >= localEnd) {
-          continue;
-        }
-        const x0 = getCaretX(line, localStart) - state.scrollX;
-        const x1 = getCaretX(line, localEnd) - state.scrollX;
-        const y0 = i * layout.lineHeight - state.scrollY;
-        drawList.AddRectFilled(
-          new ImGui.ImVec2(clipMin.x + x0, clipMin.y + y0),
-          new ImGui.ImVec2(clipMin.x + x1, clipMin.y + y0 + layout.lineHeight),
-          selectionColor
-        );
+    selectionVisibleControlId = selectionStart !== selectionEnd ? id : null;
+  } else if (selectionVisibleControlId === id) {
+    selectionStart = Math.min(state.lastSelectionStart, state.lastSelectionEnd);
+    selectionEnd = Math.max(state.lastSelectionStart, state.lastSelectionEnd);
+  }
+  if (selectionStart !== selectionEnd) {
+    for (let i = 0; i < layout.lines.length; i++) {
+      const line = layout.lines[i];
+      const localStart = clamp(selectionStart, line.start, line.end);
+      const localEnd = clamp(selectionEnd, line.start, line.end);
+      if (localStart >= localEnd) {
+        continue;
       }
+      const x0 = getCaretX(line, localStart) - state.scrollX;
+      const x1 = getCaretX(line, localEnd) - state.scrollX;
+      const y0 = i * layout.lineHeight - state.scrollY;
+      drawList.AddRectFilled(
+        new ImGui.ImVec2(clipMin.x + x0, clipMin.y + y0),
+        new ImGui.ImVec2(clipMin.x + x1, clipMin.y + y0 + layout.lineHeight),
+        selectionColor
+      );
     }
   }
 
@@ -778,18 +859,16 @@ export function customTextInput(
       const line = layout.lines[i];
       const basePos = new ImGui.ImVec2(clipMin.x - state.scrollX, y);
       drawList.AddText(basePos, textColor, convertEmojiString(line.displayText));
-      if (active && selectionStart !== selectionEnd) {
+      if (selectionStart !== selectionEnd) {
         const localStart = clamp(selectionStart, line.start, line.end);
         const localEnd = clamp(selectionEnd, line.start, line.end);
         if (localStart < localEnd) {
-          for (const grapheme of line.graphemes) {
-            if (grapheme.end <= localStart || grapheme.start >= localEnd) {
-              continue;
-            }
+          const selectedRun = getSelectedDisplayRun(line, localStart, localEnd);
+          if (selectedRun) {
             drawList.AddText(
-              new ImGui.ImVec2(clipMin.x + grapheme.x0 - state.scrollX, y),
+              new ImGui.ImVec2(clipMin.x + selectedRun.x0 - state.scrollX, y),
               selectedTextColor,
-              convertEmojiString(grapheme.displayText)
+              convertEmojiString(selectedRun.text)
             );
           }
         }

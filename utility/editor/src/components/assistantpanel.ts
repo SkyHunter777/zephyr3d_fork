@@ -33,6 +33,14 @@ type VirtualItemLayout = {
 
 export class AssistantPanel extends Disposable {
   private static readonly MAX_RENDER_TEXT_CHARS = 12000;
+  private static readonly READONLY_TEXT_INPUT_FLAGS =
+    CustomInputTextFlags.ReadOnly | CustomInputTextFlags.Multiline;
+  private static readonly USER_MESSAGE_BG = new ImGui.ImVec4(0.2, 0.3, 0.24, 1.0);
+  private static readonly USER_MESSAGE_BG_HOVERED = new ImGui.ImVec4(0.23, 0.34, 0.27, 1.0);
+  private static readonly USER_MESSAGE_BORDER = new ImGui.ImVec4(0.31, 0.47, 0.37, 1.0);
+  private static readonly ASSISTANT_MESSAGE_BG = new ImGui.ImVec4(0.19, 0.24, 0.32, 1.0);
+  private static readonly ASSISTANT_MESSAGE_BG_HOVERED = new ImGui.ImVec4(0.22, 0.28, 0.37, 1.0);
+  private static readonly ASSISTANT_MESSAGE_BORDER = new ImGui.ImVec4(0.33, 0.41, 0.55, 1.0);
   private _sessions: DesktopAssistantSessionSummary[];
   private _selectedSessionId: string;
   private _messages: DesktopAssistantMessage[];
@@ -554,9 +562,11 @@ export class AssistantPanel extends Disposable {
   }
 
   private renderMessageItem(message: DesktopAssistantMessage) {
+    const text = this.getMessageRenderText(message);
     ImGui.Separator();
+    ImGui.AlignTextToFramePadding();
     ImGui.Text(`${message.role}${message.status === 'error' ? ' (error)' : ''}`);
-    ImGui.TextWrapped(this.getMessageRenderText(message));
+    this.renderReadOnlyTextBlock(`##AssistantMessage_${message.id}`, text, message.role);
   }
 
   private renderPendingApprovalRows(pending: readonly PendingApproval[]) {
@@ -576,11 +586,21 @@ export class AssistantPanel extends Disposable {
   }
 
   private renderTimelineEntry(entry: ToolTimelineEntry) {
+    const argsText = this.getRenderJson(entry.args ?? {});
     ImGui.Separator();
+    ImGui.AlignTextToFramePadding();
     ImGui.Text(`${entry.tool} [${this.formatToolTimelineState(entry.state)}]`);
-    ImGui.TextWrapped(this.getRenderJson(entry.args ?? {}));
+    ImGui.SameLine();
+    if (ImGui.SmallButton(`Copy Args##${entry.callId}`)) {
+      ImGui.SetClipboardText(argsText);
+    }
+    this.renderReadOnlyTextBlock(`##AssistantTimelineArgs_${entry.callId}`, argsText);
     if (entry.result !== undefined) {
-      ImGui.TextWrapped(this.getRenderJson(entry.result));
+      const resultText = this.getRenderJson(entry.result);
+      if (ImGui.SmallButton(`Copy Result##${entry.callId}`)) {
+        ImGui.SetClipboardText(resultText);
+      }
+      this.renderReadOnlyTextBlock(`##AssistantTimelineResult_${entry.callId}`, resultText);
     }
   }
 
@@ -624,12 +644,9 @@ export class AssistantPanel extends Disposable {
     }
     const style = ImGui.GetStyle();
     const separatorHeight = 1 + style.ItemSpacing.y * 2;
-    const titleHeight = ImGui.GetTextLineHeightWithSpacing();
-    const contentHeight = Math.max(
-      1,
-      ImGui.CalcTextSize(this.getMessageRenderText(message), null, false, wrapWidth).y
-    );
-    const height = separatorHeight + titleHeight + contentHeight + style.ItemSpacing.y;
+    const headerHeight = Math.max(ImGui.GetTextLineHeight(), ImGui.GetFrameHeight());
+    const contentHeight = this.measureReadOnlyTextBlockHeight(this.getMessageRenderText(message));
+    const height = separatorHeight + headerHeight + style.ItemSpacing.y + contentHeight;
     this._messageLayoutCache.set(key, { width: wrapWidth, height });
     return height;
   }
@@ -642,18 +659,47 @@ export class AssistantPanel extends Disposable {
     }
     const style = ImGui.GetStyle();
     const separatorHeight = 1 + style.ItemSpacing.y * 2;
-    const titleHeight = ImGui.GetTextLineHeightWithSpacing();
-    const argsHeight = Math.max(
-      1,
-      ImGui.CalcTextSize(this.getRenderJson(entry.args ?? {}), null, false, wrapWidth).y
-    );
+    const headerHeight = Math.max(ImGui.GetTextLineHeight(), ImGui.GetFrameHeight());
+    const argsHeight = this.measureReadOnlyTextBlockHeight(this.getRenderJson(entry.args ?? {}));
     const resultHeight =
       entry.result === undefined
         ? 0
-        : Math.max(1, ImGui.CalcTextSize(this.getRenderJson(entry.result), null, false, wrapWidth).y);
-    const height = separatorHeight + titleHeight + argsHeight + resultHeight + style.ItemSpacing.y * 2;
+        : this.measureReadOnlyTextBlockHeight(this.getRenderJson(entry.result)) + style.ItemSpacing.y;
+    const height = separatorHeight + headerHeight + style.ItemSpacing.y + argsHeight + resultHeight;
     this._timelineLayoutCache.set(key, { width: wrapWidth, height });
     return height;
+  }
+
+  private renderReadOnlyTextBlock(label: string, text: string, role?: DesktopAssistantMessage['role']) {
+    const value: [string] = [text];
+    if (role === 'user') {
+      ImGui.PushStyleColor(ImGui.Col.FrameBg, AssistantPanel.USER_MESSAGE_BG);
+      ImGui.PushStyleColor(ImGui.Col.FrameBgHovered, AssistantPanel.USER_MESSAGE_BG_HOVERED);
+      ImGui.PushStyleColor(ImGui.Col.Border, AssistantPanel.USER_MESSAGE_BORDER);
+    } else if (role === 'assistant') {
+      ImGui.PushStyleColor(ImGui.Col.FrameBg, AssistantPanel.ASSISTANT_MESSAGE_BG);
+      ImGui.PushStyleColor(ImGui.Col.FrameBgHovered, AssistantPanel.ASSISTANT_MESSAGE_BG_HOVERED);
+      ImGui.PushStyleColor(ImGui.Col.Border, AssistantPanel.ASSISTANT_MESSAGE_BORDER);
+    }
+    customTextInput(
+      label,
+      value,
+      '',
+      AssistantPanel.READONLY_TEXT_INPUT_FLAGS,
+      -1,
+      this.measureReadOnlyTextBlockHeight(text)
+    );
+    if (role === 'user' || role === 'assistant') {
+      ImGui.PopStyleColor(3);
+    }
+  }
+
+  private measureReadOnlyTextBlockHeight(text: string) {
+    const style = ImGui.GetStyle();
+    const lineHeight = ImGui.GetTextLineHeight();
+    const lineCount = Math.max(1, text.split('\n').length);
+    const contentHeight = Math.max(lineHeight, lineCount * lineHeight);
+    return Math.max(ImGui.GetFrameHeight(), contentHeight + style.FramePadding.y * 2 + 2);
   }
 
   private getRenderText(text: string) {

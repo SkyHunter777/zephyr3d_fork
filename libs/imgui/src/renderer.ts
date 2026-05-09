@@ -179,6 +179,7 @@ export class Renderer extends Disposable {
   stream(
     vertexData: Uint8Array<ArrayBuffer>,
     indexData: Uint16Array<ArrayBuffer>,
+    vertexOffset: number,
     indexOffset: number,
     indexCount: number,
     texture: Nullable<Texture2D>,
@@ -188,7 +189,30 @@ export class Renderer extends Disposable {
     if (tex?.disposed) {
       tex = null;
     }
-    const vertexCount = vertexData.length / 20;
+    let minIndex = Number.POSITIVE_INFINITY;
+    let maxIndex = -1;
+    for (let i = 0; i < indexCount; i++) {
+      const index = indexData[indexOffset + i];
+      if (index < minIndex) {
+        minIndex = index;
+      }
+      if (index > maxIndex) {
+        maxIndex = index;
+      }
+    }
+    const vertexStart = Number.isFinite(minIndex) ? Math.min(vertexOffset, minIndex) : vertexOffset;
+    const vertexEnd = maxIndex >= vertexStart ? maxIndex + 1 : vertexStart;
+    const vertexCount = Math.max(0, vertexEnd - vertexStart);
+    const vertexByteOffset = vertexStart * 20;
+    const vertexByteCount = vertexCount * 20;
+    const vertexSlice =
+      vertexByteCount > 0
+        ? vertexData.subarray(vertexByteOffset, vertexByteOffset + vertexByteCount)
+        : vertexData;
+    const rebasedIndexData = new Uint16Array((indexCount + 1) & ~1);
+    for (let i = 0; i < indexCount; i++) {
+      rebasedIndexData[i] = indexData[indexOffset + i] - vertexStart;
+    }
     const overflow =
       this._drawPosition + vertexCount > Renderer.VERTEX_BUFFER_SIZE ||
       this._indexPosition + indexCount > Renderer.INDEX_BUFFER_SIZE;
@@ -200,17 +224,13 @@ export class Renderer extends Disposable {
 
     const vertexLayout = this._primitiveBuffer[this._activeBuffer];
     const alignedIndexCount = (indexCount + 1) & ~1;
-    if (indexData.length < indexOffset + alignedIndexCount) {
-      const alignedIndexData = new Uint16Array(alignedIndexCount);
-      alignedIndexData.set(indexData.subarray(indexOffset));
-      indexData = alignedIndexData;
-      indexOffset = 0;
-    }
     const vertexBuffer = vertexLayout.getVertexBuffer('position')!;
-    vertexBuffer.bufferSubData(this._drawPosition * 20, vertexData, 0, vertexCount * 20);
+    if (vertexByteCount > 0) {
+      vertexBuffer.bufferSubData(this._drawPosition * 20, vertexSlice, 0, vertexByteCount);
+    }
     vertexLayout
       .getIndexBuffer()!
-      .bufferSubData(this._indexPosition * 2, indexData, indexOffset, alignedIndexCount);
+      .bufferSubData(this._indexPosition * 2, rebasedIndexData, 0, alignedIndexCount);
     vertexLayout.setDrawOffset(vertexBuffer, this._drawPosition * 20);
     if (texture) {
       this._device.setProgram(this._programTexture);
