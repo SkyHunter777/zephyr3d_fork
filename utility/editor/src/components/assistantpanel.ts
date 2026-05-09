@@ -200,6 +200,7 @@ export class AssistantPanel extends Disposable {
         }
       }
       this.renderPendingApprovalRows(pending);
+      this.renderConversationActivityHint();
       ImGui.Dummy(new ImGui.ImVec2(0, 1));
       if (
         this._pendingConversationScrollRevision !== null &&
@@ -467,9 +468,11 @@ export class AssistantPanel extends Disposable {
     const drafts = Array.from(this._messageDrafts.get(this._selectedSessionId)?.values() ?? []).filter(
       (message) => message.role !== 'tool'
     );
-    return [...messages, ...drafts].sort((a, b) =>
-      a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt)
-    );
+    return [...messages, ...drafts]
+      .filter((message) => !this.shouldHideConversationMessage(message))
+      .sort((a, b) =>
+        a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt)
+      );
   }
 
   private get currentToolTimeline() {
@@ -561,12 +564,22 @@ export class AssistantPanel extends Disposable {
     }
   }
 
+  private shouldHideConversationMessage(message: DesktopAssistantMessage) {
+    return (
+      message.role === 'assistant' &&
+      message.status === 'pending' &&
+      !this.getMessageRenderText(message).trim()
+    );
+  }
+
   private renderMessageItem(message: DesktopAssistantMessage) {
     const text = this.getMessageRenderText(message);
-    ImGui.Separator();
-    ImGui.AlignTextToFramePadding();
-    ImGui.Text(`${message.role}${message.status === 'error' ? ' (error)' : ''}`);
-    this.renderReadOnlyTextBlock(`##AssistantMessage_${message.id}`, text, message.role);
+    if (!this.shouldHideConversationMessage(message)) {
+      ImGui.Separator();
+      ImGui.AlignTextToFramePadding();
+      ImGui.Text(`${message.role}${message.status === 'error' ? ' (error)' : ''}`);
+      this.renderReadOnlyTextBlock(`##AssistantMessage_${message.id}`, text, message.role);
+    }
   }
 
   private renderPendingApprovalRows(pending: readonly PendingApproval[]) {
@@ -583,6 +596,39 @@ export class AssistantPanel extends Disposable {
         void this.rejectToolCall(item.callId);
       }
     }
+  }
+
+  private renderConversationActivityHint() {
+    const hint = this.getConversationActivityHint();
+    if (!hint) {
+      return;
+    }
+    ImGui.Separator();
+    ImGui.TextDisabled(hint);
+  }
+
+  private getConversationActivityHint() {
+    if (!this.currentSession?.active) {
+      return null;
+    }
+    const pendingApproval = this.currentPendingApprovals[0];
+    if (pendingApproval) {
+      return `Awaiting approval for ${this.getRenderText(pendingApproval.tool)}...`;
+    }
+    const runningTool = [...this.currentToolTimeline]
+      .reverse()
+      .find((entry) => entry.state === 'running' || entry.state === 'approved');
+    if (runningTool) {
+      return `Calling ${this.getRenderText(runningTool.tool)}...`;
+    }
+    const drafts = Array.from(this._messageDrafts.get(this._selectedSessionId)?.values() ?? []);
+    const pendingAssistantDraft = drafts.find(
+      (message) => message.role === 'assistant' && (message.status === 'pending' || !message.status)
+    );
+    if (pendingAssistantDraft && !this.getMessageRenderText(pendingAssistantDraft).trim()) {
+      return 'Thinking...';
+    }
+    return 'Working...';
   }
 
   private renderTimelineEntry(entry: ToolTimelineEntry) {
