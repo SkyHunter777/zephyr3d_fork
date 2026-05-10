@@ -499,28 +499,17 @@ export class WebGPUDevice extends BaseDevice {
       console.error('CopyTexture2D(): Source texture and destination texture must have same format');
       return;
     }
-    this.flush();
     const srcTex = src as WebGPUTexture2D;
     const dstTex = dst as WebGPUTexture2D;
-    const commandEncoder = this._device!.createCommandEncoder();
-    commandEncoder.copyTextureToTexture(
-      {
-        texture: srcTex.object!,
-        mipLevel: srcLevel,
-        origin: { x: 0, y: 0, z: 0 }
-      },
-      {
-        texture: dstTex.object!,
-        mipLevel: dstLevel,
-        origin: { x: 0, y: 0, z: 0 }
-      },
-      {
-        width: srcWidth,
-        height: srcHeight,
-        depthOrArrayLayers: 1
-      }
+    this._commandQueue.copyTexture(
+      srcTex.object!,
+      dstTex.object!,
+      srcLevel,
+      dstLevel,
+      srcWidth,
+      srcHeight,
+      1
     );
-    this._device!.queue.submit([commandEncoder.finish()]);
   }
   createGPUProgram(params: GPUProgramConstructParams) {
     return new WebGPUProgram(this, params);
@@ -794,8 +783,8 @@ export class WebGPUDevice extends BaseDevice {
     );
     return (renderBundle as WebGPURenderBundle).dc;
   }
-  bufferUpload(buffer: WebGPUBuffer) {
-    this._commandQueue.bufferUpload(buffer);
+  bufferUpload(buffer: WebGPUBuffer, offset: number, size: number) {
+    this._commandQueue.bufferUpload(buffer, offset, size);
   }
   textureUpload(tex: WebGPUBaseTexture) {
     this._commandQueue.textureUpload(tex);

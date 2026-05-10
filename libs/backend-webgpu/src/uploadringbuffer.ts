@@ -58,11 +58,10 @@ export class UploadRingBuffer {
     dst: Nullable<GPUBuffer>,
     srcOffset: number,
     dstOffset: number,
-    uploadSize: number,
-    allowOverlap?: boolean
+    uploadSize: number
   ) {
     const size = (uploadSize + 3) & ~3;
-    const mappedBuffer = this.fetchBufferMapped(size, !!allowOverlap);
+    const mappedBuffer = this.fetchBufferMapped(size);
     if (src) {
       const mappedRange = mappedBuffer.mappedRange; //mappedBuffer.buffer.getMappedRange(mappedBuffer.offset, size);
       new Uint8Array(mappedRange!, mappedBuffer.offset, size).set(new Uint8Array(src, srcOffset, uploadSize));
@@ -114,9 +113,9 @@ export class UploadRingBuffer {
     }
     this._unmappedBufferList = [];
   }
-  fetchBufferMapped(size: number, allowOverlap: boolean) {
+  fetchBufferMapped(size: number) {
     for (const buffer of this._bufferList) {
-      if (allowOverlap || buffer.size - buffer.offset >= size) {
+      if (buffer.size - buffer.offset >= size) {
         buffer.used = true;
         return buffer;
       }

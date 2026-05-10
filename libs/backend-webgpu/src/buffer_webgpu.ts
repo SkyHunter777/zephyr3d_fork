@@ -1,10 +1,15 @@
 import type { GPUDataBuffer } from '@zephyr3d/device';
 import { GPUResourceUsageFlags } from '@zephyr3d/device';
 import { WebGPUObject } from './gpuobject_webgpu';
-import type { UploadBuffer } from './uploadringbuffer';
 import { UploadRingBuffer } from './uploadringbuffer';
 import type { Nullable, TypedArray, TypedArrayConstructor } from '@zephyr3d/base';
 import type { WebGPUDevice } from './device';
+import type { MappedBuffer } from './uploadringbuffer';
+
+type PendingUploadRange = {
+  offset: number;
+  size: number;
+};
 
 export class WebGPUBuffer extends WebGPUObject<GPUBuffer> implements GPUDataBuffer<GPUBuffer> {
   private readonly _size: number;
@@ -12,7 +17,8 @@ export class WebGPUBuffer extends WebGPUObject<GPUBuffer> implements GPUDataBuff
   private _gpuUsage: number;
   private _memCost: number;
   private readonly _ringBuffer: UploadRingBuffer;
-  protected _pendingUploads: UploadBuffer[];
+  protected _pendingUploads: PendingUploadRange[];
+  private _pendingUploadBuffer: Nullable<MappedBuffer>;
   constructor(device: WebGPUDevice, usage: number, data: TypedArray | number) {
     super(device);
     this._object = null;
@@ -25,6 +31,7 @@ export class WebGPUBuffer extends WebGPUObject<GPUBuffer> implements GPUDataBuff
     }
     this._ringBuffer = new UploadRingBuffer(device, (this._size + 15) & ~15);
     this._pendingUploads = [];
+    this._pendingUploadBuffer = null;
     this.load(typeof data === 'number' ? null : data);
   }
   get hash() {
@@ -39,21 +46,29 @@ export class WebGPUBuffer extends WebGPUObject<GPUBuffer> implements GPUDataBuff
   get gpuUsage() {
     return this._gpuUsage;
   }
-  private searchInsertPosition(dstByteOffset: number) {
-    let left = 0;
-    let right = this._pendingUploads.length - 1;
+  private mergePendingUpload(offset: number, size: number) {
+    let start = offset;
+    let end = offset + size;
     let insertIndex = this._pendingUploads.length;
-    while (left <= right) {
-      const mid = Math.floor((left + right) / 2);
-      const upload = this._pendingUploads[mid];
-      if (upload.uploadOffset < dstByteOffset) {
-        left = mid + 1;
-      } else {
-        insertIndex = mid;
-        right = mid - 1;
+    for (let i = 0; i < this._pendingUploads.length; i++) {
+      const pending = this._pendingUploads[i];
+      const pendingEnd = pending.offset + pending.size;
+      if (pending.offset > end) {
+        insertIndex = i;
+        break;
+      }
+      if (pendingEnd >= start && pending.offset <= end) {
+        start = Math.min(start, pending.offset);
+        end = Math.max(end, pendingEnd);
+        this._pendingUploads.splice(i, 1);
+        i--;
+        insertIndex = i + 1;
       }
     }
-    return insertIndex;
+    this._pendingUploads.splice(insertIndex, 0, {
+      offset: start,
+      size: end - start
+    });
   }
   bufferSubData(dstByteOffset: number, data: TypedArray, srcOffset?: number, srcLength?: number) {
     srcOffset = Number(srcOffset) || 0;
@@ -72,44 +87,15 @@ export class WebGPUBuffer extends WebGPUObject<GPUBuffer> implements GPUDataBuff
       );
     }
     const uploadOffset = data.byteOffset + srcOffset * data.BYTES_PER_ELEMENT;
-    const insertIndex = this.searchInsertPosition(dstByteOffset);
-    if (insertIndex < this._pendingUploads.length) {
-      const upload = this._pendingUploads[insertIndex];
-      if (
-        upload.uploadOffset < dstByteOffset + uploadSize &&
-        upload.uploadOffset + upload.uploadSize > dstByteOffset
-      ) {
-        // Flush if overlapped
-        this._device.bufferUpload(this);
-      }
-    }
-    let commit = false;
-    if (this._pendingUploads.length === 0) {
-      this.pushUpload(dstByteOffset, uploadSize, 0);
-      commit = true;
-    } else {
-      let start = dstByteOffset;
-      let end = dstByteOffset + uploadSize;
-      while (insertIndex < this._pendingUploads.length) {
-        const upload = this._pendingUploads[insertIndex];
-        const uploadStart = upload.uploadOffset;
-        const uploadEnd = uploadStart + upload.uploadSize;
-        if (uploadStart < end && uploadEnd > start) {
-          start = Math.min(start, uploadStart);
-          end = Math.max(end, uploadEnd);
-          this._pendingUploads.splice(insertIndex, 1);
-        } else {
-          break;
-        }
-      }
-      this.pushUpload(start, end - start, insertIndex);
-    }
-    new Uint8Array(this._pendingUploads[0].mappedBuffer.mappedRange!, dstByteOffset, uploadSize).set(
+    // Resolve segment ownership before mutating the shared staging page. If this
+    // upload has to start a new segment, the previous segment must snapshot its
+    // pending uploads against the old staging contents first.
+    this._device.bufferUpload(this, dstByteOffset, uploadSize);
+    this._pendingUploadBuffer ??= this._ringBuffer.fetchBufferMapped((this.byteLength + 15) & ~15);
+    new Uint8Array(this._pendingUploadBuffer.mappedRange!, dstByteOffset, uploadSize).set(
       new Uint8Array(data.buffer, uploadOffset, uploadSize)
     );
-    if (commit) {
-      this._device.bufferUpload(this);
-    }
+    this.mergePendingUpload(dstByteOffset, uploadSize);
   }
   async getBufferSubData(
     dstBuffer?: Nullable<Uint8Array<ArrayBuffer>>,
@@ -132,8 +118,8 @@ export class WebGPUBuffer extends WebGPUObject<GPUBuffer> implements GPUDataBuff
         readOffsetInBytes = offsetInBytes - copyOffsetInBytes;
         const copySizeInBytes = (readOffsetInBytes + sizeInBytes + 3) & ~3;
         sourceBuffer = this._device.createBuffer(copySizeInBytes, { usage: 'read' });
-        this.sync();
         this._device.copyBuffer(this, sourceBuffer, copyOffsetInBytes, 0, copySizeInBytes);
+        this._device.flush();
       } else {
         throw new Error('getBufferSubData() failed: buffer does not have BF_READ or BF_PACK_PIXEL flag set');
       }
@@ -164,6 +150,8 @@ export class WebGPUBuffer extends WebGPUObject<GPUBuffer> implements GPUDataBuff
       this._object = null;
       this._gpuUsage = 0;
       this._memCost = 0;
+      this._pendingUploadBuffer = null;
+      this._pendingUploads.length = 0;
     }
   }
   isBuffer(): this is GPUDataBuffer {
@@ -171,25 +159,27 @@ export class WebGPUBuffer extends WebGPUObject<GPUBuffer> implements GPUDataBuff
   }
   beginSyncChanges(encoder: GPUCommandEncoder) {
     if (this._pendingUploads.length > 0) {
-      if (!this._object) {
+      if (!this._object || !this._pendingUploadBuffer) {
         this._pendingUploads.length = 0;
+        this._pendingUploadBuffer = null;
         this._ringBuffer.beginUploads();
         return;
       }
       const cmdEncoder = encoder || this._device.device.createCommandEncoder();
       for (const upload of this._pendingUploads) {
         cmdEncoder.copyBufferToBuffer(
-          upload.mappedBuffer.buffer,
-          upload.mappedBuffer.offset,
+          this._pendingUploadBuffer.buffer,
+          upload.offset,
           this._object!,
-          upload.uploadOffset,
-          upload.uploadSize
+          upload.offset,
+          upload.size
         );
       }
       if (!encoder) {
         this._device.device.queue.submit([cmdEncoder.finish()]);
       }
       this._pendingUploads.length = 0;
+      this._pendingUploadBuffer = null;
       this._ringBuffer.beginUploads();
     }
   }
@@ -257,23 +247,8 @@ export class WebGPUBuffer extends WebGPUObject<GPUBuffer> implements GPUDataBuff
     }
   }
   private sync() {
-    if (this._pendingUploads) {
-      this._device.flushUploads();
+    if (this._pendingUploads.length > 0) {
+      this._device.flush();
     }
-  }
-  private pushUpload(dstByteOffset: number, byteSize: number, insertIndex: number) {
-    const bufferMapped = this._ringBuffer.fetchBufferMapped(byteSize, true);
-    this._pendingUploads.splice(insertIndex, 0, {
-      mappedBuffer: {
-        buffer: bufferMapped.buffer,
-        size: bufferMapped.size,
-        offset: dstByteOffset,
-        used: bufferMapped.used,
-        mappedRange: bufferMapped.mappedRange
-      },
-      uploadSize: byteSize,
-      uploadOffset: dstByteOffset,
-      uploadBuffer: this._object!
-    });
   }
 }

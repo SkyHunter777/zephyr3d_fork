@@ -11,7 +11,7 @@ export class WebGPUComputePass {
   private _computePassEncoder: Nullable<GPUComputePassEncoder>;
   constructor(device: WebGPUDevice) {
     this._device = device;
-    this._computeCommandEncoder = this._device.device.createCommandEncoder();
+    this._computeCommandEncoder = null;
     this._computePassEncoder = null;
   }
   get active() {
@@ -70,14 +70,13 @@ export class WebGPUComputePass {
       console.error('WebGPUComputePass.begin() failed: WebGPUComputePass.begin() has already been called');
       return;
     }
-    this._computeCommandEncoder = this._device.device.createCommandEncoder();
+    this._computeCommandEncoder = this._device.commandQueue.getEncoder();
     this._computePassEncoder = this._computeCommandEncoder.beginComputePass();
   }
   end() {
     if (this.active) {
       this._computePassEncoder!.end();
       this._computePassEncoder = null;
-      this._device.device.queue.submit([this._computeCommandEncoder!.finish()]);
       this._computeCommandEncoder = null;
     }
   }

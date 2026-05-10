@@ -144,8 +144,7 @@ export abstract class WebGPUBaseTexture<
   clearPendingUploads() {
     if (this._pendingUploads.length > 0) {
       this._pendingUploads = [];
-      this.beginSyncChanges(null);
-      this.endSyncChanges();
+      this._ringBuffer.purge();
     }
   }
   isMipmapDirty() {
@@ -551,9 +550,8 @@ export abstract class WebGPUBaseTexture<
     if (rowStride * blocksPerCol * depth > data.byteLength) {
       throw new Error(`WebGPUTexture.update() invalid data size: ${data.byteLength}`);
     }
-    if (!this._device.isTextureUploading(this as any)) {
+    if (!this._device.commandQueue.hasActiveWork() && !this._device.isTextureUploading(this as any)) {
       this.clearPendingUploads();
-      //this._device.textureUpload(this as WebGPUBaseTexture);
       const destination: GPUTexelCopyTextureInfo = {
         texture: this._object as GPUTexture,
         mipLevel: miplevel,
@@ -574,6 +572,7 @@ export abstract class WebGPUBaseTexture<
       };
       this._device.device.queue.writeTexture(destination, data, dataLayout, size);
     } else {
+      this._device.textureUpload(this as WebGPUBaseTexture);
       const bufferStride = (rowStride + 255) & ~255; // align to 256 bytes
       const uploadSize = bufferStride * blocksPerCol * depth;
       const upload = this._ringBuffer.uploadBuffer(null, null, 0, 0, uploadSize);
@@ -605,7 +604,6 @@ export abstract class WebGPUBaseTexture<
         bufferStride: bufferStride,
         mipLevel: miplevel
       });
-      this._device.textureUpload(this as WebGPUBaseTexture);
     }
   }
   /** @internal */
@@ -624,11 +622,10 @@ export abstract class WebGPUBaseTexture<
       console.error('BaseTexture.uploadImageData(): Cannot upload to video texture');
       return;
     }
-    if (
-      !this._device.isTextureUploading(this as any) &&
-      this._device.device.queue.copyExternalImageToTexture
-    ) {
-      this.clearPendingUploads();
+    if (this._device.device.queue.copyExternalImageToTexture) {
+      if (this._device.commandQueue.hasActiveWork() || this._device.isTextureUploading(this as any)) {
+        this._device.flush();
+      }
       const copyView: GPUCopyExternalImageDestInfo = {
         texture: this._object as GPUTexture,
         origin: {
@@ -639,12 +636,23 @@ export abstract class WebGPUBaseTexture<
         mipLevel: miplevel ?? 0,
         premultipliedAlpha: false
       };
-      this._device.device.queue.copyExternalImageToTexture({ source: data }, copyView, {
-        width: width,
-        height: height,
-        depthOrArrayLayers: 1
-      });
+      this._device.device.queue.copyExternalImageToTexture(
+        {
+          source: data,
+          origin: {
+            x: srcX ?? 0,
+            y: srcY ?? 0
+          }
+        },
+        copyView,
+        {
+          width: width,
+          height: height,
+          depthOrArrayLayers: 1
+        }
+      );
     } else {
+      this._device.textureUpload(this as WebGPUBaseTexture);
       this._pendingUploads.push({
         image: data,
         offsetX: destX,
@@ -658,7 +666,6 @@ export abstract class WebGPUBaseTexture<
         depth: 1,
         mipLevel: miplevel ?? 0
       });
-      this._device.textureUpload(this as WebGPUBaseTexture);
     }
   }
   getMipmapGenerationBindGroup(level: number, face: number) {

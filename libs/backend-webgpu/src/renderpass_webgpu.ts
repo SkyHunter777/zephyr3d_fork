@@ -34,7 +34,7 @@ export class WebGPURenderPass {
   private _frameBufferInfo: FrameBufferInfo;
   constructor(device: WebGPUDevice) {
     this._device = device;
-    this._renderCommandEncoder = this._device.device.createCommandEncoder();
+    this._renderCommandEncoder = null;
     this._renderPassEncoder = null;
     this._fbBindFlag = null;
     this._currentViewport = null;
@@ -242,7 +242,7 @@ export class WebGPURenderPass {
       console.error('WebGPURenderPass.begin() failed: begin() has already been called');
       return;
     }
-    this._renderCommandEncoder = this._device.device.createCommandEncoder();
+    this._renderCommandEncoder = this._device.commandQueue.getEncoder();
     const frameBuffer = this._frameBufferInfo.frameBuffer;
     if (!frameBuffer) {
       const mainPassDesc = this._device.defaultRenderPassDesc;
@@ -364,11 +364,7 @@ export class WebGPURenderPass {
       this._renderPassEncoder.end();
       this._renderPassEncoder = null;
     }
-    // render commands
-    if (this._renderCommandEncoder) {
-      this._device.device.queue.submit([this._renderCommandEncoder.finish()]);
-      this._renderCommandEncoder = null;
-    }
+    this._renderCommandEncoder = null;
     // unmark render target flags and generate render target mipmaps if needed
     if (this._frameBufferInfo.frameBuffer) {
       const options = this._frameBufferInfo.frameBuffer.getOptions();
