@@ -88,46 +88,6 @@ export class WebGPUBindGroup extends WebGPUObject<unknown> implements BindGroup 
   get textureList() {
     return this._textures;
   }
-  getBufferBindings() {
-    const bindings: { buffer: WebGPUBuffer; offset: number; size: number }[] = [];
-    for (const entry of this._layout.entries) {
-      if (entry.buffer) {
-        const resource = this._resources[entry.name] as [WebGPUBuffer, number, number];
-        if (resource?.[0]) {
-          const dynamicOffset =
-            entry.buffer.hasDynamicOffset && this._dynamicOffsets
-              ? (this._dynamicOffsets[entry.buffer.dynamicOffsetIndex] ?? 0)
-              : 0;
-          bindings.push({
-            buffer: resource[0],
-            offset: resource[1] + dynamicOffset,
-            size: resource[2]
-          });
-        }
-      }
-    }
-    return bindings;
-  }
-  getTextureBindings() {
-    const bindings: WebGPUBaseTexture[] = [];
-    for (const entry of this._layout.entries) {
-      if (entry.texture || entry.storageTexture || entry.externalTexture) {
-        const resource = this._resources[entry.name];
-        if (Array.isArray(resource)) {
-          const texture = resource[0] as WebGPUBaseTexture;
-          if (texture && bindings.indexOf(texture) < 0) {
-            bindings.push(texture);
-          }
-        } else if (resource) {
-          const texture = resource as WebGPUBaseTexture;
-          if (bindings.indexOf(texture) < 0) {
-            bindings.push(texture);
-          }
-        }
-      }
-    }
-    return bindings;
-  }
   invalidate() {
     this._bindGroup = null;
     this._gpuId++;

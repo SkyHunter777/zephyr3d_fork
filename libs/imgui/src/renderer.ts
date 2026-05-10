@@ -12,11 +12,21 @@ import {
   type VertexLayoutOptions
 } from '@zephyr3d/device';
 
+type PendingDrawCommand = {
+  texture: Nullable<Texture2D>;
+  scissor: [number, number, number, number];
+  vertexByteOffset: number;
+  indexOffset: number;
+  indexCount: number;
+};
+
 export class Renderer extends Disposable {
   /** @internal */
   private static readonly VERTEX_BUFFER_SIZE = 65536;
   /** @internal */
   private static readonly INDEX_BUFFER_SIZE = 65536 * 3;
+  /** @internal */
+  private static readonly VERTEX_STRIDE = 20;
   /** @internal */
   private _device: AbstractDevice;
   /** @internal */
@@ -53,6 +63,8 @@ export class Renderer extends Disposable {
   private _flipMatrix: Matrix4x4;
   /** @internal */
   private _clearBeforeRender: boolean;
+  /** @internal */
+  private _pendingDrawCommands: PendingDrawCommand[];
   /**
    * Creates a renderer instance
    * @param device - The render device
@@ -96,6 +108,7 @@ export class Renderer extends Disposable {
     this._drawPosition = 0;
     this._indexPosition = 0;
     this._clearBeforeRender = false;
+    this._pendingDrawCommands = [];
   }
   /** Gets the render device */
   get device() {
@@ -203,53 +216,94 @@ export class Renderer extends Disposable {
     const vertexStart = Number.isFinite(minIndex) ? Math.min(vertexOffset, minIndex) : vertexOffset;
     const vertexEnd = maxIndex >= vertexStart ? maxIndex + 1 : vertexStart;
     const vertexCount = Math.max(0, vertexEnd - vertexStart);
-    const vertexByteOffset = vertexStart * 20;
-    const vertexByteCount = vertexCount * 20;
-    const vertexSlice =
-      vertexByteCount > 0
-        ? vertexData.subarray(vertexByteOffset, vertexByteOffset + vertexByteCount)
-        : vertexData;
-    const rebasedIndexData = new Uint16Array((indexCount + 1) & ~1);
-    for (let i = 0; i < indexCount; i++) {
-      rebasedIndexData[i] = indexData[indexOffset + i] - vertexStart;
-    }
+    const sourceVertexByteOffset = vertexStart * Renderer.VERTEX_STRIDE;
+    const vertexByteCount = vertexCount * Renderer.VERTEX_STRIDE;
+    const alignedIndexCount = (indexCount + 1) & ~1;
     const overflow =
       this._drawPosition + vertexCount > Renderer.VERTEX_BUFFER_SIZE ||
-      this._indexPosition + indexCount > Renderer.INDEX_BUFFER_SIZE;
+      this._indexPosition + alignedIndexCount > Renderer.INDEX_BUFFER_SIZE;
     if (overflow) {
-      this._drawPosition = 0;
-      this._indexPosition = 0;
+      this.flush();
       this._activeBuffer = 1 - this._activeBuffer;
     }
 
-    const vertexLayout = this._primitiveBuffer[this._activeBuffer];
-    const alignedIndexCount = (indexCount + 1) & ~1;
-    const vertexBuffer = vertexLayout.getVertexBuffer('position')!;
+    const targetVertexByteOffset = this._drawPosition * Renderer.VERTEX_STRIDE;
     if (vertexByteCount > 0) {
-      vertexBuffer.bufferSubData(this._drawPosition * 20, vertexSlice, 0, vertexByteCount);
+      this._vertexCache.set(
+        vertexData.subarray(sourceVertexByteOffset, sourceVertexByteOffset + vertexByteCount),
+        targetVertexByteOffset
+      );
     }
-    vertexLayout
-      .getIndexBuffer()!
-      .bufferSubData(this._indexPosition * 2, rebasedIndexData, 0, alignedIndexCount);
-    vertexLayout.setDrawOffset(vertexBuffer, this._drawPosition * 20);
-    if (texture) {
-      this._device.setProgram(this._programTexture);
-      this._bindGroupTexture.setTexture('tex', texture, this._textureSampler);
-      this._device.setBindGroup(0, this._bindGroupTexture);
-    } else {
-      this._device.setProgram(this._program);
-      this._device.setBindGroup(0, this._bindGroup);
+    for (let i = 0; i < indexCount; i++) {
+      this._indexCache[this._indexPosition + i] = indexData[indexOffset + i] - vertexStart;
     }
-    this._device.setRenderStates(this._renderStateSet);
-    this._device.setVertexLayout(vertexLayout);
-    this._device.setScissor(scissor);
-    vertexLayout.draw('triangle-list', this._indexPosition, indexCount);
+    if (alignedIndexCount > indexCount) {
+      this._indexCache[this._indexPosition + indexCount] = 0;
+    }
+    this._pendingDrawCommands.push({
+      texture: tex,
+      scissor: [scissor[0], scissor[1], scissor[2], scissor[3]],
+      vertexByteOffset: targetVertexByteOffset,
+      indexOffset: this._indexPosition,
+      indexCount
+    });
 
     this._drawPosition += vertexCount;
     this._indexPosition += alignedIndexCount;
   }
   /** @internal */
+  flush() {
+    if (this._pendingDrawCommands.length === 0) {
+      this._drawPosition = 0;
+      this._indexPosition = 0;
+      return;
+    }
+    const vertexLayout = this._primitiveBuffer[this._activeBuffer];
+    const vertexBuffer = vertexLayout.getVertexBuffer('position')!;
+    const indexBuffer = vertexLayout.getIndexBuffer()!;
+    const vertexByteCount = this._drawPosition * Renderer.VERTEX_STRIDE;
+    if (vertexByteCount > 0) {
+      vertexBuffer.bufferSubData(0, this._vertexCache, 0, vertexByteCount);
+    }
+    if (this._indexPosition > 0) {
+      indexBuffer.bufferSubData(0, this._indexCache, 0, this._indexPosition);
+    }
+    this._device.setRenderStates(this._renderStateSet);
+    this._device.setVertexLayout(vertexLayout);
+    let lastTexture: Nullable<Texture2D> | undefined = undefined;
+    let lastScissor: [number, number, number, number] | null = null;
+    for (const drawCommand of this._pendingDrawCommands) {
+      if (drawCommand.texture !== lastTexture) {
+        if (drawCommand.texture) {
+          this._device.setProgram(this._programTexture);
+          this._bindGroupTexture.setTexture('tex', drawCommand.texture, this._textureSampler);
+          this._device.setBindGroup(0, this._bindGroupTexture);
+        } else {
+          this._device.setProgram(this._program);
+          this._device.setBindGroup(0, this._bindGroup);
+        }
+        lastTexture = drawCommand.texture;
+      }
+      if (
+        !lastScissor ||
+        lastScissor[0] !== drawCommand.scissor[0] ||
+        lastScissor[1] !== drawCommand.scissor[1] ||
+        lastScissor[2] !== drawCommand.scissor[2] ||
+        lastScissor[3] !== drawCommand.scissor[3]
+      ) {
+        this._device.setScissor(drawCommand.scissor);
+        lastScissor = drawCommand.scissor;
+      }
+      vertexLayout.setDrawOffset(vertexBuffer, drawCommand.vertexByteOffset);
+      vertexLayout.draw('triangle-list', drawCommand.indexOffset, drawCommand.indexCount);
+    }
+    this._pendingDrawCommands.length = 0;
+    this._drawPosition = 0;
+    this._indexPosition = 0;
+  }
+  /** @internal */
   beginRender() {
+    ASSERT(this._pendingDrawCommands.length === 0);
     const width = this._device.getDrawingBufferWidth();
     const height = this._device.getDrawingBufferHeight();
     //this._device.setViewport();
@@ -268,7 +322,9 @@ export class Renderer extends Disposable {
     }
   }
   /** @internal */
-  endRender() {}
+  endRender() {
+    this.flush();
+  }
   /** Disposes this renderer */
   protected onDispose() {
     super.onDispose();

@@ -1058,10 +1058,11 @@ export function RenderDrawData(draw_data: ImGui.DrawData | null = ImGui.GetDrawD
   draw_data.IterateDrawLists((draw_list: ImGui.DrawList) => {
     const vx = draw_list.VtxBuffer;
     const ix = draw_list.IdxBuffer;
-    const ixU16 = new Uint16Array(ix.buffer.slice(ix.byteOffset, ix.byteOffset + ix.byteLength));
+    const ixU16 = new Uint16Array(ix.buffer, ix.byteOffset, ix.byteLength / Uint16Array.BYTES_PER_ELEMENT);
     draw_list.IterateDrawCmds((draw_cmd: ImGui.DrawCmd) => {
       if (draw_cmd.UserCallback !== null) {
         // User callback (registered via ImDrawList::AddCallback)
+        renderer!.flush();
         draw_cmd.UserCallback(draw_list, draw_cmd);
       } else {
         const clip_rect = new ImGui.Vec4(
@@ -1090,6 +1091,7 @@ export function RenderDrawData(draw_data: ImGui.DrawData | null = ImGui.GetDrawD
       }
     });
   });
+  renderer!.endRender();
   renderer!.device.setScissor(scissorOld);
 }
 

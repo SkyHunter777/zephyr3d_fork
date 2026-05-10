@@ -1,8 +1,7 @@
 import type { Immutable, Nullable, Vector4 } from '@zephyr3d/base';
 import { WebGPURenderPass } from './renderpass_webgpu';
 import { WebGPUComputePass } from './computepass_webgpu';
-import type { PrimitiveType, DeviceViewport, VertexBufferInfo } from '@zephyr3d/device';
-import { PBPrimitiveType, PBPrimitiveTypeInfo } from '@zephyr3d/device';
+import type { PrimitiveType, DeviceViewport } from '@zephyr3d/device';
 import type { WebGPUDevice } from './device';
 import type { WebGPUProgram } from './gpuprogram_webgpu';
 import type { WebGPUVertexLayout } from './vertexlayout_webgpu';
@@ -11,32 +10,16 @@ import type { WebGPUBindGroup } from './bindgroup_webgpu';
 import type { WebGPUFrameBuffer } from './framebuffer_webgpu';
 import type { WebGPUBuffer } from './buffer_webgpu';
 import type { WebGPUBaseTexture } from './basetexture_webgpu';
-import type { WebGPUIndexBuffer } from './indexbuffer_webgpu';
 import { WebGPUMipmapGenerator } from './utils_webgpu';
-
-type BufferRange = {
-  offset: number;
-  size: number;
-};
 
 type LogicalSegment = {
   uploadEncoder: Nullable<GPUCommandEncoder>;
   bodyEncoder: Nullable<GPUCommandEncoder>;
   hasUploadCommands: boolean;
   hasBodyCommands: boolean;
-  hasOpaqueCommands: boolean;
-  uploadedBuffers: Map<WebGPUBuffer, BufferRange[]>;
-  consumedBuffers: Map<WebGPUBuffer, BufferRange[]>;
-  consumedTextures: Set<WebGPUBaseTexture>;
   buffersWithPendingUploads: WebGPUBuffer[];
   texturesWithPendingUploads: WebGPUBaseTexture[];
 };
-
-function overlapsRange(aOffset: number, aSize: number, bOffset: number, bSize: number) {
-  return aOffset < bOffset + bSize && aOffset + aSize > bOffset;
-}
-
-const typeU16 = PBPrimitiveTypeInfo.getCachedTypeInfo(PBPrimitiveType.U16);
 
 export class CommandQueueImmediate {
   protected _renderPass: WebGPURenderPass;
@@ -108,18 +91,15 @@ export class CommandQueueImmediate {
     this._renderPass.executeRenderBundle(renderBundle);
     const segment = this.getOrCreateCurrentSegment();
     segment.hasBodyCommands = true;
-    segment.hasOpaqueCommands = true;
-    this.recordFramebufferUsage(segment);
   }
-  bufferUpload(buffer: WebGPUBuffer, offset: number, size: number) {
-    const segment = this.getSegmentForBufferUpload(buffer, offset, size);
-    this.recordRange(segment.uploadedBuffers, buffer, offset, size);
+  bufferUpload(buffer: WebGPUBuffer, _offset: number, _size: number) {
+    const segment = this.getSegmentForUpload();
     if (segment.buffersWithPendingUploads.indexOf(buffer) < 0) {
       segment.buffersWithPendingUploads.push(buffer);
     }
   }
   textureUpload(tex: WebGPUBaseTexture) {
-    const segment = this.getSegmentForTextureUpload(tex);
+    const segment = this.getSegmentForUpload();
     if (segment.texturesWithPendingUploads.indexOf(tex) < 0) {
       segment.texturesWithPendingUploads.push(tex);
     }
@@ -136,8 +116,6 @@ export class CommandQueueImmediate {
     segment.hasBodyCommands = true;
     const encoder = this.getEncoder();
     encoder.copyBufferToBuffer(srcBuffer.object!, srcOffset, dstBuffer.object!, dstOffset, bytes);
-    this.recordBufferConsumption(segment, srcBuffer, srcOffset, bytes);
-    this.recordBufferConsumption(segment, dstBuffer, dstOffset, bytes);
   }
   copyTexture(
     srcTexture: GPUTexture,
@@ -151,7 +129,6 @@ export class CommandQueueImmediate {
     this.endAllBodyPasses();
     const segment = this.getOrCreateCurrentSegment();
     segment.hasBodyCommands = true;
-    segment.hasOpaqueCommands = true;
     const encoder = this.getEncoder();
     encoder.copyTextureToTexture(
       {
@@ -191,7 +168,6 @@ export class CommandQueueImmediate {
     );
     const segment = this.getOrCreateCurrentSegment();
     segment.hasBodyCommands = true;
-    this.recordBindGroupUsage(segment, bindGroups);
   }
   draw(
     program: WebGPUProgram,
@@ -219,7 +195,6 @@ export class CommandQueueImmediate {
     );
     const segment = this.getOrCreateCurrentSegment();
     segment.hasBodyCommands = true;
-    this.recordDrawUsage(segment, program, vertexData, bindGroups, first, count, numInstances);
   }
   capture(
     renderBundleEncoder: GPURenderBundleEncoder,
@@ -264,7 +239,6 @@ export class CommandQueueImmediate {
     this._renderPass.clear(color, depth, stencil);
     const segment = this.getOrCreateCurrentSegment();
     segment.hasBodyCommands = true;
-    this.recordFramebufferUsage(segment);
   }
   finish() {
     this.submit();
@@ -276,10 +250,6 @@ export class CommandQueueImmediate {
       bodyEncoder: null,
       hasUploadCommands: false,
       hasBodyCommands: false,
-      hasOpaqueCommands: false,
-      uploadedBuffers: new Map(),
-      consumedBuffers: new Map(),
-      consumedTextures: new Set(),
       buffersWithPendingUploads: [],
       texturesWithPendingUploads: []
     };
@@ -344,61 +314,6 @@ export class CommandQueueImmediate {
     this._segments.length = 0;
     this._drawcallCounter = 0;
   }
-  private recordRange(
-    map: Map<WebGPUBuffer, BufferRange[]>,
-    buffer: WebGPUBuffer,
-    offset: number,
-    size: number
-  ) {
-    if (size <= 0) {
-      return;
-    }
-    const ranges = map.get(buffer) ?? [];
-    let start = offset;
-    let end = offset + size;
-    for (let i = ranges.length - 1; i >= 0; i--) {
-      const range = ranges[i];
-      if (overlapsRange(start, end - start, range.offset, range.size)) {
-        start = Math.min(start, range.offset);
-        end = Math.max(end, range.offset + range.size);
-        ranges.splice(i, 1);
-      }
-    }
-    ranges.push({ offset: start, size: end - start });
-    ranges.sort((a, b) => a.offset - b.offset);
-    map.set(buffer, ranges);
-  }
-  private hasConsumedBufferOverlap(
-    segment: LogicalSegment,
-    buffer: WebGPUBuffer,
-    offset: number,
-    size: number
-  ) {
-    if (segment.hasOpaqueCommands) {
-      return true;
-    }
-    const ranges = segment.consumedBuffers.get(buffer);
-    return !!ranges?.some((range) => overlapsRange(offset, size, range.offset, range.size));
-  }
-  private findUploadedBufferRange(segment: LogicalSegment, buffer: WebGPUBuffer, offset: number) {
-    const ranges = segment.uploadedBuffers.get(buffer);
-    return ranges?.find((range) => offset >= range.offset && offset < range.offset + range.size) ?? null;
-  }
-  private recordBufferConsumption(
-    segment: LogicalSegment,
-    buffer: Nullable<WebGPUBuffer>,
-    offset: number,
-    size: number
-  ) {
-    if (buffer && size > 0) {
-      this.recordRange(segment.consumedBuffers, buffer, offset, size);
-    }
-  }
-  private recordTextureConsumption(segment: LogicalSegment, texture: Nullable<WebGPUBaseTexture>) {
-    if (texture) {
-      segment.consumedTextures.add(texture);
-    }
-  }
   private markBufferAwaitingSyncEnd(buffer: WebGPUBuffer) {
     if (this._buffersAwaitingSyncEnd.indexOf(buffer) < 0) {
       this._buffersAwaitingSyncEnd.push(buffer);
@@ -409,18 +324,9 @@ export class CommandQueueImmediate {
       this._texturesAwaitingSyncEnd.push(texture);
     }
   }
-  private getSegmentForBufferUpload(buffer: WebGPUBuffer, offset: number, size: number) {
+  private getSegmentForUpload() {
     let segment = this.getOrCreateCurrentSegment();
-    if (segment.hasBodyCommands && this.hasConsumedBufferOverlap(segment, buffer, offset, size)) {
-      this.endAllBodyPasses();
-      this.finalizeCurrentSegmentUploads();
-      segment = this.createSegment();
-    }
-    return segment;
-  }
-  private getSegmentForTextureUpload(texture: WebGPUBaseTexture) {
-    let segment = this.getOrCreateCurrentSegment();
-    if (segment.hasBodyCommands && (segment.hasOpaqueCommands || segment.consumedTextures.has(texture))) {
+    if (segment.hasBodyCommands) {
       this.endAllBodyPasses();
       this.finalizeCurrentSegmentUploads();
       segment = this.createSegment();
@@ -453,100 +359,5 @@ export class CommandQueueImmediate {
       }
       segment.texturesWithPendingUploads.length = 0;
     }
-  }
-  private recordFramebufferUsage(segment: LogicalSegment) {
-    const frameBuffer = this._renderPass.getFrameBufferInfo().frameBuffer;
-    if (!frameBuffer) {
-      return;
-    }
-    for (const attachment of frameBuffer.getColorAttachments()) {
-      this.recordTextureConsumption(segment, attachment as WebGPUBaseTexture);
-    }
-    this.recordTextureConsumption(segment, frameBuffer.getDepthAttachment() as WebGPUBaseTexture);
-  }
-  private recordBindGroupUsage(segment: LogicalSegment, bindGroups: WebGPUBindGroup[]) {
-    for (const bindGroup of bindGroups) {
-      if (!bindGroup) {
-        continue;
-      }
-      for (const binding of bindGroup.getBufferBindings()) {
-        this.recordBufferConsumption(segment, binding.buffer, binding.offset, binding.size);
-      }
-      for (const texture of bindGroup.getTextureBindings()) {
-        this.recordTextureConsumption(segment, texture);
-      }
-    }
-  }
-  private recordVertexBufferUsage(
-    segment: LogicalSegment,
-    vertexBuffer: VertexBufferInfo,
-    first: number,
-    count: number,
-    numInstances: number,
-    indexed: boolean
-  ) {
-    const buffer = vertexBuffer.buffer as unknown as WebGPUBuffer;
-    if (indexed) {
-      const uploadedRange = this.findUploadedBufferRange(segment, buffer, vertexBuffer.drawOffset);
-      if (uploadedRange) {
-        this.recordBufferConsumption(
-          segment,
-          buffer,
-          vertexBuffer.drawOffset,
-          uploadedRange.offset + uploadedRange.size - vertexBuffer.drawOffset
-        );
-      } else {
-        this.recordBufferConsumption(segment, buffer, 0, buffer.byteLength);
-      }
-      return;
-    }
-    const itemCount = vertexBuffer.stepMode === 'instance' ? numInstances : count;
-    this.recordBufferConsumption(
-      segment,
-      buffer,
-      vertexBuffer.drawOffset + first * vertexBuffer.stride,
-      itemCount * vertexBuffer.stride
-    );
-  }
-  private recordIndexBufferUsage(
-    segment: LogicalSegment,
-    indexBuffer: Nullable<WebGPUIndexBuffer>,
-    first: number,
-    count: number
-  ) {
-    if (!indexBuffer) {
-      return;
-    }
-    const indexSize = indexBuffer.indexType === typeU16 ? 2 : 4;
-    this.recordBufferConsumption(
-      segment,
-      indexBuffer as unknown as WebGPUBuffer,
-      first * indexSize,
-      count * indexSize
-    );
-  }
-  private recordDrawUsage(
-    segment: LogicalSegment,
-    program: WebGPUProgram,
-    vertexData: Nullable<WebGPUVertexLayout>,
-    bindGroups: WebGPUBindGroup[],
-    first: number,
-    count: number,
-    numInstances: number
-  ) {
-    this.recordBindGroupUsage(segment, bindGroups);
-    this.recordFramebufferUsage(segment);
-    if (!vertexData) {
-      return;
-    }
-    const layouts = program.vertexAttributes
-      ? vertexData.getLayouts(program.vertexAttributes)?.buffers
-      : null;
-    const indexBuffer = vertexData.getIndexBuffer() as Nullable<WebGPUIndexBuffer>;
-    const indexed = !!indexBuffer;
-    layouts?.forEach((vertexBuffer) => {
-      this.recordVertexBufferUsage(segment, vertexBuffer, first, count, numInstances, indexed);
-    });
-    this.recordIndexBufferUsage(segment, indexBuffer, first, count);
   }
 }
