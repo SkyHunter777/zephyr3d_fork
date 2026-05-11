@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, net, protocol, safeStorage, shell } = require('electron');
+const { execFile } = require('child_process');
 const http = require('http');
 const fs = require('fs/promises');
 const fsSync = require('fs');
@@ -22,6 +23,7 @@ const DEFAULT_EDITOR_RHI = 'webgpu';
 const SUPPORTED_EDITOR_RHIS = new Set(['webgpu', 'webgl2', 'webgl']);
 const ASSISTANT_STORAGE_DIR = 'assistant';
 const ASSISTANT_SESSIONS_FILE = 'sessions.json';
+const PORTABLE_USER_DATA_DIR = 'userdata';
 const DEFAULT_LLM_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_LLM_MODEL = 'gpt-4.1-mini';
 const DEFAULT_OPENAI_COMPAT_CHAT_PATH = '/chat/completions';
@@ -89,6 +91,90 @@ const IMAGE_FILE_MIME_TYPES = {
   '.bmp': 'image/bmp'
 };
 
+function envFlagEnabled(name, defaultValue = false) {
+  const value = process.env[name];
+  if (value === undefined) {
+    return defaultValue;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return defaultValue;
+}
+
+function canWriteDirectory(dirPath) {
+  try {
+    fsSync.mkdirSync(dirPath, { recursive: true });
+    fsSync.accessSync(dirPath, fsSync.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasWindowsUninstaller(execDir) {
+  try {
+    const entries = fsSync.readdirSync(execDir);
+    return entries.some((entry) => /^uninstall .*\.exe$/i.test(entry));
+  } catch {
+    return false;
+  }
+}
+
+function resolvePortableUserDataRoot() {
+  const explicitPortableDir = typeof process.env.ZEPHYR_EDITOR_PORTABLE_DIR === 'string'
+    ? process.env.ZEPHYR_EDITOR_PORTABLE_DIR.trim()
+    : '';
+  if (explicitPortableDir) {
+    return path.resolve(explicitPortableDir);
+  }
+  if (process.env.PORTABLE_EXECUTABLE_DIR) {
+    return path.resolve(process.env.PORTABLE_EXECUTABLE_DIR, PORTABLE_USER_DATA_DIR);
+  }
+  if (envFlagEnabled('ZEPHYR_EDITOR_PORTABLE', false)) {
+    return path.resolve(path.dirname(process.execPath), PORTABLE_USER_DATA_DIR);
+  }
+  if (process.platform === 'win32' && app.isPackaged) {
+    const execDir = path.dirname(process.execPath);
+    if (!hasWindowsUninstaller(execDir) && canWriteDirectory(execDir)) {
+      return path.resolve(execDir, PORTABLE_USER_DATA_DIR);
+    }
+  }
+  return '';
+}
+
+function configurePortableAppPaths() {
+  const portableRoot = resolvePortableUserDataRoot();
+  if (!portableRoot) {
+    return;
+  }
+  fsSync.mkdirSync(portableRoot, { recursive: true });
+  const sessionDir = path.join(portableRoot, 'session');
+  const logsDir = path.join(portableRoot, 'logs');
+  fsSync.mkdirSync(sessionDir, { recursive: true });
+  fsSync.mkdirSync(logsDir, { recursive: true });
+  app.setPath('userData', portableRoot);
+  app.setPath('sessionData', sessionDir);
+  app.setAppLogsPath(logsDir);
+}
+
+configurePortableAppPaths();
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+writeStderrLine(
+  `[app:boot] pid=${process.pid} ppid=${process.ppid} lock=${hasSingleInstanceLock} packaged=${app.isPackaged} execPath=${process.execPath} argv=${JSON.stringify(process.argv)}`
+);
+void writeDiagnosticLog(
+  `[app:boot] pid=${process.pid} ppid=${process.ppid} lock=${hasSingleInstanceLock} packaged=${app.isPackaged} execPath=${process.execPath} argv=${JSON.stringify(process.argv)}`
+);
+
 let mcpWorker = null;
 let mcpBridgeInfo = null;
 let mcpStartupPromise = null;
@@ -153,6 +239,113 @@ async function pathExists(filePath) {
 
 function writeStderrLine(message) {
   process.stderr.write(`${message}\n`);
+}
+
+async function execFileText(file, args) {
+  return await new Promise((resolve, reject) => {
+    execFile(file, args, { windowsHide: true }, (err, stdout, stderr) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(`${stdout || ''}${stderr || ''}`);
+    });
+  });
+}
+
+async function getWindowsListeningPortOwner(port) {
+  if (process.platform !== 'win32' || !Number.isInteger(port) || port < 1 || port > 65535) {
+    return null;
+  }
+  const netstatOutput = await execFileText('netstat.exe', ['-ano', '-p', 'tcp']).catch(() => '');
+  if (!netstatOutput) {
+    return null;
+  }
+  const lines = netstatOutput.split(/\r?\n/);
+  const suffix = `:${port}`;
+  const matchedLine = lines.find((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return false;
+    }
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 5) {
+      return false;
+    }
+    return parts[0].toUpperCase() === 'TCP' && parts[1].endsWith(suffix) && parts[3].toUpperCase() === 'LISTENING';
+  });
+  if (!matchedLine) {
+    return null;
+  }
+  const parts = matchedLine.trim().split(/\s+/);
+  const pid = Number.parseInt(parts[4], 10);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return {
+      pid: null,
+      processName: '',
+      executablePath: '',
+      commandLine: '',
+      raw: matchedLine.trim()
+    };
+  }
+  const psScript = [
+    `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
+    "if ($p) {",
+    "  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+    "  [pscustomobject]@{",
+    "    ProcessId = $p.ProcessId",
+    "    Name = $p.Name",
+    "    ExecutablePath = $p.ExecutablePath",
+    "    CommandLine = $p.CommandLine",
+    "  } | ConvertTo-Json -Compress",
+    "}"
+  ].join('; ');
+  const processOutput = await execFileText('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    psScript
+  ]).catch(() => '');
+  let processInfo = null;
+  if (processOutput.trim()) {
+    try {
+      processInfo = JSON.parse(processOutput.trim());
+    } catch {
+      processInfo = null;
+    }
+  }
+  return {
+    pid,
+    processName: typeof processInfo?.Name === 'string' ? processInfo.Name : '',
+    executablePath: typeof processInfo?.ExecutablePath === 'string' ? processInfo.ExecutablePath : '',
+    commandLine: typeof processInfo?.CommandLine === 'string' ? processInfo.CommandLine : '',
+    raw: matchedLine.trim()
+  };
+}
+
+function formatWindowsPortOwner(owner) {
+  if (!owner) {
+    return '';
+  }
+  const parts = [];
+  if (owner.pid) {
+    parts.push(`pid=${owner.pid}`);
+  }
+  if (owner.processName) {
+    parts.push(`name=${owner.processName}`);
+  }
+  if (owner.executablePath) {
+    parts.push(`path=${owner.executablePath}`);
+  }
+  if (owner.commandLine) {
+    parts.push(`cmd=${owner.commandLine}`);
+  }
+  if (owner.raw) {
+    parts.push(`netstat="${owner.raw}"`);
+  }
+  return parts.join(' ');
 }
 
 function rejectPendingRpcRequests(error) {
@@ -410,8 +603,14 @@ function sanitizeAssistantSessionSummary(value) {
     createdAt: typeof value?.createdAt === 'string' ? value.createdAt : new Date().toISOString(),
     updatedAt: typeof value?.updatedAt === 'string' ? value.updatedAt : new Date().toISOString(),
     messageCount: Number.isInteger(value?.messageCount) ? value.messageCount : 0,
-    active: !!value?.active
+    active: !!value?.active,
+    scopeId: normalizeAssistantScopeId(value?.scopeId)
   };
+}
+
+function normalizeAssistantScopeId(value) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized || null;
 }
 
 function guessImageMimeType(filePath) {
@@ -472,11 +671,12 @@ async function saveAssistantSessions() {
   await fs.writeFile(assistantSessionsPath(), `${JSON.stringify(assistantSessions, null, 2)}\n`, 'utf8');
 }
 
-async function readAssistantSessionMessages(sessionId) {
-  const normalizedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
-  if (!normalizedSessionId) {
-    throw new Error('sessionId is required');
+async function readAssistantSessionMessages(sessionId, scopeId) {
+  const session = findAssistantSession(sessionId, scopeId);
+  if (!session) {
+    throw new Error(`Unknown assistant session: ${sessionId}`);
   }
+  const normalizedSessionId = session.id;
   await ensureAssistantStorageDir();
   const loaded = await fs
     .readFile(assistantSessionMessagesPath(normalizedSessionId), 'utf8')
@@ -534,18 +734,30 @@ function clearPendingAssistantToolApproval(callId, approved = false, emitResolve
   return pending;
 }
 
-function findAssistantSession(sessionId) {
-  return assistantSessions.find((session) => session.id === sessionId) ?? null;
+function findAssistantSession(sessionId, scopeId) {
+  const normalizedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+  if (!normalizedSessionId) {
+    return null;
+  }
+  const normalizedScopeId = scopeId === undefined ? undefined : normalizeAssistantScopeId(scopeId);
+  return (
+    assistantSessions.find(
+      (session) =>
+        session.id === normalizedSessionId &&
+        (normalizedScopeId === undefined || (session.scopeId ?? null) === normalizedScopeId)
+    ) ?? null
+  );
 }
 
-async function createAssistantSession(title) {
+async function createAssistantSession(title, scopeId) {
   const session = sanitizeAssistantSessionSummary({
     id: `as_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     title: typeof title === 'string' && title.trim() ? title.trim() : 'New Session',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     messageCount: 0,
-    active: false
+    active: false,
+    scopeId
   });
   assistantSessions.unshift(session);
   await saveAssistantSessions();
@@ -554,8 +766,9 @@ async function createAssistantSession(title) {
   return session;
 }
 
-async function listAssistantSessions() {
-  return assistantSessions.slice();
+async function listAssistantSessions(scopeId) {
+  const normalizedScopeId = normalizeAssistantScopeId(scopeId);
+  return assistantSessions.filter((session) => (session.scopeId ?? null) === normalizedScopeId);
 }
 
 function createAssistantMessage(role, content, status = 'complete', options = {}) {
@@ -1097,7 +1310,11 @@ async function runAssistantLoop(sessionId, run) {
   throw new Error(`Assistant exceeded the maximum tool step limit of ${maxToolSteps}`);
 }
 
-async function cancelAssistantRun(sessionId) {
+async function cancelAssistantRun(sessionId, scopeId) {
+  const session = findAssistantSession(sessionId, scopeId);
+  if (!session) {
+    return false;
+  }
   const run = getAssistantRun(sessionId);
   let cancelled = false;
   if (run) {
@@ -1121,7 +1338,11 @@ async function cancelAssistantRun(sessionId) {
   return cancelled;
 }
 
-async function approveAssistantToolCall(sessionId, callId) {
+async function approveAssistantToolCall(sessionId, callId, scopeId) {
+  const session = findAssistantSession(sessionId, scopeId);
+  if (!session) {
+    return false;
+  }
   const pending = assistantPendingToolApprovals.get(callId);
   if (!pending || pending.sessionId !== sessionId) {
     return false;
@@ -1131,7 +1352,11 @@ async function approveAssistantToolCall(sessionId, callId) {
   return true;
 }
 
-async function rejectAssistantToolCall(sessionId, callId) {
+async function rejectAssistantToolCall(sessionId, callId, scopeId) {
+  const session = findAssistantSession(sessionId, scopeId);
+  if (!session) {
+    return false;
+  }
   const pending = assistantPendingToolApprovals.get(callId);
   if (!pending || pending.sessionId !== sessionId) {
     return false;
@@ -1141,14 +1366,17 @@ async function rejectAssistantToolCall(sessionId, callId) {
   return true;
 }
 
-async function sendAssistantMessage(sessionId, content, attachments) {
+async function sendAssistantMessage(sessionId, content, attachments, scopeId) {
+  const session = findAssistantSession(sessionId, scopeId);
+  if (!session) {
+    throw new Error(`Unknown assistant session: ${sessionId}`);
+  }
   if (getAssistantRun(sessionId)) {
     throw new Error('An assistant run is already active for this session');
   }
   const userMessage = await appendAssistantMessage(sessionId, 'user', content, 'complete', {
     attachments
   });
-  const session = findAssistantSession(sessionId);
   session.active = true;
   session.updatedAt = new Date().toISOString();
   await saveAssistantSessions();
@@ -1647,6 +1875,12 @@ async function promptAndApplyMcpPort() {
 }
 
 async function startLocalMcpService({ persistEnabled = false, interactive = false } = {}) {
+  writeStderrLine(
+    `[mcp:http-start-request] pid=${process.pid} port=${mcpServiceConfig.port} running=${isMcpServiceRunning()} starting=${!!mcpServiceStartPromise}`
+  );
+  void writeDiagnosticLog(
+    `[mcp:http-start-request] pid=${process.pid} port=${mcpServiceConfig.port} running=${isMcpServiceRunning()} starting=${!!mcpServiceStartPromise}`
+  );
   if (isMcpServiceRunning()) {
     if (persistEnabled && !mcpServiceConfig.enabled) {
       mcpServiceConfig.enabled = true;
@@ -1694,10 +1928,16 @@ async function startLocalMcpService({ persistEnabled = false, interactive = fals
       await saveMcpServiceConfig();
     }
     const message = err instanceof Error ? err.message : String(err);
-    writeStderrLine(`[mcp:http-start-failed] ${message}`);
-    void writeDiagnosticLog(`[mcp:http-start-failed] ${message}`);
+    const owner = err?.code === 'EADDRINUSE' ? await getWindowsListeningPortOwner(port).catch(() => null) : null;
+    const ownerDetail = formatWindowsPortOwner(owner);
+    const detail = `[mcp:http-start-failed] pid=${process.pid} port=${port} code=${err?.code || ''} ${message}${ownerDetail ? ` owner=${ownerDetail}` : ''}`;
+    writeStderrLine(detail);
+    void writeDiagnosticLog(detail);
     if (interactive) {
-      dialog.showErrorBox('Failed to Start MCP Service', message);
+      dialog.showErrorBox(
+        'Failed to Start MCP Service',
+        ownerDetail ? `${message}\n\nPort owner: ${ownerDetail}` : message
+      );
     }
     throw err;
   } finally {
@@ -1970,6 +2210,18 @@ function createPreviewWindow(url) {
   });
   previewWindow.loadURL(stripMcpQueryParams(url));
 }
+
+app.on('second-instance', () => {
+  writeStderrLine(`[app:second-instance] pid=${process.pid}`);
+  void writeDiagnosticLog(`[app:second-instance] pid=${process.pid}`);
+  if (!mainWindowRef || mainWindowRef.isDestroyed()) {
+    return;
+  }
+  if (mainWindowRef.isMinimized()) {
+    mainWindowRef.restore();
+  }
+  mainWindowRef.focus();
+});
 
 function isInternalEditorUrl(rawUrl) {
   try {
@@ -2530,19 +2782,32 @@ ipcMain.handle(SETTINGS_CHANNEL, async (_event, payload) => {
     case 'clearLlmApiKey':
       return await clearLlmApiKey(payload.args.provider);
     case 'createAssistantSession':
-      return await createAssistantSession(payload.args.title);
+      return await createAssistantSession(payload.args.title, payload.args.scopeId);
     case 'listAssistantSessions':
-      return await listAssistantSessions();
+      return await listAssistantSessions(payload.args.scopeId);
     case 'getAssistantSessionMessages':
-      return await readAssistantSessionMessages(payload.args.sessionId);
+      return await readAssistantSessionMessages(payload.args.sessionId, payload.args.scopeId);
     case 'sendAssistantMessage':
-      return await sendAssistantMessage(payload.args.sessionId, payload.args.content, payload.args.attachments);
+      return await sendAssistantMessage(
+        payload.args.sessionId,
+        payload.args.content,
+        payload.args.attachments,
+        payload.args.scopeId
+      );
     case 'cancelAssistantRun':
-      return await cancelAssistantRun(payload.args.sessionId);
+      return await cancelAssistantRun(payload.args.sessionId, payload.args.scopeId);
     case 'approveAssistantToolCall':
-      return await approveAssistantToolCall(payload.args.sessionId, payload.args.callId);
+      return await approveAssistantToolCall(
+        payload.args.sessionId,
+        payload.args.callId,
+        payload.args.scopeId
+      );
     case 'rejectAssistantToolCall':
-      return await rejectAssistantToolCall(payload.args.sessionId, payload.args.callId);
+      return await rejectAssistantToolCall(
+        payload.args.sessionId,
+        payload.args.callId,
+        payload.args.scopeId
+      );
     default:
       throw new Error(`Unknown settings operation: ${payload.operation}`);
   }
@@ -2554,46 +2819,48 @@ ipcMain.on(LOG_CHANNEL, (_event, payload) => {
   writeDiagnosticLog(lineText);
 });
 
-app.whenReady()
-  .then(async () => {
-    await loadMcpServiceConfig();
-    await loadEditorGlobalConfig();
-    await loadLlmSecrets();
-    await loadAssistantSessions();
-    registerEditorProtocol();
-    await startEmbeddedMcpWorker();
-    rebuildApplicationMenu();
-    createWindow();
-    if (mcpServiceConfig.enabled) {
-      await startLocalMcpService({ persistEnabled: false, interactive: true }).catch(() => undefined);
-    }
-
-    app.on('activate', async () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        await startEmbeddedMcpWorker();
-        rebuildApplicationMenu();
-        createWindow();
+if (hasSingleInstanceLock) {
+  app.whenReady()
+    .then(async () => {
+      await loadMcpServiceConfig();
+      await loadEditorGlobalConfig();
+      await loadLlmSecrets();
+      await loadAssistantSessions();
+      registerEditorProtocol();
+      await startEmbeddedMcpWorker();
+      rebuildApplicationMenu();
+      createWindow();
+      if (mcpServiceConfig.enabled) {
+        await startLocalMcpService({ persistEnabled: false, interactive: true }).catch(() => undefined);
       }
+
+      app.on('activate', async () => {
+        if (BrowserWindow.getAllWindows().length === 0) {
+          await startEmbeddedMcpWorker();
+          rebuildApplicationMenu();
+          createWindow();
+        }
+      });
+    })
+    .catch((err) => {
+      writeStderrLine(`[app:startup-failed] ${err?.stack || err}`);
+      void writeDiagnosticLog(`[app:startup-failed] ${err?.stack || err}`);
+      app.exit(1);
     });
-  })
-  .catch((err) => {
-    writeStderrLine(`[app:startup-failed] ${err?.stack || err}`);
-    void writeDiagnosticLog(`[app:startup-failed] ${err?.stack || err}`);
-    app.exit(1);
+
+  app.on('before-quit', () => {
+    if (mcpServiceServer) {
+      void stopLocalMcpService({ persistEnabled: false, interactive: false }).catch(() => undefined);
+    }
+    if (mcpWorker) {
+      mcpWorkerStopping = true;
+      void mcpWorker.terminate().catch(() => undefined);
+    }
   });
 
-app.on('before-quit', () => {
-  if (mcpServiceServer) {
-    void stopLocalMcpService({ persistEnabled: false, interactive: false }).catch(() => undefined);
-  }
-  if (mcpWorker) {
-    mcpWorkerStopping = true;
-    void mcpWorker.terminate().catch(() => undefined);
-  }
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
+  });
+}

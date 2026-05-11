@@ -4,12 +4,12 @@ import net from 'node:net';
 import process from 'node:process';
 import { isMainThread, parentPort, workerData } from 'node:worker_threads';
 
-const DEFAULT_PORT = Number(process.env.EDITOR_MCP_PORT || workerData?.port || 47231);
+const IPC_TRANSPORT = !isMainThread && workerData?.transport === 'ipc';
+const DEFAULT_PORT = Number(process.env.EDITOR_MCP_PORT ?? workerData?.port ?? (IPC_TRANSPORT ? 0 : 47231));
 const BRIDGE_TOKEN =
   process.env.EDITOR_MCP_TOKEN || workerData?.token || crypto.randomBytes(12).toString('hex');
 const DEFAULT_EDITOR_URL =
   process.env.EDITOR_URL || workerData?.editorUrl || 'http://127.0.0.1:8000/dist/index.html';
-const IPC_TRANSPORT = !isMainThread && workerData?.transport === 'ipc';
 
 class EditorBridgeServer {
   constructor(port, token) {

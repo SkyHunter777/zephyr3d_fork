@@ -86,7 +86,7 @@ function normalizeProjectInfo(info: ProjectInfo | null | undefined): ProjectInfo
   return { ...info };
 }
 
-function getProjectStorageId(project: ProjectInfo): string {
+export function getProjectStorageId(project: ProjectInfo): string {
   return project.path || project.uuid;
 }
 
@@ -95,6 +95,7 @@ let projectVFS: VFS = metaVFS;
 
 export class ProjectService {
   private static _currentProject = '';
+  private static _currentProjectInfo: ProjectInfo | null = null;
   private static readonly PROJECT_MANIFEST = '/project.manifest.json';
   static get VFS() {
     return projectVFS;
@@ -113,6 +114,9 @@ export class ProjectService {
   }
   static get currentProject() {
     return this._currentProject;
+  }
+  static get currentProjectStorageId() {
+    return this._currentProjectInfo ? getProjectStorageId(this._currentProjectInfo) : '';
   }
   static async listProjects(): Promise<ProjectInfo[]> {
     const manifest = await this.readManifest();
@@ -208,7 +212,16 @@ export class ProjectService {
     return uuid;
   }
   static async getCurrentProjectInfo() {
-    return this._currentProject ? await this.getProjectInfo(this._currentProject) : null;
+    if (!this._currentProject) {
+      this._currentProjectInfo = null;
+      return null;
+    }
+    if (this._currentProjectInfo?.uuid === this._currentProject) {
+      return { ...this._currentProjectInfo };
+    }
+    const info = await this.getProjectInfo(this._currentProject);
+    this._currentProjectInfo = info ? { ...info } : null;
+    return info;
   }
   static async getCurrentProjectSettings(): Promise<ProjectSettings> {
     if (this.VFS) {
@@ -237,8 +250,9 @@ export class ProjectService {
     }
   }
   static async closeCurrentProject() {
-    if (this._currentProject) {
+    if (this._currentProject || this._currentProjectInfo || this.VFS !== metaVFS) {
       this._currentProject = '';
+      this._currentProjectInfo = null;
       this.VFS = metaVFS;
     }
   }
@@ -257,6 +271,7 @@ export class ProjectService {
     this.VFS = createProjectVFS(getProjectStorageId(info));
 
     this._currentProject = uuid;
+    this._currentProjectInfo = { ...info };
     console.info(`Project opened: ${uuid}`);
     return info;
   }
@@ -281,6 +296,10 @@ export class ProjectService {
       }
     }
     console.info(`Remote project opened: ${url}`);
+    this._currentProjectInfo = {
+      name: url,
+      uuid: url
+    };
     return {
       name: url,
       uuid: url
@@ -305,6 +324,9 @@ export class ProjectService {
     const normalizedProject = normalizeProjectInfo(project);
     manifest.projectList[project.uuid] = normalizedProject;
     await this.writeManifest(manifest);
+    if (normalizedProject?.uuid && normalizedProject.uuid === this._currentProject) {
+      this._currentProjectInfo = { ...normalizedProject };
+    }
   }
   private static async readManifest() {
     const exists = await metaVFS.exists(ProjectService.PROJECT_MANIFEST);

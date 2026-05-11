@@ -7,6 +7,7 @@ import { initEmojiMapping } from './helpers/emoji';
 import { installEditorMCPBridge } from './helpers/mcpbridge';
 import type { ProjectSettings } from './core/services/project';
 import { ProjectService } from './core/services/project';
+import { isDesktopApp } from './core/services/desktop';
 import type { Nullable } from '@zephyr3d/base';
 import { GenericHtmlDirectoryReader } from '@zephyr3d/base';
 import type { DeviceBackend } from '@zephyr3d/device';
@@ -110,6 +111,21 @@ const editorApp = new Application({
   }
 });
 
+function isEditableShortcutTarget(target: EventTarget | null) {
+  const element = target instanceof HTMLElement ? target : null;
+  if (!element) {
+    return false;
+  }
+  if (element.isContentEditable) {
+    return true;
+  }
+  const tagName = element.tagName.toLowerCase();
+  if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
+    return true;
+  }
+  return !!element.closest('.monaco-editor, .monaco-inputbox');
+}
+
 editorApp.ready().then(async () => {
   if (editorMode === 'editor') {
     await initLeakDetector();
@@ -127,6 +143,20 @@ editorApp.ready().then(async () => {
     editor.registerModules();
     installEditorMCPBridge(editor);
     getInput().use(editor.handleEvent.bind(editor));
+
+    if (isDesktopApp()) {
+      const forwardDesktopShortcut = (ev: KeyboardEvent) => {
+        if (!(ev.ctrlKey || ev.metaKey) || ev.defaultPrevented || isEditableShortcutTarget(ev.target)) {
+          return;
+        }
+        if (editor.handleEvent(ev)) {
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+        }
+      };
+      window.addEventListener('keydown', forwardDesktopShortcut, true);
+      window.addEventListener('keyup', forwardDesktopShortcut, true);
+    }
 
     document.addEventListener('contextmenu', function (e) {
       e.preventDefault();

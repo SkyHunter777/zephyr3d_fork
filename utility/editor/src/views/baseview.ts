@@ -30,6 +30,7 @@ export abstract class BaseView<
         if (info.handler && (info.repeatable || !e.repeat)) {
           info.handler(shortcut);
         }
+        return true;
       }
     }
     return false;

@@ -5,25 +5,44 @@ import {
   type DesktopAssistantMessage,
   type DesktopAssistantSessionSummary
 } from './desktop';
+import { ProjectService } from './project';
 
 export class AssistantService {
+  private static _sessionScopes = new Map<string, string | null>();
+
   static isAvailable() {
     return !!getDesktopAPI()?.settings;
   }
 
+  static currentScopeId() {
+    return ProjectService.currentProjectStorageId || null;
+  }
+
   static async createSession(title?: string): Promise<DesktopAssistantSessionSummary | null> {
     const desktop = getDesktopAPI();
-    return desktop?.settings ? await desktop.settings.createAssistantSession(title) : null;
+    if (!desktop?.settings) {
+      return null;
+    }
+    const session = await desktop.settings.createAssistantSession(title, this.currentScopeId());
+    this.rememberSessionScope(session);
+    return session;
   }
 
   static async listSessions(): Promise<DesktopAssistantSessionSummary[]> {
     const desktop = getDesktopAPI();
-    return desktop?.settings ? await desktop.settings.listAssistantSessions() : [];
+    if (!desktop?.settings) {
+      return [];
+    }
+    const sessions = await desktop.settings.listAssistantSessions(this.currentScopeId());
+    sessions.forEach((session) => this.rememberSessionScope(session));
+    return sessions;
   }
 
   static async getSessionMessages(sessionId: string): Promise<DesktopAssistantMessage[]> {
     const desktop = getDesktopAPI();
-    return desktop?.settings ? await desktop.settings.getAssistantSessionMessages(sessionId) : [];
+    return desktop?.settings
+      ? await desktop.settings.getAssistantSessionMessages(sessionId, this.currentScopeId())
+      : [];
   }
 
   static async sendMessage(
@@ -33,7 +52,7 @@ export class AssistantService {
   ): Promise<DesktopAssistantMessage | null> {
     const desktop = getDesktopAPI();
     return desktop?.settings
-      ? await desktop.settings.sendAssistantMessage(sessionId, content, attachments)
+      ? await desktop.settings.sendAssistantMessage(sessionId, content, attachments, this.currentScopeId())
       : null;
   }
 
@@ -65,21 +84,46 @@ export class AssistantService {
 
   static async cancelRun(sessionId: string): Promise<boolean> {
     const desktop = getDesktopAPI();
-    return desktop?.settings ? await desktop.settings.cancelAssistantRun(sessionId) : false;
+    return desktop?.settings
+      ? await desktop.settings.cancelAssistantRun(sessionId, this.currentScopeId())
+      : false;
   }
 
   static async approveToolCall(sessionId: string, callId: string): Promise<boolean> {
     const desktop = getDesktopAPI();
-    return desktop?.settings ? await desktop.settings.approveAssistantToolCall(sessionId, callId) : false;
+    return desktop?.settings
+      ? await desktop.settings.approveAssistantToolCall(sessionId, callId, this.currentScopeId())
+      : false;
   }
 
   static async rejectToolCall(sessionId: string, callId: string): Promise<boolean> {
     const desktop = getDesktopAPI();
-    return desktop?.settings ? await desktop.settings.rejectAssistantToolCall(sessionId, callId) : false;
+    return desktop?.settings
+      ? await desktop.settings.rejectAssistantToolCall(sessionId, callId, this.currentScopeId())
+      : false;
   }
 
   static onEvent(listener: (event: DesktopAssistantEvent) => void): () => void {
     const desktop = getDesktopAPI();
-    return desktop?.settings ? desktop.settings.onAssistantEvent(listener) : () => {};
+    return desktop?.settings
+      ? desktop.settings.onAssistantEvent((event) => {
+          if (this.shouldForwardEvent(event)) {
+            listener(event);
+          }
+        })
+      : () => {};
+  }
+
+  private static rememberSessionScope(session: DesktopAssistantSessionSummary) {
+    this._sessionScopes.set(session.id, session.scopeId ?? null);
+  }
+
+  private static shouldForwardEvent(event: DesktopAssistantEvent) {
+    if (event.type === 'session_updated') {
+      this.rememberSessionScope(event.session);
+      return (event.session.scopeId ?? null) === this.currentScopeId();
+    }
+    const scopeId = this._sessionScopes.get(event.sessionId);
+    return scopeId !== undefined && scopeId === this.currentScopeId();
   }
 }

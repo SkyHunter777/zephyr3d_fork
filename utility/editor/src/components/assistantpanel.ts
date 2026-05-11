@@ -46,6 +46,7 @@ export class AssistantPanel extends Disposable {
   private _messages: DesktopAssistantMessage[];
   private _input: [string];
   private _status: string;
+  private _sessionScopeId: string | null;
   private _pendingAttachments: DesktopAssistantAttachment[];
   private _unsubscribe: () => void;
   private _pendingApprovals: Map<string, PendingApproval[]>;
@@ -63,6 +64,7 @@ export class AssistantPanel extends Disposable {
     this._messages = [];
     this._input = [''];
     this._status = '';
+    this._sessionScopeId = AssistantService.currentScopeId();
     this._pendingAttachments = [];
     this._unsubscribe = () => {};
     this._pendingApprovals = new Map();
@@ -84,6 +86,11 @@ export class AssistantPanel extends Disposable {
     if (!AssistantService.isAvailable()) {
       ImGui.TextDisabled('Assistant is only available in the desktop editor runtime.');
       return;
+    }
+    const currentScopeId = AssistantService.currentScopeId();
+    if (currentScopeId !== this._sessionScopeId) {
+      this._sessionScopeId = currentScopeId;
+      void this.handleScopeChanged();
     }
 
     this.renderToolbar();
@@ -134,8 +141,20 @@ export class AssistantPanel extends Disposable {
   }
 
   private async initialize() {
+    this._sessionScopeId = AssistantService.currentScopeId();
     await this.reloadSessions();
     if (!this._selectedSessionId && this._sessions.length > 0) {
+      await this.selectSession(this._sessions[0].id);
+    }
+  }
+
+  private async handleScopeChanged() {
+    this._selectedSessionId = '';
+    this._messages = [];
+    this._pendingAttachments = [];
+    this._status = '';
+    await this.reloadSessions();
+    if (this._sessions.length > 0) {
       await this.selectSession(this._sessions[0].id);
     }
   }
@@ -540,23 +559,6 @@ export class AssistantPanel extends Disposable {
     }
   }
 
-  private formatToolTimelineState(state: ToolTimelineState) {
-    switch (state) {
-      case 'awaiting_approval':
-        return 'awaiting approval';
-      case 'approved':
-        return 'approved';
-      case 'rejected':
-        return 'rejected';
-      case 'running':
-        return 'running';
-      case 'succeeded':
-        return 'succeeded';
-      case 'failed':
-        return 'failed';
-    }
-  }
-
   private markConversationContentAppended(sessionId: string) {
     if (sessionId === this._selectedSessionId) {
       this._conversationContentRevision++;
@@ -635,7 +637,7 @@ export class AssistantPanel extends Disposable {
     const argsText = this.getRenderJson(entry.args ?? {});
     ImGui.Separator();
     ImGui.AlignTextToFramePadding();
-    ImGui.Text(`${entry.tool} [${this.formatToolTimelineState(entry.state)}]`);
+    ImGui.Text(`${entry.tool} [${entry.state}]`);
     ImGui.SameLine();
     if (ImGui.SmallButton(`Copy Args##${entry.callId}`)) {
       ImGui.SetClipboardText(argsText);

@@ -5,6 +5,7 @@ This Electron shell is an additive desktop runtime for the existing browser edit
 - Browser builds keep using IndexedDB through `IndexedDBFS`.
 - Desktop builds expose a constrained preload bridge at `window.zephyrEditorDesktop`.
 - In desktop mode, editor metadata, system plugins, and projects are stored under Electron `app.getPath('userData')/editor-storage`.
+- On packaged Windows zip builds, the app automatically switches `userData` to `<exe-dir>/userdata` when running from an unpacked writable folder without an installer uninstaller alongside it.
 - Renderer code still talks to the existing `VFS` abstraction, so editor features do not need direct Node access.
 - Electron builds now embed the MCP server in the same process. The MCP host runs in a worker thread and is exposed as a local TCP service using MCP Streamable HTTP.
 
@@ -93,5 +94,11 @@ If the user changes the port in editor settings, the MCP client config must be u
 - `ZEPHYR_EDITOR_DEVTOOLS=1`
 - `ZEPHYR_EDITOR_LOG_PATH=<absolute path>`
 - `ZEPHYR_EDITOR_SCREENSHOT_PATH=<absolute path>`
+- `ZEPHYR_EDITOR_PORTABLE=1`
+- `ZEPHYR_EDITOR_PORTABLE_DIR=<absolute path>`
 
-The last two are useful for automation and smoke tests.
+`ZEPHYR_EDITOR_PORTABLE=1` forces portable mode and stores user data under `<exe-dir>/userdata`.
+
+`ZEPHYR_EDITOR_PORTABLE_DIR` overrides the portable data directory explicitly.
+
+The log and screenshot variables are useful for automation and smoke tests.

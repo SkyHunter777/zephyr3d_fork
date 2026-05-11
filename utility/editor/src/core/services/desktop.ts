@@ -106,6 +106,7 @@ export type DesktopAssistantSessionSummary = {
   updatedAt: string;
   messageCount: number;
   active: boolean;
+  scopeId: string | null;
 };
 
 export type DesktopAssistantAttachment = {
@@ -238,17 +239,21 @@ export type ZephyrEditorDesktopAPI = {
     toggleDevTools(): Promise<boolean>;
     setLlmApiKey(provider: DesktopLlmProvider, apiKey: string): Promise<boolean>;
     clearLlmApiKey(provider: DesktopLlmProvider): Promise<boolean>;
-    createAssistantSession(title?: string): Promise<DesktopAssistantSessionSummary>;
-    listAssistantSessions(): Promise<DesktopAssistantSessionSummary[]>;
-    getAssistantSessionMessages(sessionId: string): Promise<DesktopAssistantMessage[]>;
+    createAssistantSession(title?: string, scopeId?: string | null): Promise<DesktopAssistantSessionSummary>;
+    listAssistantSessions(scopeId?: string | null): Promise<DesktopAssistantSessionSummary[]>;
+    getAssistantSessionMessages(
+      sessionId: string,
+      scopeId?: string | null
+    ): Promise<DesktopAssistantMessage[]>;
     sendAssistantMessage(
       sessionId: string,
       content: string,
-      attachments?: DesktopAssistantAttachment[]
+      attachments?: DesktopAssistantAttachment[],
+      scopeId?: string | null
     ): Promise<DesktopAssistantMessage>;
-    cancelAssistantRun(sessionId: string): Promise<boolean>;
-    approveAssistantToolCall(sessionId: string, callId: string): Promise<boolean>;
-    rejectAssistantToolCall(sessionId: string, callId: string): Promise<boolean>;
+    cancelAssistantRun(sessionId: string, scopeId?: string | null): Promise<boolean>;
+    approveAssistantToolCall(sessionId: string, callId: string, scopeId?: string | null): Promise<boolean>;
+    rejectAssistantToolCall(sessionId: string, callId: string, scopeId?: string | null): Promise<boolean>;
     onAssistantEvent(listener: (event: DesktopAssistantEvent) => void): () => void;
   };
 };

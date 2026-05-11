@@ -56,16 +56,19 @@ contextBridge.exposeInMainWorld('zephyrEditorDesktop', {
     toggleDevTools: () => invokeSettings('toggleDevTools', {}),
     setLlmApiKey: (provider, apiKey) => invokeSettings('setLlmApiKey', { provider, apiKey }),
     clearLlmApiKey: (provider) => invokeSettings('clearLlmApiKey', { provider }),
-    createAssistantSession: (title) => invokeSettings('createAssistantSession', { title }),
-    listAssistantSessions: () => invokeSettings('listAssistantSessions', {}),
-    getAssistantSessionMessages: (sessionId) => invokeSettings('getAssistantSessionMessages', { sessionId }),
-    sendAssistantMessage: (sessionId, content, attachments) =>
-      invokeSettings('sendAssistantMessage', { sessionId, content, attachments }),
-    cancelAssistantRun: (sessionId) => invokeSettings('cancelAssistantRun', { sessionId }),
-    approveAssistantToolCall: (sessionId, callId) =>
-      invokeSettings('approveAssistantToolCall', { sessionId, callId }),
-    rejectAssistantToolCall: (sessionId, callId) =>
-      invokeSettings('rejectAssistantToolCall', { sessionId, callId }),
+    createAssistantSession: (title, scopeId) =>
+      invokeSettings('createAssistantSession', { title, scopeId }),
+    listAssistantSessions: (scopeId) => invokeSettings('listAssistantSessions', { scopeId }),
+    getAssistantSessionMessages: (sessionId, scopeId) =>
+      invokeSettings('getAssistantSessionMessages', { sessionId, scopeId }),
+    sendAssistantMessage: (sessionId, content, attachments, scopeId) =>
+      invokeSettings('sendAssistantMessage', { sessionId, content, attachments, scopeId }),
+    cancelAssistantRun: (sessionId, scopeId) =>
+      invokeSettings('cancelAssistantRun', { sessionId, scopeId }),
+    approveAssistantToolCall: (sessionId, callId, scopeId) =>
+      invokeSettings('approveAssistantToolCall', { sessionId, callId, scopeId }),
+    rejectAssistantToolCall: (sessionId, callId, scopeId) =>
+      invokeSettings('rejectAssistantToolCall', { sessionId, callId, scopeId }),
     onAssistantEvent: (listener) => {
       if (typeof listener !== 'function') {
         return () => {};
