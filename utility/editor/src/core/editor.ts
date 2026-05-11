@@ -96,6 +96,15 @@ class RemoteProjectDirectoryReader implements HttpDirectoryReader {
 
 export class Editor {
   private static _current: Editor = null;
+  private static readonly _bundledMonacoTypePackages = new Set([
+    '@zephyr3d/base',
+    '@zephyr3d/device',
+    '@zephyr3d/scene',
+    '@zephyr3d/imgui',
+    '@zephyr3d/backend-webgl',
+    '@zephyr3d/backend-webgpu',
+    '@zephyr3d/editor/editor-plugin'
+  ]);
   private readonly _moduleManager: ModuleManager;
   private readonly _assetImages: {
     brushes: { [key: string]: DRef<Texture2D> };
@@ -334,6 +343,10 @@ export class Editor {
       };
       if (this._currentProject) {
         for (const k of Object.keys(deps.dependencies)) {
+          if (Editor._bundledMonacoTypePackages.has(k)) {
+            this.removeExternalPackageTypes(k);
+            continue;
+          }
           const pkg = `${k}@${deps.dependencies[k].version}`;
           console.info(`Loading DTS for package ${pkg}`);
           try {
@@ -371,6 +384,10 @@ export class Editor {
       dependencies: Record<string, { version: string; entry: string }>;
     };
     for (const depName of Object.keys(deps.dependencies ?? {})) {
+      if (Editor._bundledMonacoTypePackages.has(depName)) {
+        this.removeExternalPackageTypes(depName);
+        continue;
+      }
       const pkg = `${depName}@${deps.dependencies[depName].version}`;
       console.info(`Loading DTS for package ${pkg}`);
       try {
@@ -1256,6 +1273,7 @@ export class Editor {
         err: 'Monaco TypeScript runtime is not ready yet'
       };
     }
+    this.ensureBundledMonacoTypesPreferred();
     const vfs = this.getVFSForPath(path);
     if (!(await vfs.exists(path))) {
       return {
@@ -1402,6 +1420,11 @@ export class Editor {
 
   private async removeSystemPluginDependencyTypes(pluginId: string, packageName: string) {
     await this.waitForMonaco();
+    void pluginId;
+    this.removeExternalPackageTypes(packageName);
+  }
+
+  private removeExternalPackageTypes(packageName: string) {
     const encodedName = encodeURIComponent(packageName);
     for (const libPath of Object.keys(this._extraLibs)) {
       if (
@@ -1413,6 +1436,12 @@ export class Editor {
       }
     }
     this.removeCompilerPathMapping(packageName);
+  }
+
+  private ensureBundledMonacoTypesPreferred() {
+    for (const packageName of Editor._bundledMonacoTypePackages) {
+      this.removeExternalPackageTypes(packageName);
+    }
   }
 
   private clearDependencyTypesForOwner(ownerId: string) {

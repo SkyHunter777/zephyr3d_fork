@@ -11,7 +11,7 @@
     "noUnusedLocals": true,
     "strictNullChecks": false,
     "allowSyntheticDefaultImports": true,
-    "experimentalDecorators": false,
+    "experimentalDecorators": true,
     "emitDecoratorMetadata": false,
     "sourceMap": true,
     "stripInternal": true,

@@ -472,7 +472,15 @@ export class ResourceManager {
    * @returns The `SerializableClass` metadata, or `null` if not found.
    */
   getClassByConstructor(ctor: GenericConstructor) {
-    return this._classMap.get(ctor) ?? null;
+    let current: any = ctor;
+    while (typeof current === 'function' && current !== Function.prototype) {
+      const cls = this._classMap.get(current);
+      if (cls) {
+        return cls;
+      }
+      current = Object.getPrototypeOf(current);
+    }
+    return null;
   }
   /**
    * Get serialization metadata by an object instance.
@@ -523,6 +531,28 @@ export class ResourceManager {
    */
   getPropertiesByClass(cls: SerializableClass) {
     return this._clsPropMap.get(cls) ?? null;
+  }
+  /**
+   * Get all properties declared on a given class and its ancestors.
+   *
+   * @param cls - Serializable class metadata.
+   *
+   * @returns An array of `PropertyAccessor` entries, or `null` if none.
+   */
+  getAllPropertiesByClass(cls: Nullable<SerializableClass>) {
+    const props: Map<string, PropertyAccessor> = new Map();
+    while (cls) {
+      const classProps = this.getPropertiesByClass(cls);
+      if (classProps) {
+        for (const prop of classProps) {
+          if (!props.has(prop.name)) {
+            props.set(prop.name, prop);
+          }
+        }
+      }
+      cls = this.getClassByConstructor(cls.parent!);
+    }
+    return [...props.values()];
   }
   /**
    * Get a property accessor by class and property name.

@@ -2,7 +2,7 @@ import type { Editor } from '../core/editor';
 import type { Camera } from '@zephyr3d/scene';
 import type { PropertyValue, Material } from '@zephyr3d/scene';
 import type { Primitive } from '@zephyr3d/scene';
-import { Mesh, Scene, SceneNode, ScriptAttachment } from '@zephyr3d/scene';
+import { Mesh, Scene, SceneNode, DirectionalLight, ScriptAttachment } from '@zephyr3d/scene';
 import { getDevice, getEngine, OrthoCamera, PerspectiveCamera } from '@zephyr3d/scene';
 import { BlobReader, BlobWriter, configure, ZipWriter } from '@zip.js/zip.js';
 import {
@@ -546,6 +546,141 @@ function notifyScriptPropertiesChanged(sceneChanged: boolean) {
   }
 }
 
+function createPropertyValueBuffer(): PropertyValue {
+  return {
+    num: [0, 0, 0, 0],
+    str: ['', '', '', ''],
+    bool: [false, false, false, false],
+    object: []
+  };
+}
+
+function getObjectEditableProperties(target: object | null | undefined) {
+  if (!target) {
+    return [];
+  }
+  const cls = getEngine().resourceManager.getClassByObject(target);
+  return cls ? getEngine().resourceManager.getAllPropertiesByClass(cls) : [];
+}
+
+function serializeEditablePropertyValue(prop: any, target: object) {
+  if (!prop.get) {
+    return {
+      value: null,
+      err: `No getter for property ${prop.name}`
+    };
+  }
+  if (prop.type === 'object_array') {
+    return {
+      value: null,
+      err: `Property "${prop.name}" of type object_array is not supported`
+    };
+  }
+  const value = createPropertyValueBuffer();
+  prop.get.call(target, value as any);
+  if (prop.type === 'bool') {
+    return { value: value.bool[0], err: null };
+  }
+  if (prop.type === 'object' || prop.type === 'string') {
+    return { value: value.str[0], err: null };
+  }
+  if (prop.type === 'float' || prop.type === 'int') {
+    return { value: value.num[0], err: null };
+  }
+  if (prop.type === 'vec2' || prop.type === 'int2') {
+    return { value: value.num.slice(0, 2), err: null };
+  }
+  if (prop.type === 'vec3' || prop.type === 'int3' || prop.type === 'rgb') {
+    return { value: value.num.slice(0, 3), err: null };
+  }
+  if (prop.type === 'vec4' || prop.type === 'int4' || prop.type === 'rgba') {
+    return { value: value.num.slice(0, 4), err: null };
+  }
+  return {
+    value: null,
+    err: `Property "${prop.name}" of type ${prop.type} is not supported`
+  };
+}
+
+function parseEditablePropertyValue(prop: any, rawValue: unknown) {
+  const value = createPropertyValueBuffer();
+  if (typeof rawValue === 'boolean') {
+    if (prop.type !== 'bool') {
+      return {
+        value: null,
+        err: `Property "${prop.name}" expects ${prop.type}; boolean value is not accepted`
+      };
+    }
+    value.bool[0] = rawValue;
+    return { value, err: null };
+  }
+  if (typeof rawValue === 'string') {
+    if (prop.type !== 'string' && prop.type !== 'object') {
+      return {
+        value: null,
+        err: `Property "${prop.name}" expects ${prop.type}; string value is not accepted`
+      };
+    }
+    value.str[0] = rawValue;
+    return { value, err: null };
+  }
+  if (typeof rawValue === 'number') {
+    if (prop.type !== 'float' && prop.type !== 'int') {
+      return {
+        value: null,
+        err: `Property "${prop.name}" expects ${prop.type}; number value is not accepted`
+      };
+    }
+    value.num[0] = rawValue;
+    return { value, err: null };
+  }
+  if (Array.isArray(rawValue)) {
+    let count = 0;
+    if (prop.type === 'vec2' || prop.type === 'int2') {
+      count = 2;
+    } else if (prop.type === 'vec3' || prop.type === 'int3' || prop.type === 'rgb') {
+      count = 3;
+    } else if (prop.type === 'vec4' || prop.type === 'int4' || prop.type === 'rgba') {
+      count = 4;
+    } else {
+      return {
+        value: null,
+        err: `Property "${prop.name}" has unsupported type ${prop.type}; cannot set from an array`
+      };
+    }
+    if (rawValue.length !== count || rawValue.some((item) => typeof item !== 'number')) {
+      return {
+        value: null,
+        err: `Property "${prop.name}" expects ${prop.type}; provide an array of exactly ${count} numbers`
+      };
+    }
+    for (let i = 0; i < count; i++) {
+      value.num[i] = rawValue[i];
+    }
+    return { value, err: null };
+  }
+  return {
+    value: null,
+    err: `Invalid value for property "${prop.name}"; expected value compatible with type ${prop.type}`
+  };
+}
+
+function findEditableProperty(
+  props: any[],
+  propertyName: string,
+  ownerLabel: string,
+  propertyListToolName: string
+) {
+  const prop = props.find((item) => item.name === propertyName);
+  if (prop) {
+    return { prop, err: null };
+  }
+  return {
+    prop: null,
+    err: `Unknown ${ownerLabel} property "${propertyName}". Use ${propertyListToolName} first and pass one of its property_name/name values.`
+  };
+}
+
 function buildScriptContextPayload(
   editor: Editor,
   scene: Scene,
@@ -934,23 +1069,24 @@ function getSceneStats(scene: Scene): JsonValue {
     return null;
   }
   let nodeCount = 0;
-  let drawableCount = 0;
+  let meshCount = 0;
   let lightCount = 0;
   scene.rootNode?.iterate((target) => {
     nodeCount++;
     if (target.isMesh()) {
-      drawableCount++;
+      meshCount++;
     }
     if (target.isLight()) {
       lightCount++;
     }
-    return true;
+    return false;
   });
   return {
     nodeCount,
-    drawableCount,
+    meshCount,
     lightCount,
-    hasMainCamera: !!scene.mainCamera,
+    sunLightNodeId: DirectionalLight.getSunLight(scene)?.persistentId ?? null,
+    mainCameraNodeId: scene.mainCamera?.persistentId ?? null,
     envLightType: scene.env?.light?.type ?? null
   };
 }
@@ -2204,7 +2340,7 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           };
         }
         const values: (number[] | number | boolean | string)[] = [];
-        const props = materialClass.getProps();
+        const props = getEngine().resourceManager.getAllPropertiesByClass(materialClass);
         for (const p of properties) {
           let propertyName = p as string;
           const prop = props.find((prop) => prop.name === propertyName);
@@ -2308,7 +2444,7 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
             err: `Cannot resolve material class for asset: ${path}`
           };
         }
-        const props = materialClass.getProps();
+        const props = getEngine().resourceManager.getAllPropertiesByClass(materialClass);
         for (const p of properties) {
           let propertyName = p.property_name as string;
           if (typeof propertyName !== 'string' || !propertyName.trim()) {
@@ -2409,7 +2545,7 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
     }
     case 'getScenePropertyList': {
       try {
-        const props = getEngine().resourceManager.getPropertiesByClass(
+        const props = getEngine().resourceManager.getAllPropertiesByClass(
           getEngine().resourceManager.getClassByConstructor(Scene)
         );
         return {
@@ -2419,6 +2555,109 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
       } catch (err) {
         return {
           propertyList: null,
+          err: `${err}`
+        };
+      }
+    }
+    case 'scene_get_properties': {
+      try {
+        const scene = getScene(editor);
+        if (!scene) {
+          return {
+            values: null,
+            err: 'No scene is currently opened; create or open a scene first'
+          };
+        }
+        const properties = params.properties as string[];
+        if (!Array.isArray(properties)) {
+          return {
+            values: null,
+            err: 'scene_get_properties requires `properties` as an array of scene property names'
+          };
+        }
+        const values: (number[] | number | boolean | string)[] = [];
+        const props = getObjectEditableProperties(scene);
+        for (const propertyName of properties) {
+          const resolved = findEditableProperty(props, propertyName, 'scene', 'scene_get_property_list');
+          if (resolved.err) {
+            return {
+              values: null,
+              err: resolved.err
+            };
+          }
+          const serialized = serializeEditablePropertyValue(resolved.prop, scene);
+          if (serialized.err) {
+            return {
+              values: null,
+              err: serialized.err
+            };
+          }
+          values.push(serialized.value as number[] | number | boolean | string);
+        }
+        return {
+          values,
+          err: null
+        };
+      } catch (err) {
+        return {
+          values: null,
+          err: `${err}`
+        };
+      }
+    }
+    case 'scene_set_properties': {
+      try {
+        const scene = getScene(editor);
+        if (!scene) {
+          return {
+            err: 'No scene is currently opened; create or open a scene first'
+          };
+        }
+        const properties = params.properties as { property_name: string; value: unknown }[];
+        if (!Array.isArray(properties)) {
+          return {
+            err: 'scene_set_properties requires `properties` as an array of { property_name, value } objects'
+          };
+        }
+        const props = getObjectEditableProperties(scene);
+        for (const update of properties) {
+          const propertyName = typeof update?.property_name === 'string' ? update.property_name.trim() : '';
+          if (!propertyName) {
+            return {
+              err: 'scene_set_properties requires each property update to include non-empty `property_name`'
+            };
+          }
+          const resolved = findEditableProperty(props, propertyName, 'scene', 'scene_get_property_list');
+          if (resolved.err) {
+            return {
+              err: resolved.err
+            };
+          }
+          if (!resolved.prop.set) {
+            return {
+              err: `Scene property "${resolved.prop.name}" is read-only and cannot be set`
+            };
+          }
+          if (resolved.prop.type === 'object_array') {
+            return {
+              err: `scene_set_properties does not support object_array property "${resolved.prop.name}"`
+            };
+          }
+          const parsed = parseEditablePropertyValue(resolved.prop, update.value);
+          if (parsed.err) {
+            return {
+              err: parsed.err
+            };
+          }
+          await resolved.prop.set.call(scene, parsed.value as any);
+        }
+        eventBus.dispatchEvent('refresh_properties');
+        eventBus.dispatchEvent('scene_changed');
+        return {
+          err: null
+        };
+      } catch (err) {
+        return {
           err: `${err}`
         };
       }
@@ -2459,7 +2698,7 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           };
         }
         return {
-          propertyList: JSON.parse(JSON.stringify(getEngine().resourceManager.getPropertiesByClass(cls))),
+          propertyList: JSON.parse(JSON.stringify(getEngine().resourceManager.getAllPropertiesByClass(cls))),
           err: null
         };
       } catch (err) {
@@ -2492,9 +2731,125 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
         };
       }
       return {
-        propertyList: JSON.parse(JSON.stringify(getEngine().resourceManager.getPropertiesByClass(cls))),
+        propertyList: JSON.parse(JSON.stringify(getEngine().resourceManager.getAllPropertiesByClass(cls))),
         err: null
       };
+    }
+    case 'node_get_properties': {
+      try {
+        const id = params.id as string;
+        if (typeof id !== 'string' || !id.trim()) {
+          return {
+            values: null,
+            err: 'node_get_properties requires `id`, the persistent id of a scene node'
+          };
+        }
+        const node = getNode(editor, id.trim());
+        if (node.err) {
+          return {
+            values: null,
+            err: node.err
+          };
+        }
+        const properties = params.properties as string[];
+        if (!Array.isArray(properties)) {
+          return {
+            values: null,
+            err: 'node_get_properties requires `properties` as an array of node property names'
+          };
+        }
+        const values: (number[] | number | boolean | string)[] = [];
+        const props = getObjectEditableProperties(node.node);
+        for (const propertyName of properties) {
+          const resolved = findEditableProperty(props, propertyName, 'node', 'node_get_property_list');
+          if (resolved.err) {
+            return {
+              values: null,
+              err: resolved.err
+            };
+          }
+          const serialized = serializeEditablePropertyValue(resolved.prop, node.node);
+          if (serialized.err) {
+            return {
+              values: null,
+              err: serialized.err
+            };
+          }
+          values.push(serialized.value as number[] | number | boolean | string);
+        }
+        return {
+          values,
+          err: null
+        };
+      } catch (err) {
+        return {
+          values: null,
+          err: `${err}`
+        };
+      }
+    }
+    case 'node_set_properties': {
+      try {
+        const id = params.id as string;
+        if (typeof id !== 'string' || !id.trim()) {
+          return {
+            err: 'node_set_properties requires `id`, the persistent id of a scene node'
+          };
+        }
+        const node = getNode(editor, id.trim());
+        if (node.err) {
+          return {
+            err: node.err
+          };
+        }
+        const properties = params.properties as { property_name: string; value: unknown }[];
+        if (!Array.isArray(properties)) {
+          return {
+            err: 'node_set_properties requires `properties` as an array of { property_name, value } objects'
+          };
+        }
+        const props = getObjectEditableProperties(node.node);
+        for (const update of properties) {
+          const propertyName = typeof update?.property_name === 'string' ? update.property_name.trim() : '';
+          if (!propertyName) {
+            return {
+              err: 'node_set_properties requires each property update to include non-empty `property_name`'
+            };
+          }
+          const resolved = findEditableProperty(props, propertyName, 'node', 'node_get_property_list');
+          if (resolved.err) {
+            return {
+              err: resolved.err
+            };
+          }
+          if (!resolved.prop.set) {
+            return {
+              err: `Node property "${resolved.prop.name}" is read-only and cannot be set`
+            };
+          }
+          if (resolved.prop.type === 'object_array') {
+            return {
+              err: `node_set_properties does not support object_array property "${resolved.prop.name}"`
+            };
+          }
+          const parsed = parseEditablePropertyValue(resolved.prop, update.value);
+          if (parsed.err) {
+            return {
+              err: parsed.err
+            };
+          }
+          await resolved.prop.set.call(node.node, parsed.value as any);
+        }
+        eventBus.dispatchEvent('refresh_properties');
+        eventBus.dispatchEvent('scene_changed');
+        return {
+          err: null
+        };
+      } catch (err) {
+        return {
+          err: `${err}`
+        };
+      }
     }
     case 'getScriptContext': {
       const project = await ProjectService.getCurrentProjectInfo();

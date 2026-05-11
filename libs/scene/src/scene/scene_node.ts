@@ -537,7 +537,7 @@ export class SceneNode
    * Warning: Do not remove children during this iteration. To allow removal, use `iterateBottomToTop`.
    *
    * @param callback - Called for each node; if returns true, iteration stops.
-   * @returns true if iteration was aborted early.
+   * @returns If returns true, the iteration will immediately stop.
    */
   iterate(callback: NodeIterateFunc) {
     if (callback(this)) {
@@ -556,7 +556,7 @@ export class SceneNode
    * Child nodes can be safely removed during this iteration.
    *
    * @param callback - Called for each node; if returns true, iteration stops.
-   * @returns true if iteration was aborted early.
+   * @returns If returns true, the iteration will immediately stop.
    */
   iterateBottomToTop(callback: NodeIterateFunc) {
     for (let i = this._children.length - 1; i >= 0; i--) {

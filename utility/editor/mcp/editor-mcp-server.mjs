@@ -1,15 +1,167 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import net from 'node:net';
+import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { isMainThread, parentPort, workerData } from 'node:worker_threads';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const IPC_TRANSPORT = !isMainThread && workerData?.transport === 'ipc';
 const DEFAULT_PORT = Number(process.env.EDITOR_MCP_PORT ?? workerData?.port ?? (IPC_TRANSPORT ? 0 : 47231));
 const BRIDGE_TOKEN =
   process.env.EDITOR_MCP_TOKEN || workerData?.token || crypto.randomBytes(12).toString('hex');
 const DEFAULT_EDITOR_URL =
   process.env.EDITOR_URL || workerData?.editorUrl || 'http://127.0.0.1:8000/dist/index.html';
+const ASSISTANT_TYPE_INDEX_PATH = path.resolve(__dirname, '..', 'dist', 'assistant', 'zephyr-types-index.json');
+const ASSISTANT_TYPES_VENDOR_ROOT = path.resolve(__dirname, '..', 'dist', 'vendor', 'zephyr3d');
+const ASSISTANT_TYPE_PACKAGES = ['base', 'device', 'scene', 'imgui', 'backend-webgl', 'backend-webgpu'];
+const MAX_TYPE_FILE_LINES = 240;
+let assistantTypeIndexPromise = null;
+
+function tokenizeSearchText(value) {
+  return String(value || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[^a-zA-Z0-9_]+/g, ' ')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function normalizeSearchValue(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function scoreTypeEntry(entry, query, tokens) {
+  const symbolLower = normalizeSearchValue(entry.symbol);
+  const signatureLower = normalizeSearchValue(entry.signature);
+  const docsLower = normalizeSearchValue(entry.docs);
+  const jsDocLower = normalizeSearchValue(entry.jsDoc);
+  let score = 0;
+  if (symbolLower === query) {
+    score += 120;
+  } else if (symbolLower.endsWith(`.${query}`)) {
+    score += 90;
+  } else if (symbolLower.includes(query)) {
+    score += 55;
+  }
+  if (signatureLower.includes(query)) {
+    score += 24;
+  }
+  for (const token of tokens) {
+    if (symbolLower.includes(token)) {
+      score += 12;
+    }
+    if (entry.keywords?.includes(token)) {
+      score += 8;
+    }
+    if (signatureLower.includes(token)) {
+      score += 5;
+    }
+    if (docsLower.includes(token)) {
+      score += 3;
+    }
+    if (jsDocLower.includes(token)) {
+      score += 4;
+    }
+    if (entry.package === token) {
+      score += 4;
+    }
+  }
+  return score;
+}
+
+function summarizeTypeEntry(entry, score = undefined) {
+  return {
+    id: entry.id,
+    package: entry.package,
+    path: entry.path,
+    symbol: entry.symbol,
+    containerSymbol: entry.containerSymbol,
+    kind: entry.kind,
+    signature: entry.signature,
+    docs: entry.docs,
+    jsDoc: entry.jsDoc,
+    startLine: entry.startLine,
+    endLine: entry.endLine,
+    score
+  };
+}
+
+async function loadAssistantTypeIndex() {
+  if (!assistantTypeIndexPromise) {
+    assistantTypeIndexPromise = fs
+      .readFile(ASSISTANT_TYPE_INDEX_PATH, 'utf8')
+      .then((text) => JSON.parse(text))
+      .catch((err) => {
+        assistantTypeIndexPromise = null;
+        throw new Error(
+          `Bundled Zephyr3D type index is unavailable at ${ASSISTANT_TYPE_INDEX_PATH}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      });
+  }
+  return await assistantTypeIndexPromise;
+}
+
+function resolveBundledTypeFile(packageName, relativePath) {
+  const normalizedPackage = String(packageName || '').trim();
+  if (!ASSISTANT_TYPE_PACKAGES.includes(normalizedPackage)) {
+    throw new Error(`Unsupported type package: ${normalizedPackage}`);
+  }
+  const normalizedRelativePath = String(relativePath || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '');
+  if (!normalizedRelativePath) {
+    throw new Error('Type file path is required');
+  }
+  const candidate = path.resolve(ASSISTANT_TYPES_VENDOR_ROOT, normalizedRelativePath);
+  const packageRoot = path.resolve(ASSISTANT_TYPES_VENDOR_ROOT, normalizedPackage);
+  if (!candidate.startsWith(`${packageRoot}${path.sep}`) || path.extname(candidate) !== '.ts') {
+    throw new Error(`Invalid type file path: ${normalizedRelativePath}`);
+  }
+  return candidate;
+}
+
+async function readBundledTypeFileExcerpt(packageName, relativePath, startLine, endLine) {
+  const filePath = resolveBundledTypeFile(packageName, relativePath);
+  const text = await fs.readFile(filePath, 'utf8');
+  const lines = text.replace(/\r/g, '').split('\n');
+  const maxLine = lines.length;
+  const normalizedStart = Math.max(1, Math.min(Number(startLine) || 1, maxLine));
+  const normalizedEnd = Math.max(
+    normalizedStart,
+    Math.min(Number(endLine) || normalizedStart + MAX_TYPE_FILE_LINES - 1, maxLine)
+  );
+  const actualEnd = Math.min(normalizedEnd, normalizedStart + MAX_TYPE_FILE_LINES - 1);
+  return {
+    package: packageName,
+    path: relativePath,
+    filePath,
+    totalLines: maxLine,
+    startLine: normalizedStart,
+    endLine: actualEnd,
+    truncated: actualEnd < normalizedEnd,
+    content: lines.slice(normalizedStart - 1, actualEnd).join('\n')
+  };
+}
+
+function findTypeEntryByReference(index, reference, packageName) {
+  const normalizedReference = String(reference || '').trim();
+  if (!normalizedReference) {
+    return null;
+  }
+  const filtered = index.entries.filter(
+    (entry) =>
+      (!packageName || entry.package === packageName) &&
+      (entry.id === normalizedReference || entry.symbol === normalizedReference)
+  );
+  if (!filtered.length) {
+    return null;
+  }
+  return filtered.sort((a, b) => (a.symbol === normalizedReference ? -1 : 0) - (b.symbol === normalizedReference ? -1 : 0))[0];
+}
 
 class EditorBridgeServer {
   constructor(port, token) {
@@ -1105,6 +1257,86 @@ const BASE_TOOLS = [
     inputSchema: { type: 'object', properties: {} }
   },
   {
+    name: 'docs_search_types',
+    description:
+      'Search the bundled Zephyr3D TypeScript declaration index for APIs, classes, functions, methods, types, and runtime scripting helpers.',
+    inputSchema: {
+      type: 'object',
+      required: ['query'],
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query such as RuntimeScript, SceneNode attach script, or PerspectiveCamera.'
+        },
+        package: {
+          type: 'string',
+          enum: ASSISTANT_TYPE_PACKAGES,
+          description: 'Optional package filter such as scene or base.'
+        },
+        limit: {
+          type: 'number',
+          default: 5,
+          description: 'Maximum number of matching declaration entries to return.'
+        }
+      }
+    }
+  },
+  {
+    name: 'docs_get_type_symbol',
+    description:
+      'Return declaration details for a bundled Zephyr3D type entry by id or symbol, including a source excerpt from the packaged .d.ts file.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: 'Exact entry id returned by docs_search_types.'
+        },
+        symbol: {
+          type: 'string',
+          description: 'Exact symbol name such as RuntimeScript, SceneNode, or RuntimeScript.onStart.'
+        },
+        package: {
+          type: 'string',
+          enum: ASSISTANT_TYPE_PACKAGES,
+          description: 'Optional package filter when resolving symbol names.'
+        },
+        max_lines: {
+          type: 'number',
+          default: 160,
+          description: 'Optional maximum number of source lines to include in the excerpt.'
+        }
+      }
+    }
+  },
+  {
+    name: 'docs_read_type_file',
+    description: 'Read a packaged Zephyr3D declaration file excerpt by package, path, and line range.',
+    inputSchema: {
+      type: 'object',
+      required: ['package', 'path'],
+      properties: {
+        package: {
+          type: 'string',
+          enum: ASSISTANT_TYPE_PACKAGES,
+          description: 'Package name such as scene or base.'
+        },
+        path: {
+          type: 'string',
+          description: 'Relative declaration path returned by docs_search_types, such as scene/dist/index.d.ts.'
+        },
+        start_line: {
+          type: 'number',
+          description: '1-based start line. Defaults to 1.'
+        },
+        end_line: {
+          type: 'number',
+          description: `1-based end line. Excerpts are capped to ${MAX_TYPE_FILE_LINES} lines.`
+        }
+      }
+    }
+  },
+  {
     name: 'project_list',
     description:
       'List editor projects. Returns projects as an array of { name, id } on success, otherwise returns err with the failure reason.',
@@ -1720,6 +1952,56 @@ const BASE_TOOLS = [
     }
   },
   {
+    name: 'scene_get_properties',
+    description:
+      'Get property values from the current scene. Property names must match scene_get_property_list. Returns { values, err }.',
+    inputSchema: {
+      type: 'object',
+      required: ['properties'],
+      properties: {
+        properties: {
+          type: 'array',
+          description: 'Scene property names to read.',
+          items: { type: 'string' }
+        },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
+    name: 'scene_set_properties',
+    description:
+      'Set editable properties on the current scene. Property names must match scene_get_property_list. Returns { err }.',
+    inputSchema: {
+      type: 'object',
+      required: ['properties'],
+      properties: {
+        properties: {
+          type: 'array',
+          description:
+            'Property updates. Values may be boolean, string, number, or number arrays for vec/rgb/rgba properties.',
+          items: {
+            type: 'object',
+            required: ['property_name', 'value'],
+            properties: {
+              property_name: { type: 'string', description: 'Editable scene property name.' },
+              value: {
+                description: 'Property value.',
+                oneOf: [
+                  { type: 'boolean' },
+                  { type: 'string' },
+                  { type: 'number' },
+                  { type: 'array', items: { type: 'number' } }
+                ]
+              }
+            }
+          }
+        },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
     name: 'node_get_property_list',
     description:
       'Get the editable property metadata list for a scene node by persistent node id. Returns { propertyList, err }.',
@@ -1728,6 +2010,58 @@ const BASE_TOOLS = [
       required: ['id'],
       properties: {
         id: { type: 'string', description: 'Persistent id of the scene node.' },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
+    name: 'node_get_properties',
+    description:
+      'Get property values from a scene node by persistent node id. Property names must match node_get_property_list. Returns { values, err }.',
+    inputSchema: {
+      type: 'object',
+      required: ['id', 'properties'],
+      properties: {
+        id: { type: 'string', description: 'Persistent id of the scene node.' },
+        properties: {
+          type: 'array',
+          description: 'Node property names to read.',
+          items: { type: 'string' }
+        },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
+    name: 'node_set_properties',
+    description:
+      'Set editable properties on a scene node by persistent node id. Property names must match node_get_property_list. Returns { err }.',
+    inputSchema: {
+      type: 'object',
+      required: ['id', 'properties'],
+      properties: {
+        id: { type: 'string', description: 'Persistent id of the scene node.' },
+        properties: {
+          type: 'array',
+          description:
+            'Property updates. Values may be boolean, string, number, or number arrays for vec/rgb/rgba properties.',
+          items: {
+            type: 'object',
+            required: ['property_name', 'value'],
+            properties: {
+              property_name: { type: 'string', description: 'Editable node property name.' },
+              value: {
+                description: 'Property value.',
+                oneOf: [
+                  { type: 'boolean' },
+                  { type: 'string' },
+                  { type: 'number' },
+                  { type: 'array', items: { type: 'number' } }
+                ]
+              }
+            }
+          }
+        },
         timeout_ms: { type: 'number', default: 10000 }
       }
     }
@@ -2252,6 +2586,101 @@ function buildToolCatalog() {
 const TOOLS = buildToolCatalog();
 
 const handlers = {
+  async docs_search_types(args) {
+    const query = typeof args.query === 'string' ? args.query.trim() : '';
+    if (!query) {
+      return { query: '', matches: [], err: 'docs_search_types requires query' };
+    }
+    const packageName = typeof args.package === 'string' && args.package.trim() ? args.package.trim() : '';
+    if (packageName && !ASSISTANT_TYPE_PACKAGES.includes(packageName)) {
+      return { query, matches: [], err: `Unsupported type package: ${packageName}` };
+    }
+    const limit = Math.max(1, Math.min(Number(args.limit) || 5, 20));
+    const tokens = tokenizeSearchText(query);
+    const normalizedQuery = normalizeSearchValue(query);
+    const index = await loadAssistantTypeIndex();
+    const matches = index.entries
+      .filter((entry) => !packageName || entry.package === packageName)
+      .map((entry) => ({
+        entry,
+        score: scoreTypeEntry(entry, normalizedQuery, tokens)
+      }))
+      .filter((item) => item.score > 0)
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          a.entry.symbol.localeCompare(b.entry.symbol) ||
+          a.entry.startLine - b.entry.startLine
+      )
+      .slice(0, limit)
+      .map((item) => summarizeTypeEntry(item.entry, item.score));
+    return {
+      query,
+      package: packageName || null,
+      totalEntries: index.entries.length,
+      matches
+    };
+  },
+  async docs_get_type_symbol(args) {
+    const id = typeof args.id === 'string' ? args.id.trim() : '';
+    const symbol = typeof args.symbol === 'string' ? args.symbol.trim() : '';
+    const packageName = typeof args.package === 'string' && args.package.trim() ? args.package.trim() : '';
+    if (!id && !symbol) {
+      return { symbol: null, entry: null, err: 'docs_get_type_symbol requires id or symbol' };
+    }
+    if (packageName && !ASSISTANT_TYPE_PACKAGES.includes(packageName)) {
+      return { symbol: symbol || id, entry: null, err: `Unsupported type package: ${packageName}` };
+    }
+    const maxLines = Math.max(20, Math.min(Number(args.max_lines) || 160, MAX_TYPE_FILE_LINES));
+    const index = await loadAssistantTypeIndex();
+    const entry = findTypeEntryByReference(index, id || symbol, packageName);
+    if (!entry) {
+      return { symbol: symbol || id, entry: null, err: 'Type entry not found' };
+    }
+    const excerpt = await readBundledTypeFileExcerpt(
+      entry.package,
+      entry.path,
+      entry.startLine,
+      Math.min(entry.endLine, entry.startLine + maxLines - 1)
+    );
+    const relatedSymbols = index.entries
+      .filter((candidate) => candidate.containerSymbol === entry.symbol)
+      .slice(0, 64)
+      .map((candidate) => ({
+        id: candidate.id,
+        symbol: candidate.symbol,
+        kind: candidate.kind,
+        startLine: candidate.startLine,
+        endLine: candidate.endLine,
+        signature: candidate.signature
+      }));
+    return {
+      symbol: entry.symbol,
+      entry: summarizeTypeEntry(entry),
+      excerpt,
+      relatedSymbols,
+      excerptTruncated: excerpt.truncated || entry.endLine > excerpt.endLine
+    };
+  },
+  async docs_read_type_file(args) {
+    const packageName = typeof args.package === 'string' ? args.package.trim() : '';
+    const relativePath = typeof args.path === 'string' ? args.path.trim() : '';
+    if (!packageName || !relativePath) {
+      return { package: packageName || null, path: relativePath || null, err: 'docs_read_type_file requires package and path' };
+    }
+    if (!ASSISTANT_TYPE_PACKAGES.includes(packageName)) {
+      return { package: packageName, path: relativePath, err: `Unsupported type package: ${packageName}` };
+    }
+    try {
+      return await readBundledTypeFileExcerpt(packageName, relativePath, args.start_line, args.end_line);
+    } catch (err) {
+      return {
+        package: packageName,
+        path: relativePath,
+        err: err instanceof Error ? err.message : String(err)
+      };
+    }
+  },
   async editor_connect_info(args) {
     const base = args.base_url || DEFAULT_EDITOR_URL;
     const url = new URL(base);
@@ -2692,12 +3121,80 @@ const handlers = {
   async scene_get_property_list(args) {
     return bridge.send('getScenePropertyList', {}, Number(args.timeout_ms ?? 10000));
   },
+  async scene_get_properties(args) {
+    if (!Array.isArray(args.properties) || args.properties.some((value) => typeof value !== 'string')) {
+      return { values: null, err: 'scene_get_properties requires the property list as string array' };
+    }
+    const properties = args.properties.map((value) => value.trim()).filter((value) => value);
+    if (properties.length !== args.properties.length) {
+      return { values: null, err: 'scene_get_properties property names must be non-empty strings' };
+    }
+    return bridge.send('scene_get_properties', { properties }, Number(args.timeout_ms ?? 10000));
+  },
+  async scene_set_properties(args) {
+    if (!Array.isArray(args.properties)) {
+      return { err: 'scene_set_properties requires the property list' };
+    }
+    const properties = [];
+    for (const prop of args.properties) {
+      if (!prop || typeof prop !== 'object') {
+        return { err: 'scene_set_properties property entries must be objects' };
+      }
+      const propertyName = typeof prop.property_name === 'string' ? prop.property_name.trim() : '';
+      if (!propertyName) {
+        return { err: 'scene_set_properties requires the scene property name' };
+      }
+      if (!Object.prototype.hasOwnProperty.call(prop, 'value')) {
+        return { err: `scene_set_properties requires value for property ${propertyName}` };
+      }
+      properties.push({ property_name: propertyName, value: prop.value });
+    }
+    return bridge.send('scene_set_properties', { properties }, Number(args.timeout_ms ?? 10000));
+  },
   async node_get_property_list(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
       return { propertyList: null, err: 'node_get_property_list requires the node id' };
     }
     return bridge.send('getNodePropertyList', { id }, Number(args.timeout_ms ?? 10000));
+  },
+  async node_get_properties(args) {
+    const id = typeof args.id === 'string' ? args.id.trim() : '';
+    if (!id) {
+      return { values: null, err: 'node_get_properties requires the node id' };
+    }
+    if (!Array.isArray(args.properties) || args.properties.some((value) => typeof value !== 'string')) {
+      return { values: null, err: 'node_get_properties requires the property list as string array' };
+    }
+    const properties = args.properties.map((value) => value.trim()).filter((value) => value);
+    if (properties.length !== args.properties.length) {
+      return { values: null, err: 'node_get_properties property names must be non-empty strings' };
+    }
+    return bridge.send('node_get_properties', { id, properties }, Number(args.timeout_ms ?? 10000));
+  },
+  async node_set_properties(args) {
+    const id = typeof args.id === 'string' ? args.id.trim() : '';
+    if (!id) {
+      return { err: 'node_set_properties requires the node id' };
+    }
+    if (!Array.isArray(args.properties)) {
+      return { err: 'node_set_properties requires the property list' };
+    }
+    const properties = [];
+    for (const prop of args.properties) {
+      if (!prop || typeof prop !== 'object') {
+        return { err: 'node_set_properties property entries must be objects' };
+      }
+      const propertyName = typeof prop.property_name === 'string' ? prop.property_name.trim() : '';
+      if (!propertyName) {
+        return { err: 'node_set_properties requires the node property name' };
+      }
+      if (!Object.prototype.hasOwnProperty.call(prop, 'value')) {
+        return { err: `node_set_properties requires value for property ${propertyName}` };
+      }
+      properties.push({ property_name: propertyName, value: prop.value });
+    }
+    return bridge.send('node_set_properties', { id, properties }, Number(args.timeout_ms ?? 10000));
   },
   async shape_create_node(args) {
     const shape = typeof args.shape === 'string' ? args.shape.trim() : '';

@@ -56,6 +56,10 @@ type ControlState = {
   blinkStartTime: number;
   lastSelectionStart: number;
   lastSelectionEnd: number;
+  cachedLayoutText: string;
+  cachedLayoutLineHeight: number;
+  cachedLayoutFlags: CustomInputTextFlags;
+  cachedLayout: TextLayout | null;
 };
 
 const controlStates = new Map<number, ControlState>();
@@ -400,6 +404,23 @@ function buildTextLayout(text: string, lineHeight: number, flags: CustomInputTex
   };
 }
 
+function getTextLayout(state: ControlState, text: string, lineHeight: number, flags: CustomInputTextFlags) {
+  if (
+    state.cachedLayout &&
+    state.cachedLayoutText === text &&
+    state.cachedLayoutLineHeight === lineHeight &&
+    state.cachedLayoutFlags === flags
+  ) {
+    return state.cachedLayout;
+  }
+  const layout = buildTextLayout(text, lineHeight, flags);
+  state.cachedLayoutText = text;
+  state.cachedLayoutLineHeight = lineHeight;
+  state.cachedLayoutFlags = flags;
+  state.cachedLayout = layout;
+  return layout;
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
@@ -620,7 +641,11 @@ function getControlState(id: number, flags: CustomInputTextFlags, initialValue: 
       submitRequested: false,
       blinkStartTime: 0,
       lastSelectionStart: 0,
-      lastSelectionEnd: 0
+      lastSelectionEnd: 0,
+      cachedLayoutText: '',
+      cachedLayoutLineHeight: 0,
+      cachedLayoutFlags: CustomInputTextFlags.None,
+      cachedLayout: null
     };
     controlStates.set(id, state);
   }
@@ -720,7 +745,7 @@ export function customTextInput(
     changed = syncActiveValue(content, state) || changed;
   }
 
-  const layout = buildTextLayout(content[0], lineHeight, flags);
+  const layout = getTextLayout(state, content[0], lineHeight, flags);
   const maxScrollX = Math.max(0, layout.maxWidth - innerWidth);
   const maxScrollY = multiline ? Math.max(0, layout.totalHeight - innerHeight) : 0;
 
