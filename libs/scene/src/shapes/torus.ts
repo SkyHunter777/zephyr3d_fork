@@ -240,7 +240,7 @@ export class TorusShape extends Shape<TorusCreationOptions> implements Clonable<
       const v = Math.cbrt(-q / 2 - sqrtDisc);
       return [u + v + shift];
     } else if (disc < -eps) {
-      const theta = Math.acos(Math.max(-1, Math.min(1, (-q / 2) / Math.sqrt((-p * p * p) / 27))));
+      const theta = Math.acos(Math.max(-1, Math.min(1, -q / 2 / Math.sqrt((-p * p * p) / 27))));
       const rho = 2 * Math.sqrt(-p / 3);
       return [
         rho * Math.cos(theta / 3) + shift,
