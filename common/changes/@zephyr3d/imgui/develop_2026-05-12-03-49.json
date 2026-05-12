@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "packageName": "@zephyr3d/imgui",
+      "comment": "Fix imgui rendering issue",
+      "type": "patch"
+    }
+  ],
+  "packageName": "@zephyr3d/imgui"
+}

@@ -1065,6 +1065,8 @@ export class AnimationSet extends Disposable implements IDisposable {
    * @param excludeJoint - Optional predicate; joints whose name returns true are excluded from
    *   skeleton structure matching.
    * @returns The newly created AnimationClip, or null on failure.
+   *
+   * @deprecated Use the new {@link AnimationSet.copyHumanoidAnimationFrom} method instead.
    */
   copyAnimationFrom(
     sourceSet: AnimationSet,

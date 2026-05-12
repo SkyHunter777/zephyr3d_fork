@@ -23,6 +23,8 @@ import { Vector3, Quaternion, Matrix4x4, clamp01 } from '@zephyr3d/base';
  * Depth-based physics parameter curves.
  * Each curve is evaluated with t = pointDepth / maxDepth (0 at root, 1 at tip).
  * This allows parameters to vary smoothly along the bone chain.
+ *
+ * @public
  */
 export interface PhysicsCurves {
   /** Scales point mass by depth */
@@ -71,9 +73,12 @@ export interface PhysicsCurves {
   fakeWaveFreq: InterpolatorScalar;
 }
 
-/** Top-level configuration for the physics controller */
+/**
+ * Top-level configuration for the physics controller
+ * @public
+ **/
 export interface ControllerConfig {
-  /** Global gravity vector (e.g. {x:0, y:-9.8, z:0}) */
+  /** Global gravity vector */
   gravity: Vector3;
   /** Global wind force vector applied to all dynamic points */
   windForce: Vector3;
@@ -111,24 +116,44 @@ export interface ControllerConfig {
   constraintOptions: ConstraintBuildOptions;
 }
 
-/** Stable runtime handle for a JointDynamics collider. */
+/**
+ * Stable runtime handle for a JointDynamics collider.
+ * @public
+ */
 export interface JointDynamicsColliderHandle {
   readonly type: 'collider';
   readonly id: number;
 }
 
-/** Stable runtime handle for a JointDynamics flat plane. */
+/**
+ * Stable runtime handle for a JointDynamics flat plane.
+ * @public
+ */
 export interface JointDynamicsFlatPlaneHandle {
   readonly type: 'flatPlane';
   readonly id: number;
 }
 
-/** Stable runtime handle for a JointDynamics grabber. */
+/**
+ * Stable runtime handle for a JointDynamics grabber.
+ * @public
+ */
 export interface JointDynamicsGrabberHandle {
   readonly type: 'grabber';
   readonly id: number;
 }
 
+/**
+ * High-level controller for joint dynamics simulation.
+ *
+ * This class manages the physics simulation for a hierarchy of bones, including constraints,
+ * colliders, and grabbers. It provides an API for initializing the system with bone data and
+ * transforms, stepping the simulation each frame, and modifying colliders and grabbers at runtime.
+ * The controller handles the internal state and logic for blending between animation and physics,
+ * applying forces, and enforcing constraints.
+ *
+ * @public
+ */
 export class JointDynamicsSystemController {
   private _config: ControllerConfig;
   private _pointsR: PointR[] = [];
@@ -172,12 +197,12 @@ export class JointDynamicsSystemController {
 
   /**
    * Initializes the physics system.
-   * @param rootTransform Root bone transform used to detect root motion.
-   * @param rootPoints Root nodes of the bone hierarchy. Multiple roots are allowed.
-   * @param pointTransforms Transform array for all physics points. Order must match `BoneNode.index`.
-   * @param colliders Collider array (spheres/capsules).
-   * @param grabbers Grabber array used for interactions such as mouse dragging.
-   * @param flatPlanes Plane limiters such as the floor to prevent penetration.
+   * @param rootTransform - Root bone transform used to detect root motion.
+   * @param rootPoints - Root nodes of the bone hierarchy. Multiple roots are allowed.
+   * @param pointTransforms - Transform array for all physics points. Order must match `BoneNode.index`.
+   * @param colliders - Collider array (spheres/capsules).
+   * @param grabbers - Grabber array used for interactions such as mouse dragging.
+   * @param flatPlanes - Plane limiters such as the floor to prevent penetration.
    */
   initialize(
     rootTransform: TransformAccess,
@@ -298,7 +323,7 @@ export class JointDynamicsSystemController {
    * Advances the simulation by one frame.
    * Internal flow: read current transforms, run Verlet integration and constraint solving,
    * then write the result back to the transforms.
-   * @param deltaTime Frame delta time in seconds. Internally subdivided by `subSteps`.
+   * @param deltaTime - Frame delta time in seconds. Internally subdivided by `subSteps`.
    */
   step(deltaTime: number): void {
     if (!this._initialized || !this._rootTransform) {
@@ -463,7 +488,7 @@ export class JointDynamicsSystemController {
   /**
    * Releases a fixed point so it becomes dynamic, for example when cloth is detached.
    * The point state is reset to avoid a sudden impulse.
-   * @param index Point index.
+   * @param index - Point index.
    */
   releasePoint(index: number): void {
     if (index < 0 || index >= this._pointsR.length) {
@@ -479,7 +504,7 @@ export class JointDynamicsSystemController {
   /**
    * Fixes a dynamic point back to the animation pose, for example when an item is reattached.
    * The point grab state is cleared.
-   * @param index Point index.
+   * @param index - Point index.
    */
   fixPoint(index: number): void {
     if (index < 0 || index >= this._pointsR.length) {
@@ -491,7 +516,7 @@ export class JointDynamicsSystemController {
 
   /**
    * Returns whether a point is fixed to animation (`weight = 0`).
-   * @param index Point index.
+   * @param index - Point index.
    */
   isPointFixed(index: number): boolean {
     if (index < 0 || index >= this._pointsR.length) {
@@ -508,7 +533,7 @@ export class JointDynamicsSystemController {
   /**
    * Fades physics in by blending from animation pose to simulation.
    * `blendRatio` moves from `1` (animation only) to `0` (physics only).
-   * @param seconds Transition duration in seconds.
+   * @param seconds - Transition duration in seconds.
    */
   fadeIn(seconds: number): void {
     this._fadeState = 'in';
@@ -519,7 +544,7 @@ export class JointDynamicsSystemController {
   /**
    * Fades physics out by blending from simulation back to animation pose.
    * `blendRatio` moves from `0` (physics only) to `1` (animation only).
-   * @param seconds Transition duration in seconds.
+   * @param seconds - Transition duration in seconds.
    */
   fadeOut(seconds: number): void {
     this._fadeState = 'out';
@@ -530,13 +555,16 @@ export class JointDynamicsSystemController {
   /**
    * Sets the global wind force vector.
    * The final wind contribution is still scaled per point by `windForceScale` and mass.
-   * @param wind Wind vector in world space.
+   * @param wind - Wind vector in world space.
    */
   setWindForce(wind: Vector3): void {
     this._config.windForce = wind;
   }
 
-  /** Enable/disable broad-phase pruning for runtime performance comparison */
+  /**
+   * Enable/disable broad-phase pruning for runtime performance comparison
+   * @param enabled - `true` to enable broad-phase, `false` to disable.
+   */
   setBroadPhaseEnabled(enabled: boolean): void {
     this._config.enableBroadPhase = enabled;
   }
@@ -554,7 +582,7 @@ export class JointDynamicsSystemController {
    * Pauses or resumes the physics simulation.
    * While paused, the system still follows root motion but skips force integration and
    * constraint solving.
-   * @param paused `true` to pause, `false` to resume.
+   * @param paused - `true` to pause, `false` to resume.
    */
   setPaused(paused: boolean): void {
     this._isPaused = paused;
@@ -564,6 +592,11 @@ export class JointDynamicsSystemController {
    * Enable or disable a collider by current array index.
    * Transform state is still read from the collider's TransformAccess each frame.
    * Prefer setColliderEnabled(handle, enabled) for runtime-owned colliders.
+   *
+   * @param index - Collider index in the current array. Note that this may change when colliders are added or removed.
+   * @param enabled - `true` to enable the collider, `false` to disable it.
+   *
+   * @returns `true` if the index is valid and the collider was updated, `false` if the index is out of range.
    */
   setColliderEnabledAt(index: number, enabled: boolean): boolean {
     if (index >= 0 && index < this._collidersRW.length) {
@@ -575,6 +608,9 @@ export class JointDynamicsSystemController {
 
   /**
    * Enable or disable a runtime collider by stable handle.
+   *
+   * @param handle - Stable handle for the collider to enable or disable.
+   * @param enabled - `true` to enable the collider, `false` to disable it.
    * @returns true if the handle is still valid.
    */
   setColliderEnabled(handle: JointDynamicsColliderHandle, enabled: boolean): boolean {
@@ -587,6 +623,8 @@ export class JointDynamicsSystemController {
 
   /**
    * Add a collider at runtime.
+   * @param r - Read-only collider data such as shape and size.
+   * @param transform - TransformAccess that provides the collider's position and rotation each frame.
    * @returns A stable handle that remains valid until this collider is removed.
    */
   addCollider(r: ColliderR, transform: TransformAccess): JointDynamicsColliderHandle {
@@ -601,6 +639,7 @@ export class JointDynamicsSystemController {
 
   /**
    * Remove a collider by stable handle.
+   * @param handle - Stable handle for the collider to remove.
    * @returns true if the collider existed and was removed.
    */
   removeCollider(handle: JointDynamicsColliderHandle): boolean {
@@ -613,6 +652,7 @@ export class JointDynamicsSystemController {
 
   /**
    * Remove a collider by current array index.
+   * @param index - Collider index in the current array. Note that this may change when colliders are added or removed.
    * Prefer removeCollider(handle) for runtime-owned colliders.
    */
   removeColliderAt(index: number): boolean {
@@ -629,7 +669,9 @@ export class JointDynamicsSystemController {
 
   /**
    * Enable or disable a flat plane by current array index.
-   * Prefer setFlatPlaneEnabled(handle, enabled) for runtime-owned flat planes.
+   * @param index - Flat plane index in the current array. Note that this may change when flat planes are added or removed.
+   * @param enabled - `true` to enable the flat plane, `false` to disable it.
+   * @returns `true` if the index is valid and the flat plane was updated, `false` if the index is out of range.
    */
   setFlatPlaneEnabledAt(index: number, enabled: boolean): boolean {
     if (index < 0 || index >= this._flatPlaneAll.length) {
@@ -642,6 +684,8 @@ export class JointDynamicsSystemController {
 
   /**
    * Enable or disable a runtime flat plane by stable handle.
+   * @param handle - Stable handle for the flat plane to enable or disable.
+   * @param enabled - `true` to enable the flat plane, `false` to disable it.
    * @returns true if the handle is still valid.
    */
   setFlatPlaneEnabled(handle: JointDynamicsFlatPlaneHandle, enabled: boolean): boolean {
@@ -654,6 +698,8 @@ export class JointDynamicsSystemController {
 
   /**
    * Add a flat plane at runtime.
+   * @param up - Up direction of the plane. The normal is computed as `Vector3.normalize(up)`.
+   * @param position - A point on the plane. The distance is computed as `-Vector3.dot(normal, position)`.
    * @returns A stable handle that remains valid until this flat plane is removed.
    */
   addFlatPlane(up: Vector3, position: Vector3): JointDynamicsFlatPlaneHandle {
@@ -672,6 +718,7 @@ export class JointDynamicsSystemController {
 
   /**
    * Remove a flat plane by stable handle.
+   * @param handle - Stable handle for the flat plane to remove.
    * @returns true if the flat plane existed and was removed.
    */
   removeFlatPlane(handle: JointDynamicsFlatPlaneHandle): boolean {
@@ -684,7 +731,8 @@ export class JointDynamicsSystemController {
 
   /**
    * Remove a flat plane by current array index.
-   * Prefer removeFlatPlane(handle) for runtime-owned flat planes.
+   * @param index - Flat plane index in the current array. Note that this may change when flat planes are added or removed.
+   * @returns true if the index was valid and the flat plane was removed, false if the index was out of range.
    */
   removeFlatPlaneAt(index: number): boolean {
     if (index < 0 || index >= this._flatPlaneAll.length) {
@@ -702,6 +750,10 @@ export class JointDynamicsSystemController {
    * Enable or disable a grabber by current array index.
    * Transform state is still read from the grabber's TransformAccess each frame.
    * Prefer setGrabberEnabled(handle, enabled) for runtime-owned grabbers.
+   *
+   * @param index - Grabber index in the current array. Note that this may change when grabbers are added or removed.
+   * @param enabled - `true` to enable the grabber, `false` to disable it.
+   * @returns `true` if the index is valid and the grabber was updated, `false` if the index is out of range.
    */
   setGrabberEnabledAt(index: number, enabled: boolean): boolean {
     if (index >= 0 && index < this._grabbersRW.length) {
@@ -716,6 +768,8 @@ export class JointDynamicsSystemController {
 
   /**
    * Enable or disable a runtime grabber by stable handle.
+   * @param handle - Stable handle for the grabber to enable or disable.
+   * @param enabled - `true` to enable the grabber, `false` to disable it.
    * @returns true if the handle is still valid.
    */
   setGrabberEnabled(handle: JointDynamicsGrabberHandle, enabled: boolean): boolean {
@@ -728,6 +782,9 @@ export class JointDynamicsSystemController {
 
   /**
    * Add a grabber at runtime.
+   * @param r - Read-only grabber data such as interaction radius.
+   * @param transform - TransformAccess that provides the grabber's position each frame.
+   * @param enabled - Whether the grabber starts enabled. The grabber can still be moved by its transform while disabled, but it won't affect any points until enabled.
    * @returns A stable handle that remains valid until this grabber is removed.
    */
   addGrabber(r: GrabberR, transform: TransformAccess, enabled = false): JointDynamicsGrabberHandle {
@@ -745,6 +802,7 @@ export class JointDynamicsSystemController {
 
   /**
    * Remove a grabber by stable handle.
+   * @param handle - Stable handle for the grabber to remove.
    * @returns true if the grabber existed and was removed.
    */
   removeGrabber(handle: JointDynamicsGrabberHandle): boolean {
@@ -758,6 +816,9 @@ export class JointDynamicsSystemController {
   /**
    * Remove a grabber by current array index.
    * Prefer removeGrabber(handle) for runtime-owned grabbers.
+   *
+   * @param index - Grabber index in the current array. Note that this may change when grabbers are added or removed.
+   * @returns true if the index was valid and the grabber was removed, false if the index was out of range.
    */
   removeGrabberAt(index: number): boolean {
     if (index < 0 || index >= this._grabbersR.length) {

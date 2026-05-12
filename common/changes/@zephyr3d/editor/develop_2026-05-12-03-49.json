@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "packageName": "@zephyr3d/editor",
+      "comment": "Add in-editor LLM support",
+      "type": "patch"
+    }
+  ],
+  "packageName": "@zephyr3d/editor"
+}

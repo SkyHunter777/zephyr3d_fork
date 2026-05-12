@@ -179,6 +179,7 @@ export class AnimationClip extends Disposable {
 // @public
 export class AnimationSet extends Disposable implements IDisposable {
     constructor(model: SceneNode);
+    // @deprecated
     copyAnimationFrom(sourceSet: AnimationSet, animationName: string, targetName?: string, excludeJoint?: (jointName: string) => boolean): AnimationClip | null;
     copyHumanoidAnimationFrom(sourceSet: AnimationSet, animationName: string, targetName?: string): AnimationClip | null;
     createAnimation(name: string, embedded?: boolean): AnimationClip | null;
@@ -2397,9 +2398,11 @@ export class DepthPass extends RenderPass {
 }
 
 // @public
-export class DevicePoolAllocator implements RGTextureAllocator<Texture2D> {
+export class DevicePoolAllocator implements RGTextureAllocator<Texture2D, FrameBuffer> {
     allocate(desc: RGTextureDesc, size: RGResolvedSize): Texture2D;
+    allocateFramebuffer(desc: RGFramebufferDesc): FrameBuffer;
     release(texture: Texture2D): void;
+    releaseFramebuffer(framebuffer: FrameBuffer): void;
 }
 
 // @public
@@ -3477,16 +3480,21 @@ export const HEIGHT_FOG_BIT: number;
 // @public
 export class HistoryResourceManager<TTexture = Texture2D> {
     constructor(allocator: RGTextureAllocator<TTexture>);
+    beginFrame(): void;
+    beginReadScope(bindings: Array<{
+        name: string;
+        texture: TTexture;
+    }>): void;
+    bindImportedTextures(executor: Pick<RenderGraphExecutor<TTexture>, 'setImportedTexture'>): void;
+    commitFrame(): void;
+    discardFrame(): void;
     dispose(): void;
-    getCurrent(name: string): TTexture;
+    endReadScope(): void;
     getPrevious(name: string): TTexture;
-    has(name: string): boolean;
-    register(name: string, desc: RGTextureDesc, size: RGResolvedSize): void;
-    registerWithTexture(name: string, desc: RGTextureDesc, size: RGResolvedSize, initialTexture: TTexture): void;
-    get size(): number;
-    swap(): void;
-    unregister(name: string): boolean;
-    updateCurrent(name: string, texture: TTexture): void;
+    importPrevious(graph: RenderGraph, name: string): RGHandle | null;
+    importPreviousIfCompatible(graph: RenderGraph, name: string, desc: RGTextureDesc, size: RGResolvedSize): RGHandle | null;
+    isCompatible(name: string, desc: RGTextureDesc, size: RGResolvedSize): boolean;
+    queueCommit(name: string, desc: RGTextureDesc, size: RGResolvedSize, texture: TTexture, ownsTexture?: boolean): void;
 }
 
 // @public
@@ -4035,7 +4043,7 @@ export type JointChainConfig = {
     }[];
 };
 
-// @public (undocumented)
+// @public
 export interface JointDynamicsColliderHandle {
     // (undocumented)
     readonly id: number;
@@ -4043,7 +4051,7 @@ export interface JointDynamicsColliderHandle {
     readonly type: 'collider';
 }
 
-// @public (undocumented)
+// @public
 export interface JointDynamicsFlatPlaneHandle {
     // (undocumented)
     readonly id: number;
@@ -4051,7 +4059,7 @@ export interface JointDynamicsFlatPlaneHandle {
     readonly type: 'flatPlane';
 }
 
-// @public (undocumented)
+// @public
 export interface JointDynamicsGrabberHandle {
     // (undocumented)
     readonly id: number;
@@ -4291,6 +4299,7 @@ export class Material extends Disposable implements Clonable<Material>, IDisposa
     clearCache(): void;
     clone(): Material;
     copyFrom(other: this): void;
+    get coreMaterial(): this;
     protected _createHash(): string;
     createInstance(): this;
     protected _createProgram(_pb: ProgramBuilder, _ctx: DrawContext, _pass: number): GPUProgram;
@@ -5671,6 +5680,7 @@ export type PropEdit = 'aabb' | 'quaternion' | 'proptrack';
 export type PropertyAccessor<T = object, U extends string = ''> = {
     type: PropertyType;
     name: string;
+    description?: string;
     phase?: number;
     readonly?: boolean;
     default?: any;
@@ -5889,8 +5899,8 @@ export class RenderGraph {
 }
 
 // @public
-export class RenderGraphExecutor<TTexture = unknown> {
-    constructor(allocator: RGTextureAllocator<TTexture>, backbufferWidth: number, backbufferHeight: number);
+export class RenderGraphExecutor<TTexture = unknown, TFramebuffer = unknown> {
+    constructor(allocator: RGTextureAllocator<TTexture, TFramebuffer>, backbufferWidth: number, backbufferHeight: number);
     execute(compiled: CompiledRenderGraph): void;
     reset(): void;
     setBackbufferSize(width: number, height: number): void;
@@ -6101,6 +6111,7 @@ export class ResourceManager {
     fetchPrimitive<T extends Primitive = Primitive>(id: string): Promise<Nullable<T>>;
     fetchTexture<T extends Texture2D | TextureCube | Texture2DArray>(id: string, options?: TextureFetchOptions<T>): Promise<T>;
     findAnimationTarget(node: SceneNode, track: PropertyTrack): object | null;
+    getAllPropertiesByClass(cls: Nullable<SerializableClass>): PropertyAccessor[];
     getAssetId(asset: unknown): string | null;
     getClassByConstructor(ctor: GenericConstructor): SerializableClass | null;
     getClassByName(className: string): SerializableClass | null;
@@ -6136,6 +6147,9 @@ export function restoreGeometryCacheMeshBinding(mesh: Mesh): Promise<boolean>;
 
 // @public
 export interface RGExecuteContext {
+    createFramebuffer<TFramebuffer = unknown>(desc: RGFramebufferDesc): TFramebuffer;
+    deferCleanup(callback: () => void): void;
+    getFramebuffer<TFramebuffer = unknown>(handle: RGHandle): TFramebuffer;
     getTexture<TTexture = unknown>(handle: RGHandle): TTexture;
 }
 
@@ -6143,17 +6157,41 @@ export interface RGExecuteContext {
 export type RGExecuteFn<T = void> = (ctx: RGExecuteContext, data: T) => void;
 
 // @public
+export interface RGFramebufferDesc {
+    attachmentCubeface?: number;
+    attachmentLayer?: number;
+    attachmentMipLevel?: number;
+    colorAttachments: unknown | unknown[] | null;
+    depthAttachment?: unknown | null;
+    height?: number;
+    ignoreDepthStencil?: boolean;
+    label?: string;
+    mipmapping?: boolean;
+    sampleCount?: number;
+    width?: number;
+}
+
+// @public
 export class RGHandle {
     get name(): string;
 }
 
 // @public
+export const RGHistoryResources: {
+    readonly TAA_COLOR: "taaColor";
+    readonly TAA_MOTION_VECTOR: "taaMotionVector";
+};
+
+// @public
 export interface RGPassBuilder {
+    addSubpass<D>(name: string, fn: RGExecuteFn<D>): void;
+    createFramebuffer(desc: RGFramebufferDesc): RGHandle;
     createTexture(desc: RGTextureDesc): RGHandle;
+    createToken(name?: string): RGHandle;
     read(handle: RGHandle): void;
     setExecute<D>(fn: RGExecuteFn<D>): void;
     sideEffect(): void;
-    write(handle: RGHandle): void;
+    write(handle: RGHandle): RGHandle;
 }
 
 // @public
@@ -6176,9 +6214,20 @@ export interface RGResourceLifetime {
 export type RGSizeMode = 'absolute' | 'backbuffer-relative';
 
 // @public
-export interface RGTextureAllocator<TTexture = unknown> {
+export class RGSubpass<T = unknown> {
+    constructor(name: string, executeFn: RGExecuteFn<T>);
+    // (undocumented)
+    readonly executeFn: RGExecuteFn<T>;
+    // (undocumented)
+    readonly name: string;
+}
+
+// @public
+export interface RGTextureAllocator<TTexture = unknown, TFramebuffer = unknown> {
     allocate(desc: RGTextureDesc, size: RGResolvedSize): TTexture;
+    allocateFramebuffer?(desc: RGFramebufferDesc): TFramebuffer;
     release(texture: TTexture): void;
+    releaseFramebuffer?(framebuffer: TFramebuffer): void;
 }
 
 // @public
@@ -6603,6 +6652,7 @@ export class ScriptRegistry {
         path: string;
     } | undefined>;
     getDependencies(entryId: string, fromId: string, dependencies: Record<string, string>): Promise<void>;
+    invalidate(moduleId?: string): void;
     resolveLogicalId(spec: string, fromId?: string): Promise<string>;
     resolveRuntimeUrl(entryId: string): Promise<string>;
     resolveSourcePath(logicalId: string): Promise<{

@@ -1787,7 +1787,7 @@ export interface ZipJSWriterConstructor {
 
 // Warnings were encountered during analysis:
 //
-// dist/index.d.ts:616:9 - (ae-forgotten-export) The symbol "EventListenerMap" needs to be exported by the entry point index.d.ts
+// dist/index.d.ts:608:9 - (ae-forgotten-export) The symbol "EventListenerMap" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 

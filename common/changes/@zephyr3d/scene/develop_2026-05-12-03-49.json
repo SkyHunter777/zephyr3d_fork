@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "packageName": "@zephyr3d/scene",
+      "comment": "Optimize rendergraph system",
+      "type": "patch"
+    }
+  ],
+  "packageName": "@zephyr3d/scene"
+}

@@ -60,9 +60,9 @@ export class HistoryResourceManager<TTexture = Texture2D> {
   /**
    * Get the previous-frame texture resolved by the current render graph pass.
    *
-   * The resource must have been imported with {@link importPrevious} or
-   * {@link importPreviousIfCompatible}, declared as a pass read, and bound with
-   * {@link beginReadScope} before this method is called.
+   * The resource must have been imported with {@link HistoryResourceManager.importPrevious} or
+   * {@link HistoryResourceManager.importPreviousIfCompatible}, declared as a pass read, and bound with
+   * {@link HistoryResourceManager.beginReadScope} before this method is called.
    *
    * @param name - Name of the history resource.
    * @returns The graph-resolved previous-frame texture.
@@ -177,8 +177,8 @@ export class HistoryResourceManager<TTexture = Texture2D> {
   /**
    * Queue a current-frame texture to become the next previous-frame history.
    *
-   * The texture is committed only when {@link commitFrame} is called. If the
-   * frame fails, {@link discardFrame} releases owned pending textures instead.
+   * The texture is committed only when {@link HistoryResourceManager.commitFrame} is called. If the
+   * frame fails, {@link HistoryResourceManager.discardFrame} releases owned pending textures instead.
    *
    * @param name - History resource name.
    * @param desc - Texture descriptor.

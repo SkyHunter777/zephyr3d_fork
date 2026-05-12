@@ -247,7 +247,7 @@ export interface RGPassBuilder {
    * reads and as the graph output passed to {@link RenderGraph.compile}. Passing
    * an older version of the same resource to `compile()` is rejected because it
    * usually means the caller ignored the handle returned by `write()`. If the pass
-   * needs the previous contents, call {@link read} on the input handle explicitly
+   * needs the previous contents, call {@link RGPassBuilder.read} on the input handle explicitly
    * before writing.
    *
    * @param handle - Handle of the resource to write to.
@@ -300,7 +300,7 @@ export interface RGPassBuilder {
    *
    * Subpasses execute in registration order and share the parent pass's declared
    * reads, writes, framebuffer views, and user data. A pass may use either
-   * subpasses or {@link setExecute}, but not both.
+   * subpasses or {@link RGPassBuilder.setExecute}, but not both.
    *
    * @param name - Debug label for the subpass.
    * @param fn - Callback invoked when this subpass executes.
@@ -310,7 +310,7 @@ export interface RGPassBuilder {
   /**
    * Set the execution callback for this pass.
    *
-   * A pass may use either this method or {@link addSubpass}, but not both.
+   * A pass may use either this method or {@link RGPassBuilder.addSubpass}, but not both.
    *
    * @param fn - Callback invoked during graph execution.
    */
@@ -424,7 +424,7 @@ export interface RGTextureAllocator<TTexture = unknown, TFramebuffer = unknown> 
    * Allocate a temporary framebuffer matching the given descriptor.
    *
    * Implementations should not auto-release this framebuffer; the graph executor
-   * calls {@link releaseFramebuffer} when execution completes or aborts.
+   * calls {@link RGTextureAllocator.releaseFramebuffer} when execution completes or aborts.
    *
    * @param desc - Framebuffer descriptor.
    * @returns The allocated framebuffer object.

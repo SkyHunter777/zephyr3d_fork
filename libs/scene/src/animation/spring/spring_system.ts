@@ -531,14 +531,6 @@ export class SpringSystem {
    * Solves a single spring constraint using XPBD (Extended Position-Based Dynamics).
    *
    * Reference: Müller et al., "Detailed Rigid Body Simulation with Extended Position Based Dynamics", 2020.
-   *
-   * The XPBD correction for a distance constraint C(x) = |x_b - x_a| - L is:
-   *   lphaTilde = compliance / dt^2`r
-   *   deltaLambda = (-C - alphaTilde * lambda) / (w_a + w_b + alphaTilde)`r
-   *   lambda += deltaLambda`r
-      // deltaX_a = -w_a * deltaLambda * n
-      // deltaX_b = +w_b * deltaLambda * n
-   * where w = 1/mass (0 for fixed particles), n̂ = unit vector from a to b.
    */
   private solveConstraintXPBD(constraint: any, dt: number): void {
     const pA = this._chain.particles[constraint.particleA];
