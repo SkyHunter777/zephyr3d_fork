@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "packageName": "@zephyr3d/editor",
+      "comment": "Add README.md",
+      "type": "patch"
+    }
+  ],
+  "packageName": "@zephyr3d/editor"
+}
