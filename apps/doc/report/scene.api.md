@@ -4369,9 +4369,6 @@ export const enum MaterialVaryingFlags {
     SSR_STORE_ROUGHNESS = 8
 }
 
-// @public
-export const MAX_CLUSTERED_LIGHTS = 255;
-
 // @public (undocumented)
 export const MAX_GERSTNER_WAVE_COUNT = 16;
 
@@ -6748,6 +6745,8 @@ export class ShaderHelper {
     static getLightBufferUniformName(): string;
     static getLinearDepthTexture(scope: PBInsideFunctionScope): PBShaderExp;
     static getLinearDepthTextureSize(scope: PBInsideFunctionScope): PBShaderExp;
+    // (undocumented)
+    static getMaxClusteredLightCount(): 255 | 127;
     // (undocumented)
     static getMorphDataUniformName(): string;
     // (undocumented)
