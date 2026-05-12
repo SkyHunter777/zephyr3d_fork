@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "packageName": "@zephyr3d/scene",
+      "comment": "Fix WebGL1 rendering issue",
+      "type": "patch"
+    }
+  ],
+  "packageName": "@zephyr3d/scene"
+}
