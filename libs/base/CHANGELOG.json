@@ -2,6 +2,18 @@
   "name": "@zephyr3d/base",
   "entries": [
     {
+      "version": "0.2.4",
+      "tag": "@zephyr3d/base_v0.2.4",
+      "date": "Tue, 12 May 2026 03:53:58 GMT",
+      "comments": {
+        "patch": [
+          {
+            "comment": "Add custom protocol support for HttpFS"
+          }
+        ]
+      }
+    },
+    {
       "version": "0.2.3",
       "tag": "@zephyr3d/base_v0.2.3",
       "date": "Wed, 29 Apr 2026 18:55:40 GMT",

@@ -2,6 +2,37 @@
   "name": "@zephyr3d/editor",
   "entries": [
     {
+      "version": "0.3.0",
+      "tag": "@zephyr3d/editor_v0.3.0",
+      "date": "Tue, 12 May 2026 03:53:58 GMT",
+      "comments": {
+        "minor": [
+          {
+            "comment": "Add standalone version by electron"
+          }
+        ],
+        "patch": [
+          {
+            "comment": "Add in-editor LLM support"
+          }
+        ],
+        "dependency": [
+          {
+            "comment": "Updating dependency \"@zephyr3d/base\" from `^0.2.3` to `0.2.4`"
+          },
+          {
+            "comment": "Updating dependency \"@zephyr3d/scene\" from `^0.9.1` to `0.9.2`"
+          },
+          {
+            "comment": "Updating dependency \"@zephyr3d/imgui\" from `^0.2.2` to `0.2.3`"
+          },
+          {
+            "comment": "Updating dependency \"@zephyr3d/backend-webgpu\" from `^0.1.11` to `0.1.12`"
+          }
+        ]
+      }
+    },
+    {
       "version": "0.2.0",
       "tag": "@zephyr3d/editor_v0.2.0",
       "date": "Wed, 29 Apr 2026 18:55:40 GMT",

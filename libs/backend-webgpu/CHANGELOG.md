@@ -1,6 +1,14 @@
 # Change Log - @zephyr3d/backend-webgpu
 
-This log was last generated on Wed, 29 Apr 2026 18:55:40 GMT and should not be manually modified.
+This log was last generated on Tue, 12 May 2026 03:53:58 GMT and should not be manually modified.
+
+## 0.1.12
+Tue, 12 May 2026 03:53:58 GMT
+
+### Patches
+
+- Simplify upload segmentation
+- Update documentation
 
 ## 0.1.11
 Wed, 29 Apr 2026 18:55:40 GMT

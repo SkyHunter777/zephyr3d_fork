@@ -1,6 +1,13 @@
 # Change Log - @zephyr3d/imgui
 
-This log was last generated on Wed, 29 Apr 2026 18:55:40 GMT and should not be manually modified.
+This log was last generated on Tue, 12 May 2026 03:53:58 GMT and should not be manually modified.
+
+## 0.2.3
+Tue, 12 May 2026 03:53:58 GMT
+
+### Patches
+
+- Fix imgui rendering issue
 
 ## 0.2.2
 Wed, 29 Apr 2026 18:55:40 GMT

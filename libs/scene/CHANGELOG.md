@@ -1,6 +1,15 @@
 # Change Log - @zephyr3d/scene
 
-This log was last generated on Fri, 01 May 2026 10:21:50 GMT and should not be manually modified.
+This log was last generated on Tue, 12 May 2026 03:53:58 GMT and should not be manually modified.
+
+## 0.9.2
+Tue, 12 May 2026 03:53:58 GMT
+
+### Patches
+
+- Add serialization property descriptions
+- Optimize rendergraph system
+- Fix instancing rendering issue
 
 ## 0.9.1
 Fri, 01 May 2026 10:21:50 GMT

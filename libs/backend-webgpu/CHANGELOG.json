@@ -2,6 +2,26 @@
   "name": "@zephyr3d/backend-webgpu",
   "entries": [
     {
+      "version": "0.1.12",
+      "tag": "@zephyr3d/backend-webgpu_v0.1.12",
+      "date": "Tue, 12 May 2026 03:53:58 GMT",
+      "comments": {
+        "patch": [
+          {
+            "comment": "Simplify upload segmentation"
+          },
+          {
+            "comment": "Update documentation"
+          }
+        ],
+        "dependency": [
+          {
+            "comment": "Updating dependency \"@zephyr3d/base\" from `^0.2.3` to `0.2.4`"
+          }
+        ]
+      }
+    },
+    {
       "version": "0.1.11",
       "tag": "@zephyr3d/backend-webgpu_v0.1.11",
       "date": "Wed, 29 Apr 2026 18:55:40 GMT",
