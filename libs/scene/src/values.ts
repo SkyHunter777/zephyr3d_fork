@@ -64,12 +64,6 @@ export const LIGHT_TYPE_SPOT = 3;
 export const LIGHT_TYPE_RECT = 4;
 
 /**
- * Max light size for clustered lighting
- * @public
- */
-export const MAX_CLUSTERED_LIGHTS = 255;
-
-/**
  * Opaque render queue type
  * @public
  */
