@@ -1,0 +1,143 @@
+# @zephyr3d/editor
+
+`@zephyr3d/editor` is the Zephyr3D visual editor package.
+
+It contains:
+
+- the browser-based editor application
+- the Electron desktop shell
+- the embedded MCP server used by desktop builds
+- the public TypeScript types for authoring editor plugins
+
+The editor is built on top of the Zephyr3D engine packages and is intended for scene editing, asset management, scripting, terrain editing, material editing, and automation workflows.
+
+## Highlights
+
+- Browser-first visual editor built with TypeScript
+- Scene, material, terrain, and scripting workflows in one package
+- Electron desktop runtime for local projects and persistent storage
+- Embedded local MCP service for agent-driven automation
+- Plugin API for menus, toolbars, edit tools, property panels, and custom scene helpers
+
+## Package Layout
+
+- `src/`: editor source code
+- `electron/`: Electron main/preload code
+- `mcp/`: embedded MCP server entry
+- `dist/`: build output
+
+## Development
+
+Build the editor:
+
+```sh
+rush build --to editor
+```
+
+Serve the browser build locally after building:
+
+```sh
+npm run serve --prefix utility/editor
+```
+
+Build and launch the Electron desktop app for development:
+
+```sh
+npm run electron:dev --prefix utility/editor
+```
+
+Launch the Electron app from an existing build:
+
+```sh
+npm run electron:start --prefix utility/editor
+```
+
+Create a packaged desktop build:
+
+```sh
+npm run electron:dist --prefix utility/editor
+```
+
+## Desktop Runtime
+
+The Electron build is an additive desktop runtime for the browser editor.
+
+- Browser builds continue to use the existing VFS abstraction and browser storage.
+- Desktop builds expose a constrained preload bridge instead of direct Node.js access in renderer code.
+- Editor metadata, system plugins, and local projects are stored under Electron `app.getPath('userData')/editor-storage`.
+
+## MCP Integration
+
+Desktop builds embed a local MCP HTTP server in the same process as the editor.
+
+- Default endpoint: `http://127.0.0.1:47231/mcp`
+- The service binds to `127.0.0.1` only
+- MCP settings are managed from `Editor > Editor Settings...`
+
+This makes the editor usable both as an interactive desktop tool and as an automation target for agent clients.
+
+## Plugin API
+
+This package also exposes the public plugin authoring types at:
+
+```ts
+import type { EditorPlugin } from '@zephyr3d/editor/editor-plugin';
+```
+
+If you are building an editor plugin outside this repository, install the package as a development dependency:
+
+```sh
+npm install --save-dev @zephyr3d/editor
+```
+
+Minimal plugin example:
+
+```ts
+import type { EditorPlugin } from '@zephyr3d/editor/editor-plugin';
+
+const plugin: EditorPlugin = {
+  id: 'com.example.editor-plugin',
+  name: 'Example Editor Plugin',
+  version: '0.1.0',
+  activate(ctx) {
+    ctx.registerMenuItems({
+      location: 'main',
+      parentId: 'project',
+      items: [
+        {
+          id: 'example-editor-plugin.about',
+          label: 'Example Plugin...',
+          action: async () => {
+            await ctx.ui.message(
+              'Example Plugin',
+              'This command is provided by a system plugin.'
+            );
+          }
+        }
+      ]
+    });
+  }
+};
+
+export default plugin;
+```
+
+The plugin API supports:
+
+- main menu and context menu contributions
+- toolbar contributions
+- custom edit tools
+- node proxy factories
+- custom property accessors
+- project storage and system plugin state/settings
+- editor event subscriptions
+
+## Related Links
+
+- Repository: https://github.com/gavinyork/zephyr3d
+- Documentation: https://zephyr3d.org/doc/
+- Online editor: https://zephyr3d.org/editor/
+
+## License
+
+MIT
