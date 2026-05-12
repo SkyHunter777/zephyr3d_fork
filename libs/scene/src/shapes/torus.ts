@@ -123,67 +123,101 @@ export class TorusShape extends Shape<TorusCreationOptions> implements Clonable<
 
   /** @internal Solve quartic a*t^4+b*t^3+c*t^2+d*t+e=0, returns real roots */
   private static _solveQuartic(a: number, b: number, c: number, d: number, e: number): number[] {
+    return TorusShape._solvePolynomialReal([a, b, c, d, e]);
+  }
+
+  /** @internal Solve a low-degree polynomial and return all real roots */
+  private static _solvePolynomialReal(coeffs: number[]): number[] {
     const eps = 1e-8;
-    if (Math.abs(a) < eps) {
-      return TorusShape._solveCubic(b, c, d, e);
+    while (coeffs.length > 0 && Math.abs(coeffs[0]) < eps) {
+      coeffs = coeffs.slice(1);
     }
-    // Depress quartic: divide by a and substitute t = u - b/(4a)
-    const inv_a = 1 / a;
-    const B = b * inv_a;
-    const C = c * inv_a;
-    const D = d * inv_a;
-    const E = e * inv_a;
-    const p = C - (3 / 8) * B * B;
-    const q = (B * B * B) / 8 - (B * C) / 2 + D;
-    const r2 = -(3 / 256) * B * B * B * B + (B * B * C) / 16 - (B * D) / 4 + E;
+    const degree = coeffs.length - 1;
+    if (degree <= 0) {
+      return [];
+    }
+    if (degree === 1) {
+      return [-coeffs[1] / coeffs[0]];
+    }
+    if (degree === 2) {
+      return TorusShape._solveQuadratic(coeffs[0], coeffs[1], coeffs[2]);
+    }
+    if (degree === 3) {
+      return TorusShape._solveCubic(coeffs[0], coeffs[1], coeffs[2], coeffs[3]);
+    }
 
-    let roots: number[];
-    if (Math.abs(q) < eps) {
-      // Biquadratic: u^4 + p*u^2 + r2 = 0
-      const disc = p * p - 4 * r2;
-      if (disc < 0) {
-        return [];
-      }
-      const sqrtDisc = Math.sqrt(disc);
-      roots = [];
-      for (const sign of [-1, 1]) {
-        const w2 = (-p + sign * sqrtDisc) / 2;
-        if (w2 >= 0) {
-          const w = Math.sqrt(w2);
-          roots.push(w, -w);
-        }
-      }
-    } else {
-      // Ferrari: find a real root of the resolvent cubic
-      //   8m^3 + 8p*m^2 + (2p^2-8r2)*m - q^2 = 0
-      const cubicRoots = TorusShape._solveCubic(8, 8 * p, 2 * p * p - 8 * r2, -q * q);
-      // Pick the largest real root
-      let m = -Infinity;
-      for (const cr of cubicRoots) {
-        if (cr > m) {
-          m = cr;
-        }
-      }
-      if (!isFinite(m)) {
-        return [];
-      }
+    const leading = coeffs[0];
+    let bound = 1;
+    for (let i = 1; i < coeffs.length; i++) {
+      bound = Math.max(bound, 1 + Math.abs(coeffs[i] / leading));
+    }
 
-      const sqrtM = m >= 0 ? Math.sqrt(m) : 0;
-      const disc1 = -(p + 2 * m) + q / (sqrtM + eps);
-      const disc2 = -(p + 2 * m) - q / (sqrtM + eps);
-      roots = [];
-      if (disc1 >= 0) {
-        const s = Math.sqrt(disc1);
-        roots.push(sqrtM + s, sqrtM - s);
-      }
-      if (disc2 >= 0) {
-        const s = Math.sqrt(disc2);
-        roots.push(-sqrtM + s, -sqrtM - s);
+    const derivative = coeffs.slice(0, -1).map((coef, index) => coef * (degree - index));
+    const criticalPoints = TorusShape._solvePolynomialReal(derivative)
+      .filter((value) => value > -bound - eps && value < bound + eps)
+      .sort((a, b) => a - b);
+    const roots: number[] = [];
+    for (const value of criticalPoints) {
+      if (Math.abs(TorusShape._evaluatePolynomial(coeffs, value)) < 1e-7) {
+        TorusShape._pushUniqueRoot(roots, value);
       }
     }
-    // Un-depress: t = u - B/4
-    const shift = B / 4;
-    return roots.map((u) => u - shift);
+
+    const points = [-bound, ...criticalPoints, bound];
+    for (let i = 0; i < points.length - 1; i++) {
+      const left = points[i];
+      const right = points[i + 1];
+      if (right - left < eps) {
+        continue;
+      }
+      const fLeft = TorusShape._evaluatePolynomial(coeffs, left);
+      const fRight = TorusShape._evaluatePolynomial(coeffs, right);
+      if (Math.abs(fLeft) < 1e-7) {
+        TorusShape._pushUniqueRoot(roots, left);
+      }
+      if (Math.abs(fRight) < 1e-7) {
+        TorusShape._pushUniqueRoot(roots, right);
+      }
+      if (fLeft * fRight < 0) {
+        TorusShape._pushUniqueRoot(roots, TorusShape._bisectPolynomialRoot(coeffs, left, right));
+      }
+    }
+    return roots.sort((a, b) => a - b);
+  }
+
+  /** @internal Evaluate a polynomial with coefficients in descending order */
+  private static _evaluatePolynomial(coeffs: number[], t: number) {
+    let result = 0;
+    for (let i = 0; i < coeffs.length; i++) {
+      result = result * t + coeffs[i];
+    }
+    return result;
+  }
+
+  /** @internal Bisect a real root in an interval with opposite signs */
+  private static _bisectPolynomialRoot(coeffs: number[], left: number, right: number) {
+    let fLeft = TorusShape._evaluatePolynomial(coeffs, left);
+    for (let i = 0; i < 64; i++) {
+      const mid = (left + right) * 0.5;
+      const fMid = TorusShape._evaluatePolynomial(coeffs, mid);
+      if (Math.abs(fMid) < 1e-12) {
+        return mid;
+      }
+      if (fLeft * fMid <= 0) {
+        right = mid;
+      } else {
+        left = mid;
+        fLeft = fMid;
+      }
+    }
+    return (left + right) * 0.5;
+  }
+
+  /** @internal Add a root if it is not already represented in the list */
+  private static _pushUniqueRoot(roots: number[], value: number) {
+    if (!roots.some((root) => Math.abs(root - value) < 1e-7)) {
+      roots.push(value);
+    }
   }
 
   /** @internal Solve cubic a*t^3+b*t^2+c*t+d=0, returns real roots (Cardano) */
@@ -206,13 +240,12 @@ export class TorusShape extends Shape<TorusCreationOptions> implements Clonable<
       const v = Math.cbrt(-q / 2 - sqrtDisc);
       return [u + v + shift];
     } else if (disc < -eps) {
-      const r = Math.sqrt((-p * p * p) / 27);
-      const theta = Math.acos(Math.max(-1, Math.min(1, -q / (2 * r))));
-      const rCbrt = Math.cbrt(r);
+      const theta = Math.acos(Math.max(-1, Math.min(1, (-q / 2) / Math.sqrt((-p * p * p) / 27))));
+      const rho = 2 * Math.sqrt(-p / 3);
       return [
-        2 * rCbrt * Math.cos(theta / 3) + shift,
-        2 * rCbrt * Math.cos((theta + 2 * Math.PI) / 3) + shift,
-        2 * rCbrt * Math.cos((theta + 4 * Math.PI) / 3) + shift
+        rho * Math.cos(theta / 3) + shift,
+        rho * Math.cos((theta + 2 * Math.PI) / 3) + shift,
+        rho * Math.cos((theta + 4 * Math.PI) / 3) + shift
       ];
     } else {
       const u = Math.cbrt(-q / 2);
