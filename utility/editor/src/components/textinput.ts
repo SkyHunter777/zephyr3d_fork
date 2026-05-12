@@ -925,8 +925,13 @@ export function customTextInput(
 
   const visibleLabel = getVisibleLabel(label);
   if (visibleLabel) {
-    ImGui.SameLine(0, style.ItemInnerSpacing.x);
-    ImGui.TextUnformatted(visibleLabel);
+    // Draw the visible label without creating a new ImGui item so external
+    // IsItemHovered()/IsItemClicked() queries still target the text box.
+    drawList.AddText(
+      new ImGui.ImVec2(rectMax.x + style.ItemInnerSpacing.x, clipMin.y),
+      textColor,
+      convertEmojiString(visibleLabel)
+    );
   }
 
   return enterReturnsTrue ? submitted : changed;
