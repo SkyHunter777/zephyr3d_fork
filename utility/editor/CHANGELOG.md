@@ -1,6 +1,13 @@
 # Change Log - @zephyr3d/editor
 
-This log was last generated on Tue, 12 May 2026 03:53:58 GMT and should not be manually modified.
+This log was last generated on Tue, 12 May 2026 04:10:20 GMT and should not be manually modified.
+
+## 0.3.1
+Tue, 12 May 2026 04:10:20 GMT
+
+### Patches
+
+- Add README.md
 
 ## 0.3.0
 Tue, 12 May 2026 03:53:58 GMT
