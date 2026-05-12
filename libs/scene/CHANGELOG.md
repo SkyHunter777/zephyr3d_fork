@@ -1,6 +1,14 @@
 # Change Log - @zephyr3d/scene
 
-This log was last generated on Tue, 12 May 2026 03:53:58 GMT and should not be manually modified.
+This log was last generated on Tue, 12 May 2026 11:06:29 GMT and should not be manually modified.
+
+## 0.9.3
+Tue, 12 May 2026 11:06:29 GMT
+
+### Patches
+
+- Fix raycast of torus shape
+- Fix WebGL1 rendering issue
 
 ## 0.9.2
 Tue, 12 May 2026 03:53:58 GMT
