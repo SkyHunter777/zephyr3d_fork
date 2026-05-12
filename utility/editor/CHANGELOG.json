@@ -4,11 +4,16 @@
     {
       "version": "0.3.1",
       "tag": "@zephyr3d/editor_v0.3.1",
-      "date": "Tue, 12 May 2026 04:10:20 GMT",
+      "date": "Tue, 12 May 2026 11:06:29 GMT",
       "comments": {
         "patch": [
           {
             "comment": "Add README.md"
+          }
+        ],
+        "dependency": [
+          {
+            "comment": "Updating dependency \"@zephyr3d/scene\" from `^0.9.2` to `0.9.3`"
           }
         ]
       }

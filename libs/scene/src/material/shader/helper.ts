@@ -2,7 +2,6 @@ import { Vector2, Vector3, Vector4 } from '@zephyr3d/base';
 import type { DrawContext } from '../../render/drawable';
 import {
   MaterialVaryingFlags,
-  MAX_CLUSTERED_LIGHTS,
   MORPH_ATTRIBUTE_VECTOR_COUNT,
   MORPH_TARGET_NORMAL,
   MORPH_TARGET_POSITION,
@@ -259,7 +258,8 @@ export class ShaderHelper {
       scope.camera = cameraStruct().uniform(0);
       scope.light = lightStruct().uniform(0);
       if (useClusteredLighting) {
-        scope[UNIFORM_NAME_LIGHT_BUFFER] = pb.vec4[(MAX_CLUSTERED_LIGHTS + 1) * 4]().uniformBuffer(0);
+        scope[UNIFORM_NAME_LIGHT_BUFFER] =
+          pb.vec4[(this.getMaxClusteredLightCount() + 1) * 4]().uniformBuffer(0);
         scope[UNIFORM_NAME_LIGHT_INDEX_TEXTURE] = (
           pb.getDevice().type === 'webgl' ? pb.tex2D() : pb.utex2D()
         ).uniform(0);
@@ -1556,5 +1556,8 @@ export class ShaderHelper {
       });
     });
     return pb.getGlobalScope()[funcName](outputColor);
+  }
+  static getMaxClusteredLightCount() {
+    return getDevice().type === 'webgl' ? 127 : 255;
   }
 }
