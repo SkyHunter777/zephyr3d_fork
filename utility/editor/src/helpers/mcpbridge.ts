@@ -9,6 +9,7 @@ import {
   base64ToUint8Array,
   DRef,
   guessMimeType,
+  Matrix4x4,
   PathUtils,
   Quaternion,
   uint8ArrayToBase64,
@@ -1694,6 +1695,45 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           };
         }
         const node = await getEngine().resourceManager.instantiatePrefab(scene.rootNode, params.path);
+        return {
+          node_id: node.persistentId,
+          err: null
+        };
+      } catch (err) {
+        return {
+          node_id: null,
+          err: `${err}`
+        };
+      }
+    }
+    case 'node_create': {
+      try {
+        const scene = getScene(editor);
+        if (!scene) {
+          return {
+            node_id: null,
+            err: 'No scene is currently opened; create or open a scene before creating a node'
+          };
+        }
+        let parentId: string = params.parent_id;
+        if (parentId !== undefined) {
+          if (typeof parentId !== 'string' || !parentId.trim()) {
+            return {
+              node_id: null,
+              err: 'node_create `parent_id` must be a non-empty scene node id when provided'
+            };
+          }
+          parentId = parentId.trim();
+        }
+        const parent = parentId ? getNode(editor, parentId) : { node: scene.rootNode, err: null };
+        if (parent.err) {
+          return {
+            node_id: null,
+            err: parent.err
+          };
+        }
+        const node = new SceneNode(scene);
+        node.parent = parent.node;
         return {
           node_id: node.persistentId,
           err: null
@@ -3849,6 +3889,15 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
           err: 'setParentNode requires `parent_id`, the persistent id of the new parent node'
         };
       }
+      const transformMode =
+        typeof params.transform_mode === 'string' && params.transform_mode.trim()
+          ? params.transform_mode.trim()
+          : 'preserve_world';
+      if (transformMode !== 'preserve_world' && transformMode !== 'preserve_local') {
+        return {
+          err: 'setParentNode `transform_mode` must be one of: preserve_world, preserve_local'
+        };
+      }
       const node = getNode(editor, id.trim());
       if (node.err) {
         return {
@@ -3865,6 +3914,10 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
         return {
           err: `Cannot reparent node ${id.trim()} under its descendant ${newParentId.trim()}`
         };
+      }
+      if (transformMode === 'preserve_world') {
+        const newLocalMatrix = Matrix4x4.invertAffine(newParentNode.node.worldMatrix).multiplyRight(node.node.worldMatrix);
+        newLocalMatrix.decompose(node.node.scale, node.node.rotation, node.node.position);
       }
       node.node.parent = newParentNode.node;
       return {

@@ -15,7 +15,13 @@ const BRIDGE_TOKEN =
   process.env.EDITOR_MCP_TOKEN || workerData?.token || crypto.randomBytes(12).toString('hex');
 const DEFAULT_EDITOR_URL =
   process.env.EDITOR_URL || workerData?.editorUrl || 'http://127.0.0.1:8000/dist/index.html';
-const ASSISTANT_TYPE_INDEX_PATH = path.resolve(__dirname, '..', 'dist', 'assistant', 'zephyr-types-index.json');
+const ASSISTANT_TYPE_INDEX_PATH = path.resolve(
+  __dirname,
+  '..',
+  'dist',
+  'assistant',
+  'zephyr-types-index.json'
+);
 const ASSISTANT_TYPES_VENDOR_ROOT = path.resolve(__dirname, '..', 'dist', 'vendor', 'zephyr3d');
 const ASSISTANT_TYPE_PACKAGES = ['base', 'device', 'scene', 'imgui', 'backend-webgl', 'backend-webgpu'];
 const MAX_TYPE_FILE_LINES = 240;
@@ -31,7 +37,9 @@ function tokenizeSearchText(value) {
 }
 
 function normalizeSearchValue(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '')
+    .trim()
+    .toLowerCase();
 }
 
 function scoreTypeEntry(entry, query, tokens) {
@@ -160,7 +168,9 @@ function findTypeEntryByReference(index, reference, packageName) {
   if (!filtered.length) {
     return null;
   }
-  return filtered.sort((a, b) => (a.symbol === normalizedReference ? -1 : 0) - (b.symbol === normalizedReference ? -1 : 0))[0];
+  return filtered.sort(
+    (a, b) => (a.symbol === normalizedReference ? -1 : 0) - (b.symbol === normalizedReference ? -1 : 0)
+  )[0];
 }
 
 class EditorBridgeServer {
@@ -525,12 +535,9 @@ const SURFACE_TYPE_SCHEMA_VALUES = ['bezier_patch'];
 const CURVE_TYPE_SCHEMA_VALUES = ['polyline', 'bezier', 'catmull_rom', 'nurbs'];
 const SCRIPT_TARGET_VALUES = ['selected', 'scene', 'node'];
 const SCRIPT_ATTACH_MODE_VALUES = ['replace_same_path', 'append', 'replace_all'];
+const NODE_REPARENT_TRANSFORM_MODE_VALUES = ['preserve_world', 'preserve_local'];
 const SCRIPT_CONFIG_SCHEMA = {
-  oneOf: [
-    { type: 'object', additionalProperties: true },
-    { type: 'array', items: {} },
-    { type: 'null' }
-  ],
+  oneOf: [{ type: 'object', additionalProperties: true }, { type: 'array', items: {} }, { type: 'null' }],
   description:
     'Optional JSON-serializable script config. Use an object for named scriptProp values or an array when the script expects one.'
 };
@@ -1323,7 +1330,8 @@ const BASE_TOOLS = [
         },
         path: {
           type: 'string',
-          description: 'Relative declaration path returned by docs_search_types, such as scene/dist/index.d.ts.'
+          description:
+            'Relative declaration path returned by docs_search_types, such as scene/dist/index.d.ts.'
         },
         start_line: {
           type: 'number',
@@ -1551,8 +1559,7 @@ const BASE_TOOLS = [
   },
   {
     name: 'script_read_source',
-    description:
-      'Read a TypeScript or JavaScript script asset under /assets and return its text source.',
+    description: 'Read a TypeScript or JavaScript script asset under /assets and return its text source.',
     inputSchema: {
       type: 'object',
       required: ['path'],
@@ -1570,7 +1577,10 @@ const BASE_TOOLS = [
       type: 'object',
       required: ['path', 'content'],
       properties: {
-        path: { type: 'string', description: 'Writable script asset VFS path under /assets, ending in .ts or .js.' },
+        path: {
+          type: 'string',
+          description: 'Writable script asset VFS path under /assets, ending in .ts or .js.'
+        },
         content: { type: 'string', description: 'Full UTF-8 script source code.' },
         overwrite: {
           type: 'boolean',
@@ -1696,11 +1706,13 @@ const BASE_TOOLS = [
         },
         script_path: {
           type: 'string',
-          description: 'Optional script asset path to remove. Combine with all=true to remove all matching attachments.'
+          description:
+            'Optional script asset path to remove. Combine with all=true to remove all matching attachments.'
         },
         all: {
           type: 'boolean',
-          description: 'When true, remove all attachments on the host, or all matching script_path attachments when script_path is also provided.'
+          description:
+            'When true, remove all attachments on the host, or all matching script_path attachments when script_path is also provided.'
         },
         timeout_ms: { type: 'number', default: 10000 }
       }
@@ -2195,6 +2207,20 @@ const BASE_TOOLS = [
     }
   },
   {
+    name: 'node_create',
+    description: 'Create a scene node in the current scene. Returns { node_id, err }.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        parent_id: {
+          type: 'string',
+          description: 'Optional persistent id of the parent scene node. Defaults to the scene root.'
+        },
+        timeout_ms: { type: 'number', default: 10000 }
+      }
+    }
+  },
+  {
     name: 'node_remove',
     description: 'Remove a scene node by persistent node id. Returns { err }.',
     inputSchema: {
@@ -2208,13 +2234,20 @@ const BASE_TOOLS = [
   },
   {
     name: 'node_set_parent',
-    description: 'Set a scene node parent by persistent node id. Returns { err }.',
+    description:
+      'Set a scene node parent by persistent node id. Use transform_mode to choose whether to preserve the node world transform matrix or local transform. Defaults to preserve_world. Returns { err }.',
     inputSchema: {
       type: 'object',
       required: ['id', 'parent_id'],
       properties: {
         id: { type: 'string', description: 'Persistent id of the scene node.' },
         parent_id: { type: 'string', description: 'Persistent id of the new parent scene node.' },
+        transform_mode: {
+          type: 'string',
+          enum: NODE_REPARENT_TRANSFORM_MODE_VALUES,
+          description:
+            'Transform preservation mode. Use preserve_world to keep the node world transform unchanged after reparenting, or preserve_local to keep the local transform unchanged. Defaults to preserve_world.'
+        },
         timeout_ms: { type: 'number', default: 10000 }
       }
     }
@@ -2396,8 +2429,7 @@ const BASE_TOOLS = [
   },
   {
     name: 'editor_save_scene',
-    description:
-      'Save the current scene to its existing path. Returns editor status plus err if failed.',
+    description: 'Save the current scene to its existing path. Returns editor status plus err if failed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2532,11 +2564,11 @@ function normalizeGeneratedModelSpec(value, key = '') {
             bezierPatch: 'bezierPatch'
           }[value] ?? value
         );
-    case 'curveType':
-    case 'curve_type':
-      return (
-        {
-          polyline: 'polyline',
+      case 'curveType':
+      case 'curve_type':
+        return (
+          {
+            polyline: 'polyline',
             bezier: 'bezier',
             catmull_rom: 'catmullRom',
             catmullRom: 'catmullRom',
@@ -2666,7 +2698,11 @@ const handlers = {
     const packageName = typeof args.package === 'string' ? args.package.trim() : '';
     const relativePath = typeof args.path === 'string' ? args.path.trim() : '';
     if (!packageName || !relativePath) {
-      return { package: packageName || null, path: relativePath || null, err: 'docs_read_type_file requires package and path' };
+      return {
+        package: packageName || null,
+        path: relativePath || null,
+        err: 'docs_read_type_file requires package and path'
+      };
     }
     if (!ASSISTANT_TYPE_PACKAGES.includes(packageName)) {
       return { package: packageName, path: relativePath, err: `Unsupported type package: ${packageName}` };
@@ -2934,7 +2970,13 @@ const handlers = {
     if (!nodeId) {
       return { host: null, attachments: null, err: 'node_attach_script requires node_id' };
     }
-    const scriptPath = readFirstStringArg(args, ['script_path', 'scriptPath', 'path', 'file_path', 'filePath']);
+    const scriptPath = readFirstStringArg(args, [
+      'script_path',
+      'scriptPath',
+      'path',
+      'file_path',
+      'filePath'
+    ]);
     if (!scriptPath) {
       return { host: null, attachments: null, err: 'node_attach_script requires script_path' };
     }
@@ -2951,7 +2993,13 @@ const handlers = {
     return bridge.send('attachScriptToNode', params, Number(args.timeout_ms ?? 10000));
   },
   async scene_attach_script(args) {
-    const scriptPath = readFirstStringArg(args, ['script_path', 'scriptPath', 'path', 'file_path', 'filePath']);
+    const scriptPath = readFirstStringArg(args, [
+      'script_path',
+      'scriptPath',
+      'path',
+      'file_path',
+      'filePath'
+    ]);
     if (!scriptPath) {
       return { host: null, attachments: null, err: 'scene_attach_script requires script_path' };
     }
@@ -2976,9 +3024,20 @@ const handlers = {
     if (Number.isInteger(args.index)) {
       params.index = args.index;
     } else if (Object.prototype.hasOwnProperty.call(args, 'index')) {
-      return { host: null, attachments: null, removed_count: 0, err: 'script_detach index must be an integer' };
+      return {
+        host: null,
+        attachments: null,
+        removed_count: 0,
+        err: 'script_detach index must be an integer'
+      };
     }
-    const scriptPath = readFirstStringArg(args, ['script_path', 'scriptPath', 'path', 'file_path', 'filePath']);
+    const scriptPath = readFirstStringArg(args, [
+      'script_path',
+      'scriptPath',
+      'path',
+      'file_path',
+      'filePath'
+    ]);
     if (scriptPath) {
       params.script_path = scriptPath;
     }
@@ -3260,6 +3319,13 @@ const handlers = {
     }
     return bridge.send('getParentNode', { id }, Number(args.timeout_ms ?? 10000));
   },
+  async node_create(args) {
+    const params = {};
+    if (typeof args.parent_id === 'string' && args.parent_id.trim()) {
+      params.parent_id = args.parent_id.trim();
+    }
+    return bridge.send('node_create', params, Number(args.timeout_ms ?? 10000));
+  },
   async node_remove(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
     if (!id) {
@@ -3276,7 +3342,18 @@ const handlers = {
     if (!parentId) {
       return { err: 'node_set_parent requires the parent_id' };
     }
-    return bridge.send('setParentNode', { id, parent_id: parentId }, Number(args.timeout_ms ?? 10000));
+    const transformMode =
+      typeof args.transform_mode === 'string' && args.transform_mode.trim() ? args.transform_mode.trim() : 'preserve_world';
+    if (!NODE_REPARENT_TRANSFORM_MODE_VALUES.includes(transformMode)) {
+      return {
+        err: `node_set_parent transform_mode must be one of: ${NODE_REPARENT_TRANSFORM_MODE_VALUES.join(', ')}`
+      };
+    }
+    return bridge.send(
+      'setParentNode',
+      { id, parent_id: parentId, transform_mode: transformMode },
+      Number(args.timeout_ms ?? 10000)
+    );
   },
   async node_get_children(args) {
     const parent = typeof args.parent === 'string' ? args.parent.trim() : '';
