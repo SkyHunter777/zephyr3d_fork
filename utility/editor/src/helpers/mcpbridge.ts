@@ -3916,7 +3916,9 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
         };
       }
       if (transformMode === 'preserve_world') {
-        const newLocalMatrix = Matrix4x4.invertAffine(newParentNode.node.worldMatrix).multiplyRight(node.node.worldMatrix);
+        const newLocalMatrix = Matrix4x4.invertAffine(newParentNode.node.worldMatrix).multiplyRight(
+          node.node.worldMatrix
+        );
         newLocalMatrix.decompose(node.node.scale, node.node.rotation, node.node.position);
       }
       node.node.parent = newParentNode.node;

@@ -14,6 +14,7 @@ import { DlgMessageBoxEx } from '../views/dlg/messageexdlg';
 import { templateScript } from '../core/build/templates';
 import { installDeps, reinstallPackages } from '../core/build/dep';
 import { DlgRampTextureCreator } from '../views/dlg/ramptexturedlg';
+import { DlgNoiseTextureCreator } from '../views/dlg/noisetexturedlg';
 import { TreeViewData, TreeView } from './treeview';
 import { DlgImport } from '../views/dlg/importdlg';
 import { DlgZABCCompress, type ZABCCompressDialogResult } from '../views/dlg/zabccompressdlg';
@@ -327,6 +328,9 @@ export class ContentListView extends ListView<{}, FileInfo | DirectoryInfo> {
           if (ImGui.BeginMenu('Texture')) {
             if (ImGui.MenuItem('Ramp Texture...')) {
               this.renderer.createRampTexture(this.renderer.selectedDir.path);
+            }
+            if (ImGui.MenuItem('Noise Texture...')) {
+              this.renderer.createNoiseTexture(this.renderer.selectedDir.path);
             }
             ImGui.EndMenu();
           }
@@ -1085,6 +1089,22 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       const filePath = this._vfs.join(path, `${sanitized}.png`);
       const pngData = UPNG.encode([data.data.buffer], data.data.length >> 2, 1, 0);
       await this._vfs.writeFile(filePath, pngData, { create: true, encoding: 'binary' });
+    }
+  }
+  async createNoiseTexture(path: string) {
+    const result = await DlgNoiseTextureCreator.createNoiseTexture(
+      'Create Noise Texture',
+      this._vfs,
+      path,
+      960,
+      620
+    );
+    if (result) {
+      try {
+        await this._vfs.writeFile(result.path, result.data, { create: true, encoding: 'binary' });
+      } catch (err) {
+        DlgMessage.messageBox('Error', `Create noise texture failed: ${err}`);
+      }
     }
   }
   async createNewFile(title: string, defaultName: string, content: (path: string) => void | Promise<void>) {
