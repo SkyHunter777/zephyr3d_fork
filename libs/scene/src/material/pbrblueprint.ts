@@ -358,6 +358,12 @@ export class PBRBluePrintMaterial
       pb.cross(scope.$outputs.zVertexNormal, scope.$outputs.zVertexTangent),
       scope.oTangent.w
     );
+    for (const outputName of ['Output1', 'Output2', 'Output3', 'Output4']) {
+      const output = this.getOutput(outputs, outputName);
+      if (output) {
+        scope.$outputs[outputName] = output;
+      }
+    }
   }
   /**
    * Builds the fragment shader for this PBR blueprint material.

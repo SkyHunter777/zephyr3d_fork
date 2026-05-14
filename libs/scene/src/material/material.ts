@@ -442,7 +442,7 @@ export class Material extends Disposable implements Clonable<Material>, IDisposa
    * @internal
    */
   createHash(pass: number) {
-    return `${this.constructor.name}|${pass}|${this._createHash()}`;
+    return `${this.constructor.name}|${this.passToHash(pass)}|${this._createHash()}`;
   }
   /**
    * Issue the actual draw call for a pass.

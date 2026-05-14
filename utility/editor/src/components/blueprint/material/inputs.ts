@@ -20,7 +20,10 @@ import {
   BillboardMatrixNode,
   PixelNormalNode,
   PixelWorldPositionNode,
-  CameraVectorNode
+  CameraVectorNode,
+  VertexIndexNode,
+  InstanceIndexNode,
+  VertexOutputNode
 } from '@zephyr3d/scene';
 import type { NodeCategory } from '../api';
 
@@ -40,6 +43,30 @@ export function getInputNodeCategories(): NodeCategory[] {
         {
           name: 'VertexTangentResolver',
           create: () => new ResolveVertexTangentNode()
+        },
+        {
+          name: 'VertexOutput1',
+          create: () => new VertexOutputNode(1)
+        },
+        {
+          name: 'VertexOutput2',
+          create: () => new VertexOutputNode(2)
+        },
+        {
+          name: 'VertexOutput3',
+          create: () => new VertexOutputNode(3)
+        },
+        {
+          name: 'VertexOutput4',
+          create: () => new VertexOutputNode(4)
+        },
+        {
+          name: 'VertexIndex',
+          create: () => new VertexIndexNode()
+        },
+        {
+          name: 'InstanceIndex',
+          create: () => new InstanceIndexNode()
         },
         {
           name: 'VertexColor',

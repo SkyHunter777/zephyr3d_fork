@@ -42,12 +42,15 @@ import {
 } from '../common/math';
 import {
   BillboardMatrixNode,
+  InstanceIndexNode,
   InvProjMatrixNode,
   InvViewProjMatrixNode,
   ProjectionMatrixNode,
   ResolveVertexNormalNode,
   ResolveVertexPositionNode,
   ResolveVertexTangentNode,
+  VertexIndexNode,
+  VertexOutputNode,
   ViewMatrixNode,
   ViewProjMatrixNode
 } from './inputs';
@@ -1471,6 +1474,12 @@ export class MaterialBlueprintIR {
       expr = this.transform(node, output);
     } else if (node instanceof RotateAboutAxisNode) {
       expr = this.rotateAboutAxis(node, output);
+    } else if (node instanceof VertexOutputNode) {
+      expr = this.vertexOutput(node, output);
+    } else if (node instanceof VertexIndexNode) {
+      expr = this.vertexIndex(node, output);
+    } else if (node instanceof InstanceIndexNode) {
+      expr = this.instanceIndex(node, output);
     } else if (node instanceof VertexColorNode) {
       expr = this.vertexColor(node, output);
     } else if (node instanceof VertexUVNode) {
@@ -1711,6 +1720,24 @@ export class MaterialBlueprintIR {
       IRFunc,
       [coord, new IRFunc([time, speed], 'mul')],
       'add'
+    );
+  }
+  private vertexOutput(node: VertexOutputNode, output: number): IRExpression {
+    return this.getOrCreateIRExpression(
+      node,
+      output,
+      IRInput,
+      (scope) => scope.$inputs[`Output${node.index}`]
+    );
+  }
+  private vertexIndex(node: VertexIndexNode, output: number): IRExpression {
+    return this.getOrCreateIRExpression(node, output, IRInput, (scope) =>
+      scope.$builder.float(scope.$builtins.vertexIndex)
+    );
+  }
+  private instanceIndex(node: InstanceIndexNode, output: number): IRExpression {
+    return this.getOrCreateIRExpression(node, output, IRInput, (scope) =>
+      scope.$builder.float(scope.$builtins.instanceIndex)
     );
   }
   /** Converts a vertex color input node to IR */

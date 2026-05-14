@@ -1,4 +1,170 @@
+import type { SerializableClass } from '../../serialization';
 import { BaseGraphNode } from '../node';
+
+/**
+ * Vertex output node
+ */
+export class VertexOutputNode extends BaseGraphNode {
+  private _index: number;
+  constructor(index: number) {
+    super();
+    this._index = index;
+    this._outputs = [{ id: 1, name: '' }];
+  }
+  get index() {
+    return this._index;
+  }
+  static getSerializationCls(): SerializableClass {
+    return {
+      ctor: VertexOutputNode,
+      name: 'VertexOutputNode',
+      createFunc(ctx: unknown, init: number) {
+        return { obj: new VertexOutputNode(init) };
+      },
+      getInitParams(obj: VertexOutputNode) {
+        return obj._index;
+      },
+      getProps() {
+        return [];
+      }
+    };
+  }
+  /**
+   * Generates a string representation of this node
+   *
+   * @returns 'vertex index'
+   */
+  toString() {
+    return `Vertex Output${this._index}`;
+  }
+  /**
+   * Validates the node state
+   *
+   * @returns Empty string (always valid)
+   *
+   * @remarks
+   * Vertex index nodes are always valid as they have no inputs.
+   */
+  protected validate() {
+    return '';
+  }
+  /**
+   * Gets the output type for a specific output slot
+   *
+   * @returns 'vec4'
+   */
+  protected getType() {
+    return 'vec4';
+  }
+}
+
+/**
+ * Vertex index input node
+ */
+export class VertexIndexNode extends BaseGraphNode {
+  /**
+   * Creates a new vertex index node
+   */
+  constructor() {
+    super();
+    this._outputs = [{ id: 1, name: '' }];
+  }
+  /**
+   * Gets the serialization descriptor for this node type
+   *
+   * @returns Serialization class descriptor
+   */
+  static getSerializationCls() {
+    return {
+      ctor: VertexIndexNode,
+      name: 'VertexIndexNode',
+      getProps() {
+        return [];
+      }
+    };
+  }
+  /**
+   * Generates a string representation of this node
+   *
+   * @returns 'vertex index'
+   */
+  toString() {
+    return 'vertex index';
+  }
+  /**
+   * Validates the node state
+   *
+   * @returns Empty string (always valid)
+   *
+   * @remarks
+   * Vertex index nodes are always valid as they have no inputs.
+   */
+  protected validate() {
+    return '';
+  }
+  /**
+   * Gets the output type for a specific output slot
+   *
+   * @returns 'float'
+   */
+  protected getType() {
+    return 'float';
+  }
+}
+
+/**
+ * Instance index input node
+ */
+export class InstanceIndexNode extends BaseGraphNode {
+  /**
+   * Creates a new instance index node
+   */
+  constructor() {
+    super();
+    this._outputs = [{ id: 1, name: '' }];
+  }
+  /**
+   * Gets the serialization descriptor for this node type
+   *
+   * @returns Serialization class descriptor
+   */
+  static getSerializationCls() {
+    return {
+      ctor: InstanceIndexNode,
+      name: 'InstanceIndexNode',
+      getProps() {
+        return [];
+      }
+    };
+  }
+  /**
+   * Generates a string representation of this node
+   *
+   * @returns 'instance index'
+   */
+  toString() {
+    return 'instance index';
+  }
+  /**
+   * Validates the node state
+   *
+   * @returns Empty string (always valid)
+   *
+   * @remarks
+   * Instance index nodes are always valid as they have no inputs.
+   */
+  protected validate() {
+    return '';
+  }
+  /**
+   * Gets the output type for a specific output slot
+   *
+   * @returns 'float'
+   */
+  protected getType() {
+    return 'float';
+  }
+}
 
 /**
  * Vertex color input node
