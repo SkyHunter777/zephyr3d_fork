@@ -472,17 +472,21 @@ export class PBRBluePrintMaterial
       bindGroup.setValue('zAnisotropy', this._anisotropy);
       bindGroup.setValue('zAnisotropyDirection', this._anisotropyDirection);
       bindGroup.setValue('zAnisotropyDirectionScaleBias', this._anisotropyDirectionScaleBias);
-      for (const u of this._uniformValues) {
-        bindGroup.setValue(u.name, u.finalValue!);
-      }
-      for (const u of this._uniformTextures) {
-        bindGroup.setTexture(u.name, u.finalTexture!.get()!, u.finalSampler);
-      }
       if (this.subsurfaceScattering && ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
         bindGroup.setValue('zSubsurfaceColor', this._subsurfaceColor);
         bindGroup.setValue('zSubsurfaceScale', this._subsurfaceScale);
         bindGroup.setValue('zSubsurfacePower', this._subsurfacePower);
         bindGroup.setValue('zSubsurfaceIntensity', this._subsurfaceIntensity);
+      }
+    }
+    for (const u of this._uniformValues) {
+      if (u.inVertexShader || this.needFragmentColor(ctx)) {
+        bindGroup.setValue(u.name, u.finalValue!);
+      }
+    }
+    for (const u of this._uniformTextures) {
+      if (u.inVertexShader || this.needFragmentColor(ctx)) {
+        bindGroup.setTexture(u.name, u.finalTexture!.get()!, u.finalSampler);
       }
     }
   }

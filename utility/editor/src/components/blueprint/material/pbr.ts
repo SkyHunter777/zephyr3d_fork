@@ -705,7 +705,9 @@ export class PBRMaterialEditor extends GraphEditor {
             node.impl.error = `Duplicated uniform name: ${node.impl.paramName}`;
             return;
           }
-          uniformNames.add(node.impl.paramName);
+          if (node.impl.isUniform) {
+            uniformNames.add(node.impl.paramName);
+          }
         }
         if (this.vertexEditor) {
           uniformNames.clear();
