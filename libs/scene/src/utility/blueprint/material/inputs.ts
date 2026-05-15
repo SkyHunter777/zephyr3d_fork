@@ -9,7 +9,13 @@ export class VertexOutputNode extends BaseGraphNode {
   constructor(index: number) {
     super();
     this._index = index;
-    this._outputs = [{ id: 1, name: '' }];
+    this._outputs = [
+      { id: 1, name: '' },
+      { id: 2, name: 'x', swizzle: 'x' },
+      { id: 3, name: 'y', swizzle: 'y' },
+      { id: 4, name: 'z', swizzle: 'z' },
+      { id: 5, name: 'w', swizzle: 'w' }
+    ];
   }
   get index() {
     return this._index;
@@ -51,10 +57,11 @@ export class VertexOutputNode extends BaseGraphNode {
   /**
    * Gets the output type for a specific output slot
    *
-   * @returns 'vec4'
+   * @param id - The output slot ID
+   * @returns 'float' for individual channel outputs (id \> 1), 'vec4' for full color
    */
-  protected getType() {
-    return 'vec4';
+  protected getType(id: number) {
+    return id > 1 ? 'float' : 'vec4';
   }
 }
 

@@ -1,5 +1,5 @@
 import type { Immutable, Nullable } from '@zephyr3d/base';
-import { Matrix4x4, parseColor, Vector3, Vector4 } from '@zephyr3d/base';
+import { Matrix4x4, parseColor, splitStringByGraphemes, Vector3, Vector4 } from '@zephyr3d/base';
 import { Font } from './font';
 import { GlyphManager } from './glyphmanager';
 import type { RenderStateSet } from '../render_states';
@@ -97,11 +97,12 @@ export class DrawText {
       device.setRenderStates(this.textRenderStates!);
       device.setBindGroup(0, this.textBindGroup!);
       let drawn = 0;
-      const total = text.length;
+      const splitted = splitStringByGraphemes(text);
+      const total = splitted.length;
       while (drawn < total) {
         const count = Math.min(total - drawn, this.GLYPH_COUNT - this.textOffset);
         if (count > 0) {
-          x = this.drawTextNoOverflow(device, text, drawn, count, x, y);
+          x = this.drawTextNoOverflow(device, splitted, drawn, count, x, y);
           drawn += count;
           this.textOffset += count;
         }
@@ -116,7 +117,7 @@ export class DrawText {
   /** @internal */
   private static drawTextNoOverflow(
     device: AbstractDevice,
-    text: string,
+    text: string[],
     start: number,
     count: number,
     x: number,

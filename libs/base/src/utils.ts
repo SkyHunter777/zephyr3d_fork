@@ -510,6 +510,56 @@ export function ASSERT(condition: boolean, message?: string): asserts condition 
 }
 
 /**
+ * Splits a string into an array of grapheme clusters (user-perceived characters).
+ * @param text - The input string to split.
+ * @returns An array of grapheme clusters.
+ * @public
+ */
+export function splitStringByGraphemes(text: string): string[] {
+  function isModifier(codePoint: number) {
+    return (
+      codePoint === 0xfe0f ||
+      codePoint === 0x200d ||
+      (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff) ||
+      (codePoint >= 0x20d0 && codePoint <= 0x20ff)
+    );
+  }
+
+  const result: string[] = [];
+  let i = 0;
+
+  while (i < text.length) {
+    let grapheme = '';
+    const codePoint = text.codePointAt(i)!;
+
+    // Add primary character
+    if (codePoint >= 0x10000) {
+      grapheme += text.slice(i, i + 2);
+      i += 2;
+    } else {
+      grapheme += text[i];
+      i += 1;
+    }
+
+    // Add modifiers
+    while (i < text.length && isModifier(text.codePointAt(i)!)) {
+      const modifierCodePoint = text.codePointAt(i)!;
+      if (modifierCodePoint >= 0x10000) {
+        grapheme += text.slice(i, i + 2);
+        i += 2;
+      } else {
+        grapheme += text[i];
+        i += 1;
+      }
+    }
+
+    result.push(grapheme);
+  }
+
+  return result;
+}
+
+/**
  * Converts a Uint8Array to Base64 (Supports emoji character)
  * @param array - Uint8Array to convert
  * @returns Base64 string

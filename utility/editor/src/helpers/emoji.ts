@@ -1,3 +1,4 @@
+import { splitStringByGraphemes } from '@zephyr3d/base';
 import { imGuiSetCharCodeMap } from '@zephyr3d/imgui';
 
 const EMOJI_TO_PRIVATE_MAP: Record<string, number> = {
@@ -36,53 +37,9 @@ export function initEmojiMapping() {
   imGuiSetCharCodeMap(PRIVATE_TO_EMOJI_MAP);
 }
 
-function isModifier(codePoint: number) {
-  return (
-    codePoint === 0xfe0f || // 变体选择器-16
-    codePoint === 0x200d || // ZWJ (零宽连接符)
-    (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff) || // 肤色修饰符
-    (codePoint >= 0x20d0 && codePoint <= 0x20ff) // 组合用双重符号
-  );
-}
-
-function splitByGraphemes(text: string) {
-  const result: string[] = [];
-  let i = 0;
-
-  while (i < text.length) {
-    let grapheme = '';
-    const codePoint = text.codePointAt(i);
-
-    // 添加主要字符
-    if (codePoint >= 0x10000) {
-      grapheme += text.slice(i, i + 2);
-      i += 2;
-    } else {
-      grapheme += text[i];
-      i += 1;
-    }
-
-    // 添加修饰符
-    while (i < text.length && isModifier(text.codePointAt(i))) {
-      const modifierCodePoint = text.codePointAt(i);
-      if (modifierCodePoint >= 0x10000) {
-        grapheme += text.slice(i, i + 2);
-        i += 2;
-      } else {
-        grapheme += text[i];
-        i += 1;
-      }
-    }
-
-    result.push(grapheme);
-  }
-
-  return result;
-}
-
 export function convertEmojiString(text: string) {
   let result = '';
-  const chars = splitByGraphemes(text);
+  const chars = splitStringByGraphemes(text);
   for (const c of chars) {
     if (c in EMOJI_TO_PRIVATE_MAP) {
       result += String.fromCodePoint(EMOJI_TO_PRIVATE_MAP[c]);
