@@ -1,4 +1,6 @@
 type FileSystemDirectoryHandleLike = {
+  kind: 'directory';
+  name: string;
   values(): AsyncIterable<FileSystemDirectoryHandleLike | FileSystemFileHandleLike>;
 };
 
@@ -70,7 +72,7 @@ export class FilePicker {
     }
     try {
       const root = await showDirectoryPicker();
-      return this.collectDirectoryFiles(root);
+      return this.collectDirectoryFiles(root, root.name);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         return [];

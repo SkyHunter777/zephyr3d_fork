@@ -40,7 +40,7 @@ export class BatchGroup extends GraphNode {
     this.on('visiblechanged', (node) => {
       node.iterate((child) => {
         if (child.isMesh()) {
-          this._changeTag++;
+          this.invalidate();
           return true;
         }
         return false;
@@ -54,7 +54,7 @@ export class BatchGroup extends GraphNode {
             this.invalidateBoundingVolume();
           }
           child.on('bvchanged', bvCallback);
-          this._changeTag++;
+          this.invalidate();
         }
       });
     });
@@ -66,7 +66,7 @@ export class BatchGroup extends GraphNode {
             this.invalidateBoundingVolume();
           }
           child.off('bvchanged', bvCallback);
-          this._changeTag++;
+          this.invalidate();
         }
       });
     });

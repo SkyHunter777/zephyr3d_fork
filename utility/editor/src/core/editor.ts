@@ -641,7 +641,17 @@ export class Editor {
         const project = await ProjectService.openProject(uuid);
         const settings = await ProjectService.getCurrentProjectSettings();
         this._currentProject = project;
-        this._moduleManager.activate('Scene', settings.startupScene ?? project.lastEditScene ?? '');
+        let scene = settings.startupScene ?? project.lastEditScene ?? '';
+        if (!scene) {
+          const sceneFiles = await ProjectService.VFS.glob('/**/*.zscn', {
+            includeDirs: false,
+            recursive: true
+          });
+          if (sceneFiles.length > 0) {
+            scene = sceneFiles[0].path;
+          }
+        }
+        this._moduleManager.activate('Scene', settings.startupScene ?? project.lastEditScene ?? scene);
         for (const dep of Object.keys(settings.dependencies ?? {})) {
           const depName = dep;
           const depVersion = settings.dependencies[dep];

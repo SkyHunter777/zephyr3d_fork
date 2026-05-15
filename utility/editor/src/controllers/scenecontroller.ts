@@ -121,7 +121,7 @@ export class SceneController extends BaseController<SceneModel, SceneView> {
       }
       case 'CLOSE_PROJECT': {
         let err: string = null;
-        if (!arg?.force && (await this.ensureSceneSaved())) {
+        if (arg?.force || (await this.ensureSceneSaved())) {
           err = await this._editor.closeProject(this._scenePath);
         }
         if (arg?.cb) {
@@ -185,7 +185,7 @@ export class SceneController extends BaseController<SceneModel, SceneView> {
         break;
       case 'EXPORT_PROJECT': {
         let err: string = null;
-        if (!arg?.force && (await this.ensureSceneSaved())) {
+        if (arg?.force || (await this.ensureSceneSaved())) {
           err = await this._editor.exportProject();
         }
         if (arg?.cb) {
@@ -222,7 +222,7 @@ export class SceneController extends BaseController<SceneModel, SceneView> {
       case 'NEW_DOC': {
         let path: string = null;
         let err: string = null;
-        if (!arg?.force && (await this.ensureSceneSaved())) {
+        if (arg?.force || (await this.ensureSceneSaved())) {
           path = this.createScene(true, arg?.path);
         } else {
           err = 'User refused to create scene';
@@ -262,7 +262,7 @@ export class SceneController extends BaseController<SceneModel, SceneView> {
       }
       case 'OPEN_DOC': {
         let err = null;
-        if (!arg?.force && (await this.ensureSceneSaved())) {
+        if (arg?.force || (await this.ensureSceneSaved())) {
           if (arg?.path) {
             await this.openScene(arg.path, true);
           } else {
