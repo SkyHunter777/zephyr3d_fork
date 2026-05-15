@@ -46,6 +46,8 @@ export type DirectoryInfo = {
   subDir: DirectoryInfo[];
   parent: DirectoryInfo;
   open: boolean;
+  loaded?: boolean;
+  hasChildrenHint?: boolean;
 };
 
 interface AreaBounds {
@@ -98,6 +100,9 @@ class VFSDirData extends TreeViewData<DirectoryInfo> {
   }
   getChildren(parent: DirectoryInfo): DirectoryInfo[] {
     return parent?.subDir ?? [];
+  }
+  hasChildren(parent: DirectoryInfo): boolean {
+    return parent?.hasChildrenHint ?? parent?.subDir?.length > 0;
   }
   getParent(node: DirectoryInfo): DirectoryInfo {
     return node.parent;
@@ -430,7 +435,17 @@ export class DirTreeView extends TreeView<{}, DirectoryInfo> {
     this._renderer.refreshFileView();
   }
   protected onNodeSelected(): void {
-    this._renderer.refreshFileView();
+    void this._renderer.ensureDirectoryLoaded(this.selectedNode).finally(() => {
+      this._renderer.refreshFileView();
+    });
+  }
+  protected onNodeOpenChanged(node: DirectoryInfo, open: boolean) {
+    node.open = open;
+    if (open) {
+      void this._renderer.ensureDirectoryLoaded(node).catch((err) => {
+        console.error(`Load directory ${node.path} failed: ${err}`);
+      });
+    }
   }
   protected onDrawContextMenu(dir: DirectoryInfo) {
     this._renderer.renderPluginContextMenu('asset-directory', dir);
@@ -1392,6 +1407,10 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   }
 
   private revealAsset(path: string) {
+    void this.revealAssetAsync(path);
+  }
+
+  private async revealAssetAsync(path: string) {
     if (!path) {
       return;
     }
@@ -1400,15 +1419,16 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       this._pendingRevealAssetPath = normalizedPath;
       return;
     }
-    this.selectAssetByPath(normalizedPath);
+    await this.selectAssetByPath(normalizedPath);
   }
 
-  private selectAssetByPath(path: string) {
+  private async selectAssetByPath(path: string) {
     if (!path) {
       return;
     }
     const normalizedPath = this._vfs.normalizePath(path);
     const dirPath = this._vfs.dirname(normalizedPath);
+    await this.ensureDirectoryChainLoaded(dirPath);
     const dir = this.findDirectoryByPath(this._filesystem, dirPath);
     if (!dir) {
       return;
@@ -1432,7 +1452,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     if (this.selectedDir === dir) {
       flags |= ImGui.TreeNodeFlags.Selected;
     }
-    if (dir.subDir.length === 0) {
+    if (!dir.hasChildrenHint && dir.subDir.length === 0) {
       flags |= ImGui.TreeNodeFlags.Leaf;
     }
     const forceExpanded = this.selectedDir ? this.isParentOf(dir, this.selectedDir) : false;
@@ -1510,7 +1530,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   }
 
   async loadFileSystem() {
-    const rootDir = await this.loadDirectoryInfo(this._options.rootDir);
+    const rootDir = await this.loadDirectoryInfo(this._options.rootDir, 1);
     this._filesystem = rootDir;
     this._forceNavRefresh = true;
 
@@ -1523,7 +1543,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     if (this._pendingRevealAssetPath) {
       const path = this._pendingRevealAssetPath;
       this._pendingRevealAssetPath = null;
-      this.selectAssetByPath(path);
+      await this.selectAssetByPath(path);
     }
 
     this.dispatchEvent('loaded');
@@ -1608,6 +1628,58 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     return null;
   }
 
+  async ensureDirectoryLoaded(dir: DirectoryInfo) {
+    if (!dir || dir.loaded) {
+      return;
+    }
+    const refreshed = await this.loadDirectoryInfo(dir.path, 1);
+    if (!refreshed) {
+      return;
+    }
+    dir.files = refreshed.files;
+    dir.subDir = refreshed.subDir;
+    dir.loaded = true;
+    dir.hasChildrenHint = refreshed.hasChildrenHint;
+    for (const subDir of dir.subDir) {
+      subDir.parent = dir;
+    }
+    if (this.selectedDir === dir) {
+      this.refreshFileView();
+    }
+  }
+
+  private async ensureDirectoryChainLoaded(path: string) {
+    if (!this._filesystem) {
+      return;
+    }
+    const rootPath = this._vfs.normalizePath(this._filesystem.path);
+    const normalizedPath = this._vfs.normalizePath(path);
+    if (normalizedPath === rootPath) {
+      await this.ensureDirectoryLoaded(this._filesystem);
+      return;
+    }
+    const relative = normalizedPath.slice(rootPath.length).replace(/^\/+/, '');
+    let current = this._filesystem;
+    await this.ensureDirectoryLoaded(current);
+    for (const part of relative.split('/').filter(Boolean)) {
+      const nextPath = this._vfs.join(current.path, part);
+      let next = current.subDir.find((dir) => this._vfs.normalizePath(dir.path) === this._vfs.normalizePath(nextPath));
+      if (!next) {
+        await this.ensureDirectoryLoaded(current);
+        next = current.subDir.find(
+          (dir) => this._vfs.normalizePath(dir.path) === this._vfs.normalizePath(nextPath)
+        );
+      }
+      if (!next) {
+        return;
+      }
+      current.open = true;
+      next.parent = current;
+      await this.ensureDirectoryLoaded(next);
+      current = next;
+    }
+  }
+
   private isParentOf(parent: DirectoryInfo, child: DirectoryInfo) {
     while (child.parent) {
       if (parent.path === child.parent.path) {
@@ -1617,7 +1689,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     }
     return false;
   }
-  async loadDirectoryInfo(path: string): Promise<DirectoryInfo> {
+  async loadDirectoryInfo(path: string, depth = Number.POSITIVE_INFINITY): Promise<DirectoryInfo> {
     if (!this._vfs) {
       return null;
     }
@@ -1628,7 +1700,9 @@ export class VFSRenderer extends makeObservable(Disposable)<{
         subDir: [],
         parent: null,
         open: false,
-        path
+        path,
+        loaded: depth > 0,
+        hasChildrenHint: false
       };
 
       const content: FileMetadata[] =
@@ -1641,10 +1715,24 @@ export class VFSRenderer extends makeObservable(Disposable)<{
 
       for (const entry of content) {
         if (entry.type === 'directory') {
-          const dirInfo = await this.loadDirectoryInfo(entry.path);
-          if (dirInfo) {
-            info.subDir.push(dirInfo);
-            dirInfo.parent = info;
+          info.hasChildrenHint = true;
+          if (depth > 0) {
+            const dirInfo =
+              depth > 1
+                ? await this.loadDirectoryInfo(entry.path, depth - 1)
+                : {
+                    files: [],
+                    subDir: [],
+                    parent: info,
+                    open: false,
+                    path: entry.path,
+                    loaded: false,
+                    hasChildrenHint: true
+                  };
+            if (dirInfo) {
+              info.subDir.push(dirInfo);
+              dirInfo.parent = info;
+            }
           }
         } else if (entry.type === 'file') {
           info.files.push({
