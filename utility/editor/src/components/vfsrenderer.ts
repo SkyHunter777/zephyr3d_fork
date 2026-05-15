@@ -538,6 +538,8 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   private _reloadQueued = false;
   private _reloadQueuedPreserveSelection = false;
   private _reloadingFileSystem = false;
+  private _vfsBatchDepth = 0;
+  private _vfsBatchReloadPending = false;
   private readonly _options: VFSRendererOptions = null;
 
   constructor(vfs: VFS, fileFilter: string[] = [], treePanelWidth = 200, options?: VFSRendererOptions) {
@@ -607,6 +609,21 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   }
   get currentDirContent() {
     return this._currentDirContent;
+  }
+  async runWithVFSBatchUpdate<T>(task: () => Promise<T>): Promise<T> {
+    this._vfsBatchDepth++;
+    try {
+      return await task();
+    } finally {
+      this._vfsBatchDepth--;
+      if (this._vfsBatchDepth <= 0) {
+        this._vfsBatchDepth = 0;
+        if (this._vfsBatchReloadPending) {
+          this._vfsBatchReloadPending = false;
+          this.queueFileSystemReload(true);
+        }
+      }
+    }
   }
   get revealInFileManagerLabel() {
     return getDesktopAPI()?.platform === 'win32' ? 'Show in Explorer' : 'Reveal in File Manager';
@@ -1748,21 +1765,23 @@ export class VFSRenderer extends makeObservable(Disposable)<{
             if (saveOptions) {
               const dlgProgressBar = new DlgProgress('Write File##ImportProgress', 300);
               dlgProgressBar.showModal();
-              for (let i = 0; i < result.paths.length; i++) {
-                dlgProgressBar.setProgress(i + 1, result.paths.length);
-                try {
-                  await ResourceService.savePrefab(
-                    models[i],
-                    getEngine().resourceManager,
-                    PathUtils.basename(result.paths[i], PathUtils.extname(result.paths[i])),
-                    info.targetDirectory.path,
-                    dtVFS,
-                    saveOptions[i]
-                  );
-                } catch (err) {
-                  console.error(`Write model ${result.paths[i]} failed: ${err}`);
+              await this.runWithVFSBatchUpdate(async () => {
+                for (let i = 0; i < result.paths.length; i++) {
+                  dlgProgressBar.setProgress(i + 1, result.paths.length);
+                  try {
+                    await ResourceService.savePrefab(
+                      models[i],
+                      getEngine().resourceManager,
+                      PathUtils.basename(result.paths[i], PathUtils.extname(result.paths[i])),
+                      info.targetDirectory.path,
+                      dtVFS,
+                      saveOptions[i]
+                    );
+                  } catch (err) {
+                    console.error(`Write model ${result.paths[i]} failed: ${err}`);
+                  }
                 }
-              }
+              });
               dlgProgressBar.close();
             }
           }
@@ -1991,6 +2010,11 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       !this._vfs.isParentOf(rootPath, changedPath) &&
       !this._vfs.isParentOf(changedPath, rootPath)
     ) {
+      return;
+    }
+    if (this._vfsBatchDepth > 0) {
+      this._reloadQueuedPreserveSelection = true;
+      this._vfsBatchReloadPending = true;
       return;
     }
     this.queueFileSystemReload(true);
