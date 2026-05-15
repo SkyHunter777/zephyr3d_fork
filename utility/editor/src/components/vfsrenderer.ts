@@ -481,9 +481,13 @@ export class DirTreeView extends TreeView<{}, DirectoryInfo> {
       if (ImGui.MenuItem('Delete##VFSDeleteFolder')) {
         this._renderer.VFS.deleteDirectory(dir.path, true)
           .then(() => {
+            this._renderer.removePathsFromFileSystem([dir.path]);
             if (dir === this.selectedNode) {
               this.selectNode(null);
             }
+            this._renderer.refreshFileView();
+            this._renderer.emitSelectedChanged();
+            this._renderer.queueFileSystemReload(true);
           })
           .catch((err) => {
             DlgMessage.messageBox('Error', `Delete directory failed: ${err}`);
@@ -1212,8 +1216,12 @@ export class VFSRenderer extends makeObservable(Disposable)<{
 
     Promise.all(deletePromises)
       .then(() => {
+        const deletedPaths = items.map((item) => ('subDir' in item ? item.path : item.meta.path));
+        this.removePathsFromFileSystem(deletedPaths);
         this._contentView.deselectAll();
+        this.refreshFileView();
         this.emitSelectedChanged();
+        this.queueFileSystemReload(true);
       })
       .catch((err) => {
         DlgMessage.messageBox('Error', `Delete failed: ${err}`);
@@ -1457,9 +1465,13 @@ export class VFSRenderer extends makeObservable(Disposable)<{
             this._vfs
               .deleteDirectory(dir.path, true)
               .then(() => {
+                this.removePathsFromFileSystem([dir.path]);
                 if (dir === this.selectedDir) {
                   this._nav.selectNode(null);
                 }
+                this.refreshFileView();
+                this.emitSelectedChanged();
+                this.queueFileSystemReload(true);
               })
               .catch((err) => {
                 DlgMessage.messageBox('Error', `Delete directory failed: ${err}`);
@@ -1529,6 +1541,39 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     } finally {
       this._reloadingFileSystem = false;
     }
+  }
+
+  private removePathsFromFileSystem(paths: string[]) {
+    if (!this._filesystem || !paths?.length) {
+      return;
+    }
+    const normalizedPaths = paths.map((path) => this._vfs.normalizePath(path));
+    for (const path of normalizedPaths) {
+      this.removePathFromDirectory(this._filesystem, path);
+      if (this.selectedDir && this._vfs.normalizePath(this.selectedDir.path) === path) {
+        const fallbackDir = this.findDirectoryByPath(this._filesystem, this._vfs.dirname(path)) ?? this._filesystem;
+        this._nav.selectNode(fallbackDir);
+      }
+    }
+  }
+
+  private removePathFromDirectory(dir: DirectoryInfo, targetPath: string): boolean {
+    const subDirIndex = dir.subDir.findIndex((subDir) => this._vfs.normalizePath(subDir.path) === targetPath);
+    if (subDirIndex >= 0) {
+      dir.subDir.splice(subDirIndex, 1);
+      return true;
+    }
+    const fileIndex = dir.files.findIndex((file) => this._vfs.normalizePath(file.meta.path) === targetPath);
+    if (fileIndex >= 0) {
+      dir.files.splice(fileIndex, 1);
+      return true;
+    }
+    for (const subDir of dir.subDir) {
+      if (this.removePathFromDirectory(subDir, targetPath)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private findDirectoryByPath(root: DirectoryInfo, path: string): DirectoryInfo | null {
