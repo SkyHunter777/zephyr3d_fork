@@ -1,5 +1,5 @@
 import type { Nullable } from '@zephyr3d/base';
-import { applyMixins, DRef } from '@zephyr3d/base';
+import { applyMixins, DRef, makeObservable } from '@zephyr3d/base';
 import { GraphNode } from './graph_node';
 import type { MeshMaterial } from '../material';
 import { LambertMaterial, ShaderHelper } from '../material';
@@ -37,11 +37,17 @@ import type { SkinnedBoundingBox } from '../animation';
  * @public
  */
 export type MeshUpdateCallback = (frameId: number, elapsedInSeconds: number, deltaInSeconds: number) => void;
+
+const MeshBase = makeObservable(applyMixins(GraphNode, mixinDrawable))<{
+  primitive_changed: [primitive: Nullable<Primitive>];
+  material_changed: [material: Nullable<MeshMaterial>];
+}>();
+
 /**
  * Mesh node
  * @public
  */
-export class Mesh extends applyMixins(GraphNode, mixinDrawable) implements BatchDrawable {
+export class Mesh extends MeshBase implements BatchDrawable {
   /** @internal */
   private readonly _primitive: DRef<Primitive>;
   /** @internal */
@@ -184,6 +190,7 @@ export class Mesh extends applyMixins(GraphNode, mixinDrawable) implements Batch
       this.invalidateBoundingVolume();
       RenderBundleWrapper.drawableChanged(this);
       this._primitiveChangeTag = null;
+      this.dispatchEvent('primitive_changed', prim);
     }
   }
   /** Material of the mesh */
@@ -202,6 +209,7 @@ export class Mesh extends applyMixins(GraphNode, mixinDrawable) implements Batch
           : null;
       RenderBundleWrapper.drawableChanged(this);
       this._materialChangeTag = null;
+      this.dispatchEvent('material_changed', m);
     }
   }
   /**

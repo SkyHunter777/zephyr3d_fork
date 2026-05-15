@@ -7,6 +7,24 @@ import type { GenericConstructor, Nullable } from './utils';
 export type EventMap = Record<string, any[]>;
 
 /**
+ * Type-only marker used to preserve the event map of an {@link IEventTarget}.
+ *
+ * @public
+ */
+export declare const EventMapType: unique symbol;
+
+/**
+ * Extracts the event map carried by an {@link IEventTarget}.
+ *
+ * @public
+ */
+export type EventMapOf<T> = T extends { readonly [EventMapType]?: infer M }
+  ? M extends EventMap
+    ? M
+    : never
+  : never;
+
+/**
  * Event handler type
  * @public
  */
@@ -34,6 +52,11 @@ type EventListenerMap<T extends EventMap> = {
  * @public
  */
 export interface IEventTarget<T extends EventMap = any> {
+  /**
+   * Type-only event map marker.
+   * @internal
+   */
+  readonly [EventMapType]?: T;
   /**
    * Sets up a function that will be called whenever the specified event is delivered to the target
    * @param type - The event type to listen for
@@ -72,6 +95,8 @@ export interface IEventTarget<T extends EventMap = any> {
  * @public
  */
 export class Observable<X extends EventMap> implements IEventTarget<X> {
+  /** @internal */
+  declare readonly [EventMapType]?: X;
   /** @internal */
   _listeners: Nullable<EventListenerMap<X>>;
   /**
@@ -244,8 +269,11 @@ export class Observable<X extends EventMap> implements IEventTarget<X> {
  */
 export function makeObservable<C extends GenericConstructor | ObjectConstructor>(cls: C) {
   return function _<X extends EventMap>() {
-    type I = InstanceType<typeof cls> extends IEventTarget<infer U> ? X & U : X;
+    type U = EventMapOf<InstanceType<typeof cls>>;
+    type I = [U] extends [never] ? X : X & U;
     return class E extends cls implements IEventTarget<I> {
+      /** @internal */
+      declare readonly [EventMapType]?: I;
       /** @internal */
       _listeners: Nullable<EventListenerMap<I>>;
       constructor(...args: any[]) {

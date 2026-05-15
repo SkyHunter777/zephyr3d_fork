@@ -32,11 +32,18 @@ export class BatchGroup extends GraphNode {
     this._changeTag = 0;
     this._bindGroupAllocator = new InstanceBindGroupAllocator();
     this._staticBV = false;
-    const bvCallback = function (this: BatchGroup) {
+    const bvCallback = () => {
       if (!this._staticBV) {
         this.invalidateBoundingVolume();
       }
-    }.bind(this);
+    };
+    const primitiveCallback = () => {
+      bvCallback();
+      this.invalidate();
+    };
+    const materialCallback = () => {
+      this.invalidate();
+    };
     this.on('visiblechanged', (node) => {
       node.iterate((child) => {
         if (child.isMesh()) {
@@ -54,6 +61,8 @@ export class BatchGroup extends GraphNode {
             this.invalidateBoundingVolume();
           }
           child.on('bvchanged', bvCallback);
+          child.on('primitive_changed', primitiveCallback);
+          child.on('material_changed', materialCallback);
           this.invalidate();
         }
       });
@@ -66,6 +75,8 @@ export class BatchGroup extends GraphNode {
             this.invalidateBoundingVolume();
           }
           child.off('bvchanged', bvCallback);
+          child.off('primitive_changed', primitiveCallback);
+          child.off('material_changed', materialCallback);
           this.invalidate();
         }
       });
