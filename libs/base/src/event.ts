@@ -18,11 +18,7 @@ export declare const EventMapType: unique symbol;
  *
  * @public
  */
-export type EventMapOf<T> = T extends { readonly [EventMapType]?: infer M }
-  ? M extends EventMap
-    ? M
-    : never
-  : never;
+export type EventMapOf<T> = T extends IEventTarget<infer M> ? (M extends EventMap ? M : never) : never;
 
 /**
  * Event handler type
@@ -54,7 +50,6 @@ type EventListenerMap<T extends EventMap> = {
 export interface IEventTarget<T extends EventMap = any> {
   /**
    * Type-only event map marker.
-   * @internal
    */
   readonly [EventMapType]?: T;
   /**
@@ -95,8 +90,6 @@ export interface IEventTarget<T extends EventMap = any> {
  * @public
  */
 export class Observable<X extends EventMap> implements IEventTarget<X> {
-  /** @internal */
-  declare readonly [EventMapType]?: X;
   /** @internal */
   _listeners: Nullable<EventListenerMap<X>>;
   /**
@@ -272,8 +265,6 @@ export function makeObservable<C extends GenericConstructor | ObjectConstructor>
     type U = EventMapOf<InstanceType<typeof cls>>;
     type I = [U] extends [never] ? X : X & U;
     return class E extends cls implements IEventTarget<I> {
-      /** @internal */
-      declare readonly [EventMapType]?: I;
       /** @internal */
       _listeners: Nullable<EventListenerMap<I>>;
       constructor(...args: any[]) {
