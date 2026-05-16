@@ -1,5 +1,5 @@
 import type { Nullable } from '@zephyr3d/base';
-import { applyMixins, DRef, makeObservable } from '@zephyr3d/base';
+import { applyMixins, castObservable, DRef } from '@zephyr3d/base';
 import { GraphNode } from './graph_node';
 import type { MeshMaterial } from '../material';
 import { LambertMaterial, ShaderHelper } from '../material';
@@ -38,7 +38,7 @@ import type { SkinnedBoundingBox } from '../animation';
  */
 export type MeshUpdateCallback = (frameId: number, elapsedInSeconds: number, deltaInSeconds: number) => void;
 
-const MeshBase = makeObservable(applyMixins(GraphNode, mixinDrawable))<{
+const MeshBase = castObservable(applyMixins(GraphNode, mixinDrawable))<{
   primitive_changed: [primitive: Nullable<Primitive>];
   material_changed: [material: Nullable<MeshMaterial>];
 }>();

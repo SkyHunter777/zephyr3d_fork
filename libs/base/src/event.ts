@@ -412,3 +412,31 @@ export function makeObservable<C extends GenericConstructor | ObjectConstructor>
     };
   };
 }
+
+/**
+ * Cast augments a class with {@link IEventTarget} capabilities.
+ *
+ * It returns a higher-order factory that, when instantiated with an event map `X`,
+ * produces a subclass adding `on/once/off/dispatchEvent` and the internal listener management.
+ *
+ * Usage:
+ * ```ts
+ * class Base {}
+ * const Eventful = makeObservable(Base)<{ 'ready': []; 'data': [number] }>();
+ * const obj = new Eventful();
+ * obj.on('data', (n) => console.log(n));
+ * obj.dispatchEvent('data', 42);
+ * ```
+ *
+ * @typeParam C - A constructor type to be extended (plain `ObjectConstructor` or a generic class)
+ * @param cls - The base class to extend
+ * @returns A generic factory that accepts an event map and returns an extended class
+ * @public
+ */
+export function castObservable<C extends GenericConstructor | ObjectConstructor>(cls: C) {
+  return function _<X extends EventMap>() {
+    type U = EventMapOf<InstanceType<typeof cls>>;
+    type I = [U] extends [never] ? X : X & U;
+    return cls as C & { new (...args: any[]): IEventTarget<I> };
+  };
+}

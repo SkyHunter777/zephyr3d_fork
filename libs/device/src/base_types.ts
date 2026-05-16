@@ -1,4 +1,4 @@
-import type { TypedArray, Vector4, IEventTarget, Nullable, Immutable } from '@zephyr3d/base';
+import type { TypedArray, Vector4, IEventTarget, Nullable, Immutable, Rect, Vector3 } from '@zephyr3d/base';
 import { float2half } from '@zephyr3d/base';
 import type { PBComputeOptions, PBRenderOptions, PBStructTypeInfo, ProgramBuilder } from './builder';
 import type {
@@ -2379,6 +2379,31 @@ export type DeviceViewport = {
 };
 
 /**
+ * Horizontal alignment for text layout
+ * @public
+ */
+export type TextHorizontalAlignment = 'left' | 'center' | 'right';
+
+/**
+ * Vertical alignment for text layout
+ * @public
+ */
+export type TextVerticalAlignment = 'top' | 'center' | 'bottom';
+
+/**
+ * Layout options for drawing text inside a rectangle
+ * @public
+ */
+export interface DrawTextLayoutOptions {
+  /** Horizontal alignment of each line */
+  halign?: TextHorizontalAlignment;
+  /** Vertical alignment of the text block */
+  valign?: TextVerticalAlignment;
+  /** Whether to wrap text automatically to fit the rectangle width */
+  wordWrap?: boolean;
+}
+
+/**
  * Abstract interface for the rendering device.
  * @public
  */
@@ -2416,7 +2441,9 @@ export interface AbstractDevice extends IEventTarget<DeviceEventMap> {
   /** Cancel schedule next frame */
   cancelNextFrame(handle: number): void;
   /** Set font for drawText function */
-  setFont(fontName: string): void;
+  setFont(fontName: Nullable<string>): void;
+  /** Set render states to be used when drawing text. If not set, default states will be used. */
+  setTextRenderStates(states: Nullable<RenderStateSet>): void;
   /**
    * Draw a string
    * @param text - The string that will be drawn
@@ -2424,7 +2451,20 @@ export interface AbstractDevice extends IEventTarget<DeviceEventMap> {
    * @param y - y coordinate in pixels related to the viewport origin
    * @param color - A CSS color value
    */
-  drawText(text: string, x: number, y: number, color: string, viewport?: Immutable<number[]>): void;
+  drawText(text: string, x: number, y: number, color: string | Vector3 | Vector4): void;
+  /**
+   * Draw a string inside a rectangle with layout and clipping
+   * @param text - The string that will be drawn
+   * @param rect - Layout rectangle in pixels related to the viewport origin
+   * @param color - A CSS color value
+   * @param options - Text layout options
+   */
+  drawText(
+    text: string,
+    rect: Immutable<Rect>,
+    color: string | Vector3 | Vector4,
+    options?: DrawTextLayoutOptions
+  ): void;
   /**
    * Clears the current frame buffer
    * @param clearColor - If not null, the color buffer will be cleared to this value.

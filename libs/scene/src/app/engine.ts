@@ -194,8 +194,6 @@ export class Engine {
   /**
    * Ticks all attached scripts by calling their `onUpdate` hooks, if enabled.
    *
-   * Delegates to {@link ScriptingSystem.update}. No-op when disabled.
-   *
    * @param deltaTime - Time since last update in Seconds.
    * @param elapsedTime - Total elapsed time in Seconds.
    */

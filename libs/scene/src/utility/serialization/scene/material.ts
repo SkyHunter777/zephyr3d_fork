@@ -731,7 +731,7 @@ export function getStandardSpriteMaterialClass(manager: ResourceManager): Serial
             get(value) {
               value.str[0] = manager.getAssetId(this.spriteTexture) ?? '';
             },
-            async set(value) {
+            async set(this: StandardSpriteMaterial, value) {
               if (!value || !value.str[0]) {
                 this.spriteTexture = null;
               } else {

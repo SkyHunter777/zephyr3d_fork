@@ -98,6 +98,8 @@ export type PropertyAccessorOptions = {
   minValue?: number;
   /** Maximum numeric value (for sliders/spinners). */
   maxValue?: number;
+  /** Whether string property is multiline. */
+  multiline?: boolean;
   /** Step/speed for numeric editing UI. */
   speed?: number;
   /** Whether the property can be animated/keyframed. */

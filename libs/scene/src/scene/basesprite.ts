@@ -24,7 +24,7 @@ export class BaseSprite<M extends SpriteMaterial>
   /** @internal */
   private static _primitive: DRef<Primitive> = new DRef();
   /** @internal */
-  private readonly _material: DRef<M>;
+  protected readonly _material: DRef<M>;
   /** @internal */
   protected _instanceHash: Nullable<string>;
   /** @internal */

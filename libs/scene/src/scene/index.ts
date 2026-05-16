@@ -5,6 +5,7 @@ export * from './light';
 export * from './mesh';
 export * from './basesprite';
 export * from './sprite';
+export * from './textsprite';
 export * from './water';
 export * from './octree';
 export * from './scene_node';

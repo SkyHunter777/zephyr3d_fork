@@ -856,6 +856,7 @@ export class PropertyEditor extends Observable<{
           labels: string[];
           values: any[];
         };
+        multiline?: boolean;
         speed?: number;
         minValue?: number;
         maxValue?: number;
@@ -943,7 +944,18 @@ export class PropertyEditor extends Observable<{
           }
         } else {
           const val = tmpProperty.str as [string];
-          changed = customTextInput('##value', val, '', readonly ? CustomInputTextFlags.ReadOnly : 0);
+          changed = value.options?.multiline
+            ? customTextInput(
+                '##value',
+                val,
+                '',
+                readonly
+                  ? CustomInputTextFlags.ReadOnly | CustomInputTextFlags.Multiline
+                  : CustomInputTextFlags.Multiline,
+                -1,
+                100
+              )
+            : customTextInput('##value', val, '', readonly ? CustomInputTextFlags.ReadOnly : 0);
         }
         break;
       }
@@ -1212,7 +1224,18 @@ export class PropertyEditor extends Observable<{
                 ImGui.SetKeyboardFocusHere();
                 this._pendingStringEditorFocus = null;
               }
-              changed = customTextInput('##value', val, '', readonly ? CustomInputTextFlags.ReadOnly : 0);
+              changed = value.options?.multiline
+                ? customTextInput(
+                    '##value',
+                    val,
+                    '',
+                    readonly
+                      ? CustomInputTextFlags.ReadOnly | CustomInputTextFlags.Multiline
+                      : CustomInputTextFlags.Multiline,
+                    -1,
+                    100
+                  )
+                : customTextInput('##value', val, '', readonly ? CustomInputTextFlags.ReadOnly : 0);
             } else {
               const clicked = this.renderClippedStringField(
                 '##value_display',

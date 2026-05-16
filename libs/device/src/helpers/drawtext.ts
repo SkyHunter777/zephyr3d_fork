@@ -1,12 +1,28 @@
-import type { Immutable, Nullable } from '@zephyr3d/base';
+import type { Immutable, Nullable, Rect } from '@zephyr3d/base';
 import { Matrix4x4, parseColor, splitStringByGraphemes, Vector3, Vector4 } from '@zephyr3d/base';
 import { Font } from './font';
 import { GlyphManager } from './glyphmanager';
 import type { RenderStateSet } from '../render_states';
-import type { AbstractDevice } from '../base_types';
+import type {
+  AbstractDevice,
+  DrawTextLayoutOptions,
+  TextHorizontalAlignment,
+  TextVerticalAlignment
+} from '../base_types';
 import type { BindGroup, GPUProgram, StructuredBuffer, VertexLayout } from '../gpuobject';
 
 const MAX_GLYPH_COUNT = 1024;
+
+type TextLayoutLine = {
+  text: string;
+  width: number;
+};
+
+type ResolvedTextLayoutOptions = {
+  halign: TextHorizontalAlignment;
+  valign: TextVerticalAlignment;
+  wordWrap: boolean;
+};
 
 /**
  * Helper class to draw some text onto the screen
@@ -36,17 +52,21 @@ export class DrawText {
   /** @internal */
   private static font: Nullable<Font> = null;
   /** @internal */
+  private static overrideRenderStates: Nullable<RenderStateSet> = null;
+  /** @internal */
   private static vertexCache: Nullable<Float32Array<ArrayBuffer>> = null;
   /** @internal */
   private static readonly colorValue: Vector4 = new Vector4();
   /** @internal */
-  private static calculateTextMatrix(
-    device: AbstractDevice,
-    matrix: Matrix4x4,
-    viewport?: Immutable<number[]>
-  ) {
-    const viewportWidth = viewport ? viewport[2] : device.getViewport().width;
-    const viewportHeight = viewport ? viewport[3] : device.getViewport().height;
+  private static readonly defaultLayoutOptions: ResolvedTextLayoutOptions = {
+    halign: 'left',
+    valign: 'top',
+    wordWrap: false
+  };
+  /** @internal */
+  private static calculateTextMatrix(device: AbstractDevice, matrix: Matrix4x4) {
+    const viewportWidth = device.getViewport().width;
+    const viewportHeight = device.getViewport().height;
     matrix.identity();
     const projectionMatrix = Matrix4x4.ortho(0, viewportWidth, 0, viewportHeight, 1, 100);
     const flipMatrix = Matrix4x4.translation(new Vector3(0, viewportHeight, 0)).scaleRight(
@@ -59,9 +79,16 @@ export class DrawText {
    * @param device - The render device
    * @param name - The font name
    */
-  static setFont(device: AbstractDevice, name: string) {
+  static setFont(device: AbstractDevice, name: Nullable<string>) {
     const scale = device.getScaleY();
-    this.font = Font.fetchFont(name, scale) || Font.fetchFont('12px arial', scale);
+    this.font = name ? Font.fetchFont(name, scale) : Font.fetchFont('12px arial', scale);
+  }
+  /**
+   * Set render states to be used when drawing text. If not set, default states will be used.
+   * @param renderStates - The render states to use when drawing text. If null, default states will be used.
+   */
+  static setRenderStates(renderStates: Nullable<RenderStateSet>) {
+    this.overrideRenderStates = renderStates ?? null;
   }
   /**
    * Draw text onto the screen
@@ -74,44 +101,112 @@ export class DrawText {
   static drawText(
     device: AbstractDevice,
     text: string,
-    color: string,
+    color: string | Vector3 | Vector4,
     x: number,
-    y: number,
-    viewport?: Immutable<number[]>
+    y: number
+  ): void;
+  /**
+   * Draw text inside a rectangle with layout and clipping
+   * @param device - The render device
+   * @param text - The text to be drawn
+   * @param color - The text color
+   * @param rect - The layout rectangle
+   * @param options - Layout options
+   */
+  static drawText(
+    device: AbstractDevice,
+    text: string,
+    color: string | Vector3 | Vector4,
+    rect: Immutable<Rect>,
+    options?: DrawTextLayoutOptions
+  ): void;
+  static drawText(
+    device: AbstractDevice,
+    text: string,
+    color: string | Vector3 | Vector4,
+    xOrRect: number | Immutable<Rect>,
+    yOrOptions?: number | DrawTextLayoutOptions
   ) {
-    if (text.length > 0) {
-      device.pushDeviceStates();
-      this.prepareDrawText(device);
-      this.calculateTextMatrix(device, this.textMatrix, viewport);
-      const colorValue = parseColor(color);
-      this.colorValue.x = colorValue.r;
-      this.colorValue.y = colorValue.g;
-      this.colorValue.z = colorValue.b;
-      this.colorValue.w = colorValue.a;
-      this.textBindGroup!.setValue('flip', device.type === 'webgpu' && device.getFramebuffer() ? 1 : 0);
-      this.textBindGroup!.setValue('srgbOut', device.getFramebuffer() ? 0 : 1);
-      this.textBindGroup!.setValue('textMatrix', this.textMatrix);
-      this.textBindGroup!.setValue('textColor', this.colorValue);
-      device.setProgram(this.textProgram!);
-      device.setVertexLayout(this.textVertexLayout!);
-      device.setRenderStates(this.textRenderStates!);
-      device.setBindGroup(0, this.textBindGroup!);
-      let drawn = 0;
-      const splitted = splitStringByGraphemes(text);
-      const total = splitted.length;
-      while (drawn < total) {
-        const count = Math.min(total - drawn, this.GLYPH_COUNT - this.textOffset);
-        if (count > 0) {
-          x = this.drawTextNoOverflow(device, splitted, drawn, count, x, y);
-          drawn += count;
-          this.textOffset += count;
-        }
-        if (this.GLYPH_COUNT === this.textOffset) {
-          this.textOffset = 0;
-          device.flush();
+    this.colorToVec4(color, this.colorValue);
+    if (typeof xOrRect === 'number') {
+      if (text.length > 0) {
+        device.pushDeviceStates();
+        try {
+          this.beginDrawText(device);
+          this.drawPreparedText(device, text, xOrRect, yOrOptions as number);
+        } finally {
+          device.popDeviceStates();
         }
       }
-      device.popDeviceStates();
+      return;
+    }
+    this.drawTextRect(device, text, xOrRect, yOrOptions as DrawTextLayoutOptions);
+  }
+  /** @internal */
+  private static drawTextRect(
+    device: AbstractDevice,
+    text: string,
+    rect: Immutable<Rect>,
+    options?: DrawTextLayoutOptions
+  ) {
+    if (text.length > 0 && rect.width > 0 && rect.height > 0) {
+      device.pushDeviceStates();
+      try {
+        this.beginDrawText(device);
+        const viewport = device.getViewport();
+        const resolved = this.resolveLayoutOptions(options);
+        const lines = this.layoutText(text, rect.width, resolved.wordWrap);
+        if (lines.length === 0) {
+          return;
+        }
+        const lineHeight = this.font!.maxHeight;
+        const blockHeight = lines.length * lineHeight;
+        let startY = rect.y;
+        if (resolved.valign === 'center') {
+          startY += (rect.height - blockHeight) * 0.5;
+        } else if (resolved.valign === 'bottom') {
+          startY += rect.height - blockHeight;
+        }
+        const absoluteScissorRect = {
+          x: viewport.x + rect.x,
+          y: viewport.y + viewport.height - rect.y - rect.height,
+          width: rect.width,
+          height: rect.height
+        };
+        const currentScissor = device.getScissor();
+        const clipX = Math.max(absoluteScissorRect.x, currentScissor.x);
+        const clipY = Math.max(absoluteScissorRect.y, currentScissor.y);
+        const clipRight = Math.min(
+          absoluteScissorRect.x + absoluteScissorRect.width,
+          currentScissor.x + currentScissor.width
+        );
+        const clipBottom = Math.min(
+          absoluteScissorRect.y + absoluteScissorRect.height,
+          currentScissor.y + currentScissor.height
+        );
+        const clipWidth = Math.max(0, clipRight - clipX);
+        const clipHeight = Math.max(0, clipBottom - clipY);
+        if (clipWidth <= 0 || clipHeight <= 0) {
+          return;
+        }
+        device.setScissor([clipX, clipY, clipWidth, clipHeight]);
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          const lineY = startY + i * lineHeight;
+          if (lineY + lineHeight <= rect.y || lineY >= rect.y + rect.height) {
+            continue;
+          }
+          let lineX = rect.x;
+          if (resolved.halign === 'center') {
+            lineX += (rect.width - line.width) * 0.5;
+          } else if (resolved.halign === 'right') {
+            lineX += rect.width - line.width;
+          }
+          this.drawPreparedText(device, line.text, lineX, lineY);
+        }
+      } finally {
+        device.popDeviceStates();
+      }
     }
   }
   /** @internal */
@@ -171,6 +266,128 @@ export class DrawText {
     this.textBindGroup!.setTexture('tex', this.glyphManager!.getAtlasTexture(atlasIndex)!);
     device.draw('triangle-list', (this.textOffset + drawn) * 6, (i - drawn) * 6);
     return x;
+  }
+  /** @internal */
+  private static colorToVec4(color: string | Vector3 | Vector4, out: Vector4): Vector4 {
+    if (typeof color === 'string') {
+      const colorValue = parseColor(color);
+      out.setXYZW(colorValue.r, colorValue.g, colorValue.b, colorValue.a);
+    } else if (color instanceof Vector3) {
+      out.setXYZW(color.x, color.y, color.z, 1);
+    } else {
+      out.set(color);
+    }
+    return out;
+  }
+  /** @internal */
+  private static beginDrawText(device: AbstractDevice) {
+    this.prepareDrawText(device);
+    this.calculateTextMatrix(device, this.textMatrix);
+    this.textBindGroup!.setValue('flip', device.type === 'webgpu' && device.getFramebuffer() ? 1 : 0);
+    this.textBindGroup!.setValue('srgbOut', device.getFramebuffer() ? 0 : 1);
+    this.textBindGroup!.setValue('textMatrix', this.textMatrix);
+    this.textBindGroup!.setValue('textColor', this.colorValue);
+    device.setProgram(this.textProgram!);
+    device.setVertexLayout(this.textVertexLayout!);
+    device.setRenderStates(this.overrideRenderStates ?? this.textRenderStates!);
+    device.setBindGroup(0, this.textBindGroup!);
+  }
+  /** @internal */
+  private static drawPreparedText(device: AbstractDevice, text: string, x: number, y: number) {
+    let drawn = 0;
+    const splitted = splitStringByGraphemes(text);
+    const total = splitted.length;
+    while (drawn < total) {
+      const count = Math.min(total - drawn, this.GLYPH_COUNT - this.textOffset);
+      if (count > 0) {
+        x = this.drawTextNoOverflow(device, splitted, drawn, count, x, y);
+        drawn += count;
+        this.textOffset += count;
+      }
+      if (this.GLYPH_COUNT === this.textOffset) {
+        this.textOffset = 0;
+        device.flush();
+      }
+    }
+  }
+  /** @internal */
+  private static resolveLayoutOptions(options?: DrawTextLayoutOptions): ResolvedTextLayoutOptions {
+    return {
+      halign: options?.halign ?? this.defaultLayoutOptions.halign,
+      valign: options?.valign ?? this.defaultLayoutOptions.valign,
+      wordWrap: options?.wordWrap ?? this.defaultLayoutOptions.wordWrap
+    };
+  }
+  /** @internal */
+  private static layoutText(text: string, maxWidth: number, wordWrap: boolean): TextLayoutLine[] {
+    const result: TextLayoutLine[] = [];
+    const paragraphs = text.split(/\r\n|\r|\n/);
+    for (const paragraph of paragraphs) {
+      if (!wordWrap) {
+        result.push({
+          text: paragraph,
+          width: this.measureLineWidth(paragraph)
+        });
+        continue;
+      }
+      this.layoutWrappedParagraph(paragraph, maxWidth, result);
+    }
+    return result;
+  }
+  /** @internal */
+  private static layoutWrappedParagraph(text: string, maxWidth: number, out: TextLayoutLine[]) {
+    if (text.length === 0) {
+      out.push({ text: '', width: 0 });
+      return;
+    }
+    const chars = splitStringByGraphemes(text);
+    let start = 0;
+    while (start < chars.length) {
+      let width = 0;
+      let breakPos = start;
+      let lastWhitespaceBreak = -1;
+      while (breakPos < chars.length) {
+        const ch = chars[breakPos];
+        const charWidth = this.glyphManager!.getCharWidth(ch, this.font!);
+        if (breakPos > start && width + charWidth > maxWidth) {
+          break;
+        }
+        width += charWidth;
+        breakPos++;
+        if (/^\s$/u.test(ch)) {
+          lastWhitespaceBreak = breakPos;
+        }
+      }
+      if (breakPos < chars.length && lastWhitespaceBreak > start) {
+        const lineText = chars.slice(start, lastWhitespaceBreak).join('').replace(/\s+$/u, '');
+        out.push({
+          text: lineText,
+          width: this.measureLineWidth(lineText)
+        });
+        start = lastWhitespaceBreak;
+        while (start < chars.length && /^\s$/u.test(chars[start])) {
+          start++;
+        }
+      } else {
+        const lineText = chars.slice(start, breakPos).join('');
+        out.push({
+          text: lineText,
+          width
+        });
+        start = Math.max(breakPos, start + 1);
+      }
+    }
+  }
+  /** @internal */
+  private static measureLineWidth(text: string) {
+    if (!text) {
+      return 0;
+    }
+    let width = 0;
+    for (const ch of splitStringByGraphemes(text)) {
+      width += this.glyphManager!.getCharWidth(ch, this.font!);
+    }
+    return width;
   }
   /** @internal */
   private static prepareDrawText(device: AbstractDevice) {

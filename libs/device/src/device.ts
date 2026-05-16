@@ -1,4 +1,4 @@
-import type { Immutable, Nullable } from '@zephyr3d/base';
+import type { Immutable, Nullable, Rect, Vector3 } from '@zephyr3d/base';
 import { type Vector4, type TypedArray, type IEventTarget, Observable } from '@zephyr3d/base';
 import type { ITimer } from './timer';
 import { CPUTimer } from './timer';
@@ -58,7 +58,8 @@ import type {
   AbstractDevice,
   DeviceOptions,
   DeviceEventMap,
-  DeviceViewport
+  DeviceViewport,
+  DrawTextLayoutOptions
 } from './base_types';
 import { DrawText } from './helpers';
 import { Pool } from './pool';
@@ -499,11 +500,43 @@ export abstract class BaseDevice extends Observable<DeviceEventMap> {
     }
     return pool;
   }
-  setFont(fontName: string) {
+  setFont(fontName: Nullable<string>) {
     DrawText.setFont(this, fontName);
   }
-  drawText(text: string, x: number, y: number, color: string, viewport?: Immutable<number[]>) {
-    DrawText.drawText(this, text, color, x, y, viewport);
+  setTextRenderStates(renderStates: Nullable<RenderStateSet>) {
+    DrawText.setRenderStates(renderStates);
+  }
+  drawText(text: string, x: number, y: number, color: string | Vector3 | Vector4): void;
+  drawText(
+    text: string,
+    rect: Immutable<Rect>,
+    color: string | Vector3 | Vector4,
+    options?: DrawTextLayoutOptions
+  ): void;
+  drawText(
+    text: string,
+    xOrRect: number | Immutable<Rect>,
+    yOrColor: number | string | Vector3 | Vector4,
+    colorOrOptions?: string | Vector3 | Vector4 | DrawTextLayoutOptions,
+    options?: DrawTextLayoutOptions
+  ) {
+    if (typeof xOrRect === 'number') {
+      DrawText.drawText(
+        this,
+        text,
+        colorOrOptions as string | Vector3 | Vector4,
+        xOrRect,
+        yOrColor as number
+      );
+    } else {
+      DrawText.drawText(
+        this,
+        text,
+        yOrColor as string | Vector3 | Vector4,
+        xOrRect,
+        options ?? (colorOrOptions as DrawTextLayoutOptions)
+      );
+    }
   }
   setFramebuffer(rt: Nullable<FrameBuffer>): void;
   setFramebuffer(color: BaseTexture[], depth?: BaseTexture, sampleCount?: number): void;
