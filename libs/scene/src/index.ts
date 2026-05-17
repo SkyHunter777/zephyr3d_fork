@@ -15,6 +15,7 @@ export * from './shapes';
 export * from './render';
 export * from './material';
 export * from './render';
+export * from './text';
 export * from './scene';
 export * from './animation';
 export * from './camera';

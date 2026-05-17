@@ -1,7 +1,8 @@
 import type { Scene } from './scene';
 import { StandardSpriteMaterial } from '../material/sprite_std';
 import { BaseSprite } from './basesprite';
-import { Immutable, Nullable, Vector3 } from '@zephyr3d/base';
+import type { Immutable, Nullable } from '@zephyr3d/base';
+import { Vector3 } from '@zephyr3d/base';
 import { Vector2, Vector4 } from '@zephyr3d/base';
 import type { RenderStateSet } from '@zephyr3d/device';
 import { getDevice } from '../app/api';

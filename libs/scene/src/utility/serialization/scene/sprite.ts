@@ -5,8 +5,9 @@ import { defineProps, type SerializableClass } from '../types';
 import { meshInstanceClsMap } from './common';
 import { Sprite } from '../../../scene/sprite';
 import { SpriteMaterial } from '../../../material/sprite';
-import { Vector2, Vector3, Vector4 } from '@zephyr3d/base';
+import { Vector2, Vector3 } from '@zephyr3d/base';
 import { TextSprite } from '../../../scene/textsprite';
+import { SDFTextSprite } from '../../../scene/sdftextsprite';
 
 /** @internal */
 export function getSpriteClass(): SerializableClass {
@@ -216,6 +217,99 @@ export function getTextSpriteClass(): SerializableClass {
             value.num[2] = c.z;
           },
           set(this: TextSprite, value) {
+            this.textColor = new Vector3(value.num[0], value.num[1], value.num[2]);
+          }
+        }
+      ]);
+    }
+  };
+}
+
+/** @internal */
+export function getSDFTextSpriteClass(): SerializableClass {
+  return {
+    ctor: SDFTextSprite,
+    name: 'SDFTextSprite',
+    parent: GraphNode,
+    noTitle: true,
+    createFunc(ctx: SceneNode) {
+      const node = new SDFTextSprite(ctx.scene!);
+      node.parent = ctx;
+      return { obj: node };
+    },
+    getProps() {
+      return defineProps([
+        {
+          name: 'Anchor',
+          description: 'Sprite pivot in normalized UV space',
+          type: 'vec2',
+          default: [0.5, 0.5],
+          get(this: Sprite, value) {
+            value.num[0] = this.anchorX;
+            value.num[1] = this.anchorY;
+          },
+          set(this: Sprite, value) {
+            this.anchorX = value.num[0];
+            this.anchorY = value.num[1];
+          }
+        },
+        {
+          name: 'Resolution',
+          description: 'Text render target resolution',
+          type: 'int2',
+          options: {
+            minValue: 1,
+            maxValue: 4096
+          },
+          default: [128, 128],
+          get(this: SDFTextSprite, value) {
+            value.num[0] = this.resolutionX;
+            value.num[1] = this.resolutionY;
+          },
+          set(this: SDFTextSprite, value) {
+            this.resolutionX = value.num[0];
+            this.resolutionY = value.num[1];
+          }
+        },
+        {
+          name: 'Font',
+          description: 'Canvas font string (e.g. "12px arial")',
+          type: 'string',
+          default: '12px arial',
+          get(this: SDFTextSprite, value) {
+            value.str[0] = this.font;
+          },
+          set(this: SDFTextSprite, value) {
+            this.font = value.str[0];
+          }
+        },
+        {
+          name: 'Text',
+          description: 'Displayed text content',
+          type: 'string',
+          default: '',
+          options: {
+            multiline: true
+          },
+          get(this: SDFTextSprite, value) {
+            value.str[0] = this.text;
+          },
+          set(this: SDFTextSprite, value) {
+            this.text = value.str[0];
+          }
+        },
+        {
+          name: 'TextColor',
+          description: 'Color of the rendered text',
+          type: 'rgb',
+          default: [1, 1, 1],
+          get(this: SDFTextSprite, value) {
+            const c = this.textColor;
+            value.num[0] = c.x;
+            value.num[1] = c.y;
+            value.num[2] = c.z;
+          },
+          set(this: SDFTextSprite, value) {
             this.textColor = new Vector3(value.num[0], value.num[1], value.num[2]);
           }
         }

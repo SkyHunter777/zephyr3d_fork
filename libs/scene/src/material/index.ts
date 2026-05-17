@@ -12,6 +12,8 @@ export * from './pbrsg';
 export * from './pbrblueprint';
 export * from './sprite';
 export * from './sprite_std';
+export * from './sprite_sdf';
+export * from './msdf_text';
 export * from './spriteblueprint';
 export * from './mixins/pbr/common';
 export * from './mixins/lightmodel/pbrmetallicroughness';

@@ -187,7 +187,7 @@ import type { BlueprintDAG, GraphStructure, IGraphNode, NodeConnection } from '.
 import type { Material, MeshMaterial, PBRBluePrintMaterial } from '../../material';
 import type { Primitive } from '../../render';
 import { FunctionCallNode, FunctionInputNode, FunctionOutputNode } from '../blueprint/material/func';
-import { getSpriteClass, getTextSpriteClass } from './scene/sprite';
+import { getSDFTextSpriteClass, getSpriteClass, getTextSpriteClass } from './scene/sprite';
 
 const defaultValues: Record<PropertyType, any> = {
   bool: false,
@@ -280,6 +280,7 @@ export class ResourceManager {
         getMeshClass(),
         getSpriteClass(),
         getTextSpriteClass(),
+        getSDFTextSpriteClass(),
         getWaterClass(this),
         getTerrainClass(this),
         getFFTWaveGeneratorClass(),
@@ -659,6 +660,19 @@ export class ResourceManager {
       this._allocated.set(data, id);
     }
     return data;
+  }
+  /**
+   * Fetch a text asset by ID via the asset manager.
+   *
+   * @param id - Asset identifier or path.
+   * @returns A Promise that resolves to the font asset, or `null` if not found.
+   */
+  async fetchFontAsset(id: string) {
+    const fontAsset = await this._assetManager.fetchFontAsset(id);
+    if (fontAsset) {
+      this._allocated.set(fontAsset, id);
+    }
+    return fontAsset;
   }
   /**
    * Serialize an object to a JSON structure using registered class metadata.

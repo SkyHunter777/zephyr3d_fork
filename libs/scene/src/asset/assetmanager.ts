@@ -48,6 +48,7 @@ import { BoundingBox } from '../utility/bounding_volume';
 import { MaterialBlueprintIR } from '../utility/blueprint/material/ir';
 import type { Skeleton } from '../animation';
 import { Primitive } from '../render';
+import { FontAsset } from '../text';
 
 /**
  * Options for texture fetching.
@@ -172,6 +173,10 @@ export class AssetManager {
     [url: string]: Promise<Nullable<ArrayBuffer>>;
   };
   /** @internal */
+  private _fontAssets: {
+    [url: string]: Promise<Nullable<FontAsset>>;
+  };
+  /** @internal */
   private _textDatas: {
     [url: string]: Promise<string>;
   };
@@ -209,6 +214,7 @@ export class AssetManager {
     this._skeletons = {};
     this._bluePrints = {};
     this._binaryDatas = {};
+    this._fontAssets = {};
     this._textDatas = {};
     this._jsonDatas = {};
   }
@@ -262,6 +268,7 @@ export class AssetManager {
       }
     }
     this._skeletons = {};
+    this._fontAssets = {};
     this._binaryDatas = {};
     this._textDatas = {};
     this._jsonDatas = {};
@@ -362,6 +369,34 @@ export class AssetManager {
     if (!P) {
       P = this.loadBinaryData(url, postProcess, VFSs);
       this._binaryDatas[hash] = P;
+    }
+    return P;
+  }
+  /**
+   * Fetch a font asset via VFS.
+   *
+   * - Cached per resolved URL. Post-process is applied only on first load for a given key.
+   *
+   * @param url - Resource URL or VFS path.
+   * @param httpRequest - Optional HttpRequest for custom URL resolution/headers.
+   * @returns A promise that resolves to the loaded (and optionally processed) font asset.
+   */
+  async fetchFontAsset(url: string, httpRequest?: Nullable<HttpRequest>, VFSs?: VFS[]) {
+    const hash = httpRequest?.urlResolver?.(url) ?? url;
+    let P = this._fontAssets[hash];
+    if (!P) {
+      P = new Promise<Nullable<FontAsset>>((resolve, reject) => {
+        this.loadBinaryData(url, null, VFSs)
+          .then((data) => {
+            resolve(data ? FontAsset.fromBuffer(data) : null);
+          })
+          .catch((err) => {
+            reject(
+              new Error(`Failed to load font asset from ${url}: ${err instanceof Error ? err.message : err}`)
+            );
+          });
+      });
+      this._fontAssets[hash] = P;
     }
     return P;
   }
