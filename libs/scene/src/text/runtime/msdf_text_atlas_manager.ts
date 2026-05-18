@@ -2,8 +2,8 @@ import { getDevice } from '../../app/api';
 import type { FontAsset } from '../font';
 import { MSDFGlyphAtlas } from './msdf_glyph_atlas';
 
-const DEFAULT_DISTANCE_RANGE = 6;
-const DEFAULT_PADDING = 2;
+const DEFAULT_DISTANCE_RANGE = 8;
+const DEFAULT_PADDING = 6;
 
 export class MSDFTextAtlasManager {
   private readonly _atlases: Map<FontAsset, MSDFGlyphAtlas>;

@@ -77,7 +77,7 @@ const MORE_COMPONENTS = 1 << 5;
 const WE_HAVE_AN_X_AND_Y_SCALE = 1 << 6;
 const WE_HAVE_A_TWO_BY_TWO = 1 << 7;
 const DEFAULT_MSDF_ATLAS_PAGE_SIZE = 1024;
-const DEFAULT_MSDF_GLYPH_SIZE = 64;
+const DEFAULT_MSDF_GLYPH_SIZE = 32;
 
 /**
  * Minimal runtime font asset for TrueType outlines.
