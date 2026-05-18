@@ -48,7 +48,7 @@ import { BoundingBox } from '../utility/bounding_volume';
 import { MaterialBlueprintIR } from '../utility/blueprint/material/ir';
 import type { Skeleton } from '../animation';
 import { Primitive } from '../render';
-import { FontAsset } from '../text';
+import { FontAsset, type FontAssetFetchOptions } from '../text';
 
 /**
  * Options for texture fetching.
@@ -174,7 +174,7 @@ export class AssetManager {
   };
   /** @internal */
   private _fontAssets: {
-    [url: string]: Promise<Nullable<FontAsset>>;
+    [url: string]: Nullable<FontAsset> | Promise<Nullable<FontAsset>>;
   };
   /** @internal */
   private _textDatas: {
@@ -272,6 +272,21 @@ export class AssetManager {
     this._binaryDatas = {};
     this._textDatas = {};
     this._jsonDatas = {};
+  }
+  /**
+   * Removes a cached font asset entry by URL.
+   *
+   * This only evicts the cache entry. It does not dispose any external references to the FontAsset.
+   *
+   * @param url - Resource URL or VFS path.
+   * @returns `true` if a cache entry existed and was removed.
+   */
+  releaseFontAsset(url: string) {
+    if (url in this._fontAssets) {
+      delete this._fontAssets[url];
+      return true;
+    }
+    return false;
   }
   /**
    * Register a texture loader (highest priority first).
@@ -375,20 +390,22 @@ export class AssetManager {
   /**
    * Fetch a font asset via VFS.
    *
-   * - Cached per resolved URL. Post-process is applied only on first load for a given key.
+   * - Cached per URL only.
+   * - `options` are applied only when the font is first loaded for that URL.
+   * - If the URL is already cached, later calls ignore `options` and reuse the cached FontAsset.
    *
    * @param url - Resource URL or VFS path.
-   * @param httpRequest - Optional HttpRequest for custom URL resolution/headers.
+   * @param options - Optional MSDF atlas settings bound to the loaded FontAsset.
    * @returns A promise that resolves to the loaded (and optionally processed) font asset.
    */
-  async fetchFontAsset(url: string, httpRequest?: Nullable<HttpRequest>, VFSs?: VFS[]) {
-    const hash = httpRequest?.urlResolver?.(url) ?? url;
+  async fetchFontAsset(url: string, options?: FontAssetFetchOptions, VFSs?: VFS[]) {
+    const hash = url;
     let P = this._fontAssets[hash];
     if (!P) {
       P = new Promise<Nullable<FontAsset>>((resolve, reject) => {
         this.loadBinaryData(url, null, VFSs)
           .then((data) => {
-            resolve(data ? FontAsset.fromBuffer(data) : null);
+            resolve(data ? FontAsset.fromBuffer(data, options) : null);
           })
           .catch((err) => {
             reject(
@@ -399,6 +416,15 @@ export class AssetManager {
       this._fontAssets[hash] = P;
     }
     return P;
+  }
+  /**
+   * Fetch a font asset via VFS if already cached.
+   * @param url - Resource URL or VFS path.
+   * @returns The cached FontAsset if it exists and is loaded, or null if not cached or still loading.
+   */
+  getFontAsset(url: string): Nullable<FontAsset> {
+    const hash = url;
+    return this._fontAssets[hash] instanceof Promise ? null : (this._fontAssets[hash] ?? null);
   }
   async fetchBluePrint(url: string, VFSs?: VFS[]) {
     const hash = url;

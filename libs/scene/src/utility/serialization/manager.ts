@@ -58,6 +58,7 @@ import type { Scene } from '../../scene';
 import { SceneNode } from '../../scene';
 import type { PropertyTrack } from '../../animation';
 import type { ModelFetchOptions, TextureFetchOptions } from '../../asset';
+import type { FontAsset, FontAssetFetchOptions } from '../../text';
 import { AssetManager } from '../../asset';
 import type { BaseTexture, SamplerOptions, Texture2D, Texture2DArray, TextureCube } from '@zephyr3d/device';
 import {
@@ -187,7 +188,7 @@ import type { BlueprintDAG, GraphStructure, IGraphNode, NodeConnection } from '.
 import type { Material, MeshMaterial, PBRBluePrintMaterial } from '../../material';
 import type { Primitive } from '../../render';
 import { FunctionCallNode, FunctionInputNode, FunctionOutputNode } from '../blueprint/material/func';
-import { getSDFTextSpriteClass, getSpriteClass, getTextSpriteClass } from './scene/sprite';
+import { getMSDFTextSpriteClass, getSpriteClass, getTextSpriteClass } from './scene/sprite';
 
 const defaultValues: Record<PropertyType, any> = {
   bool: false,
@@ -280,7 +281,7 @@ export class ResourceManager {
         getMeshClass(),
         getSpriteClass(),
         getTextSpriteClass(),
-        getSDFTextSpriteClass(),
+        getMSDFTextSpriteClass(),
         getWaterClass(this),
         getTerrainClass(this),
         getFFTWaveGeneratorClass(),
@@ -650,11 +651,12 @@ export class ResourceManager {
    * - Associates the returned data with the given ID for future reverse lookup.
    * - The ID is typically a VFS path or locator.
    *
-   * @param id - Asset identifier or path.
+   * @param path - VFS path of the binary asset.
    *
    * @returns A Promise that resolves to the binary content, or `null` if not found.
    */
-  async fetchBinary(id: string) {
+  async fetchBinary(path: string) {
+    const id = this.VFS.normalizePath(path);
     const data = await this._assetManager.fetchBinaryData(id);
     if (data) {
       this._allocated.set(data, id);
@@ -664,15 +666,35 @@ export class ResourceManager {
   /**
    * Fetch a text asset by ID via the asset manager.
    *
-   * @param id - Asset identifier or path.
+   * @param path - VFS path of TTF/OTF file.
    * @returns A Promise that resolves to the font asset, or `null` if not found.
    */
-  async fetchFontAsset(id: string) {
-    const fontAsset = await this._assetManager.fetchFontAsset(id);
+  async fetchFontAsset(path: string, options?: FontAssetFetchOptions) {
+    const id = this.VFS.normalizePath(path);
+    const fontAsset = await this._assetManager.fetchFontAsset(id, options);
     if (fontAsset) {
       this._allocated.set(fontAsset, id);
     }
     return fontAsset;
+  }
+  /**
+   * Get a cached font asset by ID if already loaded.
+   *
+   * @param path - VFS path of TTF/OTF file.
+   * @returns The cached FontAsset if it exists and is loaded, or null if not cached or still loading.
+   */
+  getFontAsset(path: string) {
+    return this._assetManager.getFontAsset(this.VFS.normalizePath(path));
+  }
+  /**
+   * Removes a cached font asset entry by asset instance or asset ID.
+   *
+   * @param asset - Loaded font asset instance or its asset ID/path.
+   * @returns `true` if a cache entry existed and was removed.
+   */
+  releaseFontAsset(asset: FontAsset | string) {
+    const path = typeof asset === 'string' ? asset : this.getAssetId(asset);
+    return path ? this._assetManager.releaseFontAsset(this.VFS.normalizePath(path)) : false;
   }
   /**
    * Serialize an object to a JSON structure using registered class metadata.
@@ -810,13 +832,14 @@ export class ResourceManager {
   /**
    * Load a model by ID and track the allocation for reverse lookup.
    *
-   * @param id - Model identifier or path.
+   * @param path - VFS path of the model file.
    * @param scene - Scene into which the model is loaded.
    * @param options - Optional model fetch options.
    *
    * @returns A Promise resolving to the loaded model object, or `null` if failed.
    */
-  async fetchModel(id: string, scene: Scene, options?: ModelFetchOptions) {
+  async fetchModel(path: string, scene: Scene, options?: ModelFetchOptions) {
+    const id = this.VFS.normalizePath(path);
     const model = await this._assetManager.fetchModel(scene, id, options);
     if (model) {
       this._allocated.set(model.group, id);
@@ -849,15 +872,16 @@ export class ResourceManager {
   /**
    * Load a texture by ID and track the allocation for reverse lookup.
    *
-   * @param id - Texture identifier or path.
+   * @param path - VFS path of the texture file.
    * @param options - Optional texture fetch options.
    *
    * @returns A Promise resolving to the loaded texture, or `null` if failed.
    */
   async fetchTexture<T extends Texture2D | TextureCube | Texture2DArray>(
-    id: string,
+    path: string,
     options?: TextureFetchOptions<T>
   ) {
+    const id = this.VFS.normalizePath(path);
     const texture = await this._assetManager.fetchTexture(id, options);
     if (texture) {
       this._allocated.set(texture, id);
@@ -867,11 +891,12 @@ export class ResourceManager {
   /**
    * Load a material by ID and track the allocation for reverse lookup.
    *
-   * @param id - Material identifier or path.
+   * @param path - VFS path of the material file.
    *
    * @returns A Promise resolving to the loaded material, or `null` if failed.
    */
-  async fetchMaterial<T extends Material = MeshMaterial>(id: string) {
+  async fetchMaterial<T extends Material = MeshMaterial>(path: string) {
+    const id = this.VFS.normalizePath(path);
     const material = await this._assetManager.fetchMaterial<T>(id);
     if (material) {
       this._allocated.set(material, id);
@@ -897,11 +922,12 @@ export class ResourceManager {
   /**
    * Load a primitive by ID and track the allocation for reverse lookup.
    *
-   * @param id - Primitive identifier or path.
+   * @param path - VFS path of the primitive file.
    *
    * @returns A Promise resolving to the loaded primitive, or `null` if failed.
    */
-  async fetchPrimitive<T extends Primitive = Primitive>(id: string) {
+  async fetchPrimitive<T extends Primitive = Primitive>(path: string) {
+    const id = this.VFS.normalizePath(path);
     const primitive = await this._assetManager.fetchPrimitive<T>(id);
     if (primitive) {
       this._allocated.set(primitive, id);

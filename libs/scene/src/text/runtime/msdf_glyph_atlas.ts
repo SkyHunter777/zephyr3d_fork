@@ -78,6 +78,9 @@ export class MSDFGlyphAtlas extends TextureAtlasManager {
     if (!glyph) {
       return null;
     }
+    if (glyph.contours.length === 0 || glyph.xMax <= glyph.xMin || glyph.yMax <= glyph.yMin) {
+      return null;
+    }
     try {
       const info = this.createGlyph(glyph);
       this._glyphs.set(key, info);

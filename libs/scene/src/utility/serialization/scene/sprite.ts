@@ -7,7 +7,7 @@ import { Sprite } from '../../../scene/sprite';
 import { SpriteMaterial } from '../../../material/sprite';
 import { Vector2, Vector3 } from '@zephyr3d/base';
 import { TextSprite } from '../../../scene/textsprite';
-import { SDFTextSprite } from '../../../scene/sdftextsprite';
+import { MSDFTextSprite } from '../../../scene/msdftextsprite';
 
 /** @internal */
 export function getSpriteClass(): SerializableClass {
@@ -226,14 +226,14 @@ export function getTextSpriteClass(): SerializableClass {
 }
 
 /** @internal */
-export function getSDFTextSpriteClass(): SerializableClass {
+export function getMSDFTextSpriteClass(): SerializableClass {
   return {
-    ctor: SDFTextSprite,
-    name: 'SDFTextSprite',
+    ctor: MSDFTextSprite,
+    name: 'MSDFTextSprite',
     parent: GraphNode,
     noTitle: true,
     createFunc(ctx: SceneNode) {
-      const node = new SDFTextSprite(ctx.scene!);
+      const node = new MSDFTextSprite(ctx.scene!);
       node.parent = ctx;
       return { obj: node };
     },
@@ -241,46 +241,88 @@ export function getSDFTextSpriteClass(): SerializableClass {
       return defineProps([
         {
           name: 'Anchor',
-          description: 'Sprite pivot in normalized UV space',
+          description: 'Sprite pivot in normalized layout-box space',
           type: 'vec2',
           default: [0.5, 0.5],
-          get(this: Sprite, value) {
+          get(this: MSDFTextSprite, value) {
             value.num[0] = this.anchorX;
             value.num[1] = this.anchorY;
           },
-          set(this: Sprite, value) {
+          set(this: MSDFTextSprite, value) {
             this.anchorX = value.num[0];
             this.anchorY = value.num[1];
           }
         },
         {
-          name: 'Resolution',
-          description: 'Text render target resolution',
-          type: 'int2',
+          name: 'FontAsset',
+          description: 'Font asset path used to build the runtime MSDF glyph atlas',
+          type: 'object',
+          default: '',
+          options: {
+            mimeTypes: ['font/ttf', 'font/otf']
+          },
+          isNullable() {
+            return true;
+          },
+          get(this: MSDFTextSprite, value) {
+            value.str[0] = this.fontAsset
+              ? (getEngine().resourceManager.getAssetId(this.fontAsset) ?? '')
+              : '';
+          },
+          async set(this: MSDFTextSprite, value) {
+            this.fontAsset = value.str[0]
+              ? await getEngine().resourceManager.fetchFontAsset(value.str[0])
+              : null;
+          }
+        },
+        {
+          name: 'FontSize',
+          description: 'Font size in local-space units before node scaling',
+          type: 'float',
+          default: 32,
           options: {
             minValue: 1,
             maxValue: 4096
           },
-          default: [128, 128],
-          get(this: SDFTextSprite, value) {
-            value.num[0] = this.resolutionX;
-            value.num[1] = this.resolutionY;
+          get(this: MSDFTextSprite, value) {
+            value.num[0] = this.fontSize;
           },
-          set(this: SDFTextSprite, value) {
-            this.resolutionX = value.num[0];
-            this.resolutionY = value.num[1];
+          set(this: MSDFTextSprite, value) {
+            this.fontSize = value.num[0];
           }
         },
         {
-          name: 'Font',
-          description: 'Canvas font string (e.g. "12px arial")',
-          type: 'string',
-          default: '12px arial',
-          get(this: SDFTextSprite, value) {
-            value.str[0] = this.font;
+          name: 'MaxWidth',
+          description: 'Maximum layout width in local-space units, 0 disables wrapping',
+          type: 'float',
+          default: 0,
+          options: {
+            minValue: 0,
+            maxValue: 4096
           },
-          set(this: SDFTextSprite, value) {
-            this.font = value.str[0];
+          get(this: MSDFTextSprite, value) {
+            value.num[0] = this.maxWidth;
+          },
+          set(this: MSDFTextSprite, value) {
+            this.maxWidth = value.num[0];
+          }
+        },
+        {
+          name: 'TextAlign',
+          description: 'Horizontal alignment within the layout width',
+          type: 'string',
+          default: 'left',
+          options: {
+            enum: {
+              labels: ['Left', 'Center', 'Right'],
+              values: ['left', 'center', 'right']
+            }
+          },
+          get(this: MSDFTextSprite, value) {
+            value.str[0] = this.textAlign;
+          },
+          set(this: MSDFTextSprite, value) {
+            this.textAlign = value.str[0] as 'left' | 'center' | 'right';
           }
         },
         {
@@ -291,10 +333,10 @@ export function getSDFTextSpriteClass(): SerializableClass {
           options: {
             multiline: true
           },
-          get(this: SDFTextSprite, value) {
+          get(this: MSDFTextSprite, value) {
             value.str[0] = this.text;
           },
-          set(this: SDFTextSprite, value) {
+          set(this: MSDFTextSprite, value) {
             this.text = value.str[0];
           }
         },
@@ -303,14 +345,46 @@ export function getSDFTextSpriteClass(): SerializableClass {
           description: 'Color of the rendered text',
           type: 'rgb',
           default: [1, 1, 1],
-          get(this: SDFTextSprite, value) {
+          get(this: MSDFTextSprite, value) {
             const c = this.textColor;
             value.num[0] = c.x;
             value.num[1] = c.y;
             value.num[2] = c.z;
           },
-          set(this: SDFTextSprite, value) {
+          set(this: MSDFTextSprite, value) {
             this.textColor = new Vector3(value.num[0], value.num[1], value.num[2]);
+          }
+        },
+        {
+          name: 'OutlineColor',
+          description: 'Color of the SDF outline rendered around the text',
+          type: 'rgb',
+          default: [0, 0, 0],
+          get(this: MSDFTextSprite, value) {
+            const c = this.material.outlineColor;
+            value.num[0] = c.x;
+            value.num[1] = c.y;
+            value.num[2] = c.z;
+          },
+          set(this: MSDFTextSprite, value) {
+            this.material.outlineColor = new Vector3(value.num[0], value.num[1], value.num[2]);
+          }
+        },
+        {
+          name: 'OutlineWidth',
+          description:
+            'Outline thickness in text local-space units; it scales with the text when moving closer or farther',
+          type: 'float',
+          default: 0,
+          options: {
+            minValue: 0,
+            maxValue: 4096
+          },
+          get(this: MSDFTextSprite, value) {
+            value.num[0] = this.material.outlineWidth;
+          },
+          set(this: MSDFTextSprite, value) {
+            this.material.outlineWidth = value.num[0];
           }
         }
       ]);

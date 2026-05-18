@@ -1,4 +1,5 @@
 import type { Nullable } from '@zephyr3d/base';
+import { DRef } from '@zephyr3d/base';
 import { RectsPacker } from '@zephyr3d/base';
 import type { AbstractDevice, TextureFormat } from '../base_types';
 import type { BaseTexture, Texture2D } from '../gpuobject';
@@ -39,7 +40,7 @@ export class TextureAtlasManager {
   /** @internal */
   protected _linearSpace: boolean;
   /** @internal */
-  protected _atlasList: Partial<Texture2D[]>;
+  protected _atlasList: DRef<Texture2D>[];
   /** @internal */
   protected _atlasInfoMap: Partial<Record<string, AtlasInfo>>;
   /** @internal */
@@ -85,7 +86,7 @@ export class TextureAtlasManager {
    * @returns Atlas texture for given index
    */
   getAtlasTexture(index: number) {
-    return this._atlasList[index];
+    return this._atlasList[index]?.get() ?? undefined;
   }
   /**
    * Gets the information about specified atlas
@@ -202,9 +203,9 @@ export class TextureAtlasManager {
     let textureAtlas: Texture2D;
     if (atlasIndex === this._atlasList.length) {
       textureAtlas = this._createAtlasTexture();
-      this._atlasList.push(textureAtlas);
+      this._atlasList.push(new DRef(textureAtlas));
     } else {
-      textureAtlas = this._atlasList[atlasIndex]!;
+      textureAtlas = this._atlasList[atlasIndex]!.get()!;
     }
     textureAtlas.updateFromElement(ctx.canvas, x, y, xOffset, yOffset, w, h);
   }
@@ -213,9 +214,9 @@ export class TextureAtlasManager {
     let textureAtlas: Texture2D;
     if (atlasIndex === this._atlasList.length) {
       textureAtlas = this._createAtlasTexture();
-      this._atlasList.push(textureAtlas);
+      this._atlasList.push(new DRef(textureAtlas));
     } else {
-      textureAtlas = this._atlasList[atlasIndex]!;
+      textureAtlas = this._atlasList[atlasIndex]!.get()!;
     }
     if (bitmap instanceof ImageBitmap) {
       textureAtlas.updateFromElement(bitmap, x, y, 0, 0, bitmap.width, bitmap.height);

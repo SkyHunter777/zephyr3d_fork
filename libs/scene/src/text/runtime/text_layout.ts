@@ -2,21 +2,32 @@ import { splitStringByGraphemes } from '@zephyr3d/base';
 import type { FontAsset } from '../font';
 import type { MSDFGlyphAtlas, MSDFGlyphInfo } from './msdf_glyph_atlas';
 
+export type TextAlign = 'left' | 'center' | 'right';
+
 export type LayoutGlyph = {
   char: string;
   glyphIndex: number;
   atlasGlyph: MSDFGlyphInfo;
+  lineIndex: number;
   x: number;
   y: number;
   xOffset: number;
   advance: number;
 };
 
+export type TextLayoutLine = {
+  width: number;
+  glyphStart: number;
+  glyphEnd: number;
+};
+
 export type TextLayoutResult = {
   glyphs: LayoutGlyph[];
   width: number;
+  boxWidth: number;
   height: number;
   lineHeight: number;
+  lines: TextLayoutLine[];
 };
 
 export function layoutText(
@@ -29,17 +40,27 @@ export function layoutText(
   const scale = fontSize / font.metrics.unitsPerEm;
   const lineHeight = (font.metrics.ascent - font.metrics.descent + font.metrics.lineGap) * scale;
   const glyphs: LayoutGlyph[] = [];
+  const lines: TextLayoutLine[] = [];
   let x = 0;
   let y = 0;
   let maxLineWidth = 0;
   let prevGlyphIndex = 0;
+  let lineIndex = 0;
+  let lineStartGlyph = 0;
   const chars = splitStringByGraphemes(text);
   for (const ch of chars) {
     if (ch === '\n') {
       maxLineWidth = Math.max(maxLineWidth, x);
+      lines.push({
+        width: x,
+        glyphStart: lineStartGlyph,
+        glyphEnd: glyphs.length
+      });
       x = 0;
       y += lineHeight;
       prevGlyphIndex = 0;
+      lineIndex++;
+      lineStartGlyph = glyphs.length;
       continue;
     }
     const codePoint = ch.codePointAt(0);
@@ -63,9 +84,16 @@ export function layoutText(
     const advance = glyph.advanceWidth * scale;
     if (maxWidth > 0 && x > 0 && x + kerning + advance > maxWidth) {
       maxLineWidth = Math.max(maxLineWidth, x);
+      lines.push({
+        width: x,
+        glyphStart: lineStartGlyph,
+        glyphEnd: glyphs.length
+      });
       x = 0;
       y += lineHeight;
       prevGlyphIndex = 0;
+      lineIndex++;
+      lineStartGlyph = glyphs.length;
     } else {
       x += kerning;
     }
@@ -74,6 +102,7 @@ export function layoutText(
         char: ch,
         glyphIndex,
         atlasGlyph,
+        lineIndex,
         x,
         y,
         xOffset,
@@ -84,10 +113,17 @@ export function layoutText(
     prevGlyphIndex = glyphIndex;
   }
   maxLineWidth = Math.max(maxLineWidth, x);
+  lines.push({
+    width: x,
+    glyphStart: lineStartGlyph,
+    glyphEnd: glyphs.length
+  });
   return {
     glyphs,
     width: maxLineWidth,
+    boxWidth: maxWidth > 0 ? Math.max(maxLineWidth, maxWidth) : maxLineWidth,
     height: Math.max(lineHeight, y + lineHeight),
-    lineHeight
+    lineHeight,
+    lines
   } satisfies TextLayoutResult;
 }

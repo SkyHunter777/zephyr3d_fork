@@ -171,7 +171,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
   }
   /** Primitive of the mesh */
   get primitive() {
-    return this._primitive.get();
+    return this._primitive?.get() ?? null;
   }
   set primitive(prim) {
     const currentPrimitive = this._primitive.get();
@@ -195,7 +195,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
   }
   /** Material of the mesh */
   get material() {
-    return this._material.get();
+    return this._material?.get() ?? null;
   }
   set material(m) {
     if (this._material.get() !== m) {

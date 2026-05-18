@@ -27,7 +27,7 @@ import {
   getEngine,
   Sprite,
   TextSprite,
-  SDFTextSprite
+  MSDFTextSprite
 } from '@zephyr3d/scene';
 import { SceneNode } from '@zephyr3d/scene';
 import { DirectionalLight } from '@zephyr3d/scene';
@@ -436,8 +436,8 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
               action: () => this.handleAddNode(TextSprite, 'Add TextSprite')
             },
             {
-              label: 'SDFTextSprite',
-              action: () => this.handleAddNode(SDFTextSprite, 'Add SDFTextSprite')
+              label: 'MSDFTextSprite',
+              action: () => this.handleAddNode(MSDFTextSprite, 'Add MSDFTextSprite')
             },
             {
               label: 'Particle System',

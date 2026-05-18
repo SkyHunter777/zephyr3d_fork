@@ -25,6 +25,7 @@ import {
 } from '../material';
 import { StandardSpriteMaterial } from '../material/sprite_std';
 import { ScreenAdapter } from './screen';
+import { MSDFTextAtlasManager } from '../text/runtime';
 
 /**
  * Interface for objects that can be rendered.
@@ -68,6 +69,7 @@ export class Engine {
   private _builtinsVFS: Nullable<MemoryFS>;
   private _scriptingSystem: ScriptingSystem;
   private _resourceManager: ResourceManager;
+  private _msdfTextAtlasManager: MSDFTextAtlasManager;
   private _enabled: boolean;
   private _screen: ScreenAdapter;
   protected _activeRenderables: {
@@ -87,6 +89,7 @@ export class Engine {
     this._builtinsVFS = null;
     this._scriptingSystem = new ScriptingSystem({ VFS, scriptsRoot });
     this._resourceManager = new ResourceManager(VFS);
+    this._msdfTextAtlasManager = new MSDFTextAtlasManager();
     this._enabled = enabled ?? true;
     this._activeRenderables = [];
     this._loadingScenes = {};
@@ -117,6 +120,61 @@ export class Engine {
    */
   get resourceManager() {
     return this._resourceManager;
+  }
+  /**
+   * Exposes the shared runtime MSDF text atlas manager.
+   */
+  get msdfTextAtlasManager() {
+    return this._msdfTextAtlasManager;
+  }
+  /**
+   * Releases a loaded font asset from the resource cache and disposes its shared MSDF atlas textures.
+   *
+   * Existing scene nodes that still reference this font asset are not updated automatically.
+   * Call this only after you have stopped using the font, or when you intentionally want it to rebuild later.
+   *
+   * @param fontAsset - The loaded font asset to release.
+   * @returns `true` if either the atlas cache or the font cache had an entry to remove.
+   */
+  releaseFontAsset(font: string) {
+    const fontAsset = this._resourceManager.getFontAsset(font);
+    if (!fontAsset) {
+      return false;
+    }
+    const atlasReleased = this._msdfTextAtlasManager.releaseAtlas(fontAsset);
+    const fontReleased = this._resourceManager.releaseFontAsset(fontAsset);
+    return atlasReleased || fontReleased;
+  }
+  /**
+   * Configures the MSDF atlas for a given font asset, creating or replacing the atlas as needed.
+   *
+   * This is useful to customize the glyph size, atlas page size, distance range, and padding for MSDF text rendering.
+   * Existing scene nodes that reference this font asset will use the updated atlas automatically.
+   *
+   * @param font - The font asset path to configure the MSDF atlas for.
+   * @param pageSize - The size of each atlas page in pixels (e.g., 512, 1024).
+   * @param glyphSize - The size of each glyph in pixels (e.g., 32, 64).
+   * @param distanceRange - The distance range for MSDF generation. Defaults to 4.
+   * @param padding - The padding between glyphs in the atlas in pixels. Defaults to 2.
+   * @returns `true` if the atlas was successfully configured, or `false` if the font asset was not found.
+   *
+   * @remarks
+   * The font asset must be loaded and available in the resource manager for the atlas to be configured.
+   */
+  configureMSDFAtlas(
+    font: string,
+    pageSize: number,
+    glyphSize: number,
+    distanceRange?: number,
+    padding?: number
+  ) {
+    const fontAsset = this._resourceManager.getFontAsset(font);
+    if (!fontAsset) {
+      console.warn(`Font asset '${font}' not found for MSDF atlas configuration.`);
+      return false;
+    }
+    this._msdfTextAtlasManager.configureAtlas(fontAsset, pageSize, glyphSize, distanceRange, padding);
+    return true;
   }
   /**
    * Exposes the active {@link ScreenAdapter}.
@@ -368,3 +426,5 @@ export class Engine {
     }
   }
 }
+
+export { MSDFTextAtlasManager };

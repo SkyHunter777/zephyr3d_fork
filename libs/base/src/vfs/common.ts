@@ -297,6 +297,8 @@ export function guessMimeType(path: string) {
     '.vrm': 'model/gltf-binary',
     '.ktx': 'image/ktx',
     '.ktx2': 'image/ktx2',
+    '.ttf': 'font/ttf',
+    '.otf': 'font/otf',
     // zephyr3d specific
     '.zbpt': 'application/vnd.zephyr3d.blueprint+json',
     '.zmsh': 'application/vnd.zephyr3d.mesh+json',

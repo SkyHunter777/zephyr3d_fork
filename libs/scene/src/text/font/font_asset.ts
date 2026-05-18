@@ -1,6 +1,16 @@
 import { SFNTReader } from './sfnt_reader';
 import type { FontMetrics, GlyphContour, GlyphData, GlyphPoint } from './types';
 
+export type FontAssetFetchOptions = {
+  pageSize?: number;
+  glyphSize?: number;
+};
+
+export type FontAssetMSDFAtlasSettings = Readonly<{
+  pageSize: number;
+  glyphSize: number;
+}>;
+
 type TableRecord = {
   offset: number;
   length: number;
@@ -66,6 +76,8 @@ const WE_HAVE_A_SCALE = 1 << 3;
 const MORE_COMPONENTS = 1 << 5;
 const WE_HAVE_AN_X_AND_Y_SCALE = 1 << 6;
 const WE_HAVE_A_TWO_BY_TWO = 1 << 7;
+const DEFAULT_MSDF_ATLAS_PAGE_SIZE = 1024;
+const DEFAULT_MSDF_GLYPH_SIZE = 64;
 
 /**
  * Minimal runtime font asset for TrueType outlines.
@@ -85,7 +97,8 @@ export class FontAsset {
   private readonly _gposPairs: GPOSPairSubtable[];
   private readonly _metrics: FontMetrics;
   private readonly _numberOfHMetrics: number;
-  private constructor(buffer: ArrayBuffer) {
+  private readonly _msdfAtlasSettings: FontAssetMSDFAtlasSettings;
+  private constructor(buffer: ArrayBuffer, options?: FontAssetFetchOptions) {
     this._reader = new SFNTReader(buffer);
     this._tables = parseTableDirectory(this._reader);
     const head = this.requireTable('head');
@@ -123,12 +136,25 @@ export class FontAsset {
     this._kernPairs = parseKernPairs(this._reader, this.getTable('kern'));
     this._gposPairs = parseGPOSPairs(this._reader, this.getTable('GPOS'));
     this._glyphCache = new Map();
+    this._msdfAtlasSettings = Object.freeze({
+      pageSize: normalizeMSDFAtlasPageSize(options?.pageSize),
+      glyphSize: normalizeMSDFGlyphSize(options?.glyphSize)
+    });
   }
-  static fromBuffer(buffer: ArrayBuffer) {
-    return new FontAsset(buffer);
+  static fromBuffer(buffer: ArrayBuffer, options?: FontAssetFetchOptions) {
+    return new FontAsset(buffer, options);
   }
   get metrics(): FontMetrics {
     return this._metrics;
+  }
+  get msdfAtlasSettings(): FontAssetMSDFAtlasSettings {
+    return this._msdfAtlasSettings;
+  }
+  get msdfAtlasPageSize() {
+    return this._msdfAtlasSettings.pageSize;
+  }
+  get msdfGlyphSize() {
+    return this._msdfAtlasSettings.glyphSize;
   }
   getGlyphIndex(codePoint: number) {
     if (this._cmapFormat12) {
@@ -955,4 +981,12 @@ function buildGlyphData(
     yMax,
     contours
   };
+}
+
+function normalizeMSDFAtlasPageSize(value: number | undefined) {
+  return Math.max(32, Math.round(Number.isFinite(value) ? value! : DEFAULT_MSDF_ATLAS_PAGE_SIZE));
+}
+
+function normalizeMSDFGlyphSize(value: number | undefined) {
+  return Math.max(8, Math.round(Number.isFinite(value) ? value! : DEFAULT_MSDF_GLYPH_SIZE));
 }
