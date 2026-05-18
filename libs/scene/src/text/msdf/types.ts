@@ -27,13 +27,23 @@ export type MSDFBitmap = {
 };
 
 /**
+ * Edge color mask used by MSDF generation.
+ *
+ * Colors are stored as RGB bit masks, allowing an edge to contribute to
+ * multiple channels (for example cyan = green | blue).
+ *
+ * @public
+ */
+export type EdgeColor = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+/**
  * Colored line edge used for MSDF generation.
  *
  * @public
  */
 export type ColoredLineEdge = {
   kind: 'line';
-  color: 0 | 1 | 2;
+  color: EdgeColor;
   p0: { x: number; y: number };
   p1: { x: number; y: number };
 };
@@ -45,7 +55,7 @@ export type ColoredLineEdge = {
  */
 export type ColoredQuadraticEdge = {
   kind: 'quadratic';
-  color: 0 | 1 | 2;
+  color: EdgeColor;
   p0: { x: number; y: number };
   p1: { x: number; y: number };
   p2: { x: number; y: number };

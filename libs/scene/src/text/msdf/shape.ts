@@ -1,5 +1,5 @@
 import type { GlyphContour, GlyphPoint } from '../font';
-import type { ColoredEdge, MSDFShape } from './types';
+import type { ColoredEdge, EdgeColor, MSDFShape } from './types';
 
 export function buildMSDFShape(contours: GlyphContour[]): MSDFShape {
   return {
@@ -25,7 +25,7 @@ function buildContourEdges(contour: GlyphContour): ColoredEdge[] {
     if (p0.onCurve && p1.onCurve) {
       edges.push({
         kind: 'line',
-        color: 0,
+        color: 7,
         p0: { x: p0.x, y: p0.y },
         p1: { x: p1.x, y: p1.y }
       });
@@ -39,7 +39,7 @@ function buildContourEdges(contour: GlyphContour): ColoredEdge[] {
       }
       edges.push({
         kind: 'quadratic',
-        color: 0,
+        color: 7,
         p0: { x: p0.x, y: p0.y },
         p1: { x: p1.x, y: p1.y },
         p2: { x: p2.x, y: p2.y }
@@ -70,16 +70,16 @@ function colorizeContour(edges: ColoredEdge[]) {
   const corners = detectCorners(edges);
   if (corners.length === 0) {
     for (let i = 0; i < edges.length; i++) {
-      edges[i].color = (i % 3) as 0 | 1 | 2;
+      edges[i].color = 7;
     }
     return edges;
   }
-  let color: 0 | 1 | 2 = 0;
+  let color: EdgeColor = 5;
   const cornerSet = new Set(corners);
   for (let i = 0; i < edges.length; i++) {
     edges[i].color = color;
     if (cornerSet.has((i + 1) % edges.length)) {
-      color = ((color + 1) % 3) as 0 | 1 | 2;
+      color = color === 3 ? 6 : 3;
     }
   }
   return edges;

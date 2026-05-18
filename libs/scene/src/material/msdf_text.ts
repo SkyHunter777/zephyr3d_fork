@@ -157,12 +157,15 @@ export class MSDFTextMaterial extends MeshMaterial implements Clonable<MSDFTextM
       );
       scope.$l.outlinePxWidth = pb.div(scope.zMSDFOutlineWidth, scope.localUnitsPerPixel);
       scope.$l.outlineAlpha = pb.clamp(pb.add(scope.sdfPxDistance, pb.add(0.5, scope.outlinePxWidth)), 0, 1);
-      scope.$l.outlineMask = pb.max(pb.sub(scope.outlineAlpha, scope.alpha), 0);
-      scope.$l.finalColor = pb.add(
+      scope.$l.outlineMaskRaw = pb.max(pb.sub(scope.outlineAlpha, scope.alpha), 0);
+      scope.$l.hasOutline = pb.greaterThan(scope.zMSDFOutlineWidth, 1e-4);
+      scope.$l.outlineMask = pb.mul(scope.outlineMaskRaw, pb.float(scope.hasOutline));
+      scope.$l.finalAlpha = pb.clamp(pb.add(scope.alpha, scope.outlineMask), 0, 1);
+      scope.$l.weightedColor = pb.add(
         pb.mul(scope.zMSDFTextColor, scope.alpha),
         pb.mul(scope.zMSDFOutlineColor, scope.outlineMask)
       );
-      scope.$l.finalAlpha = pb.max(scope.alpha, scope.outlineMask);
+      scope.$l.finalColor = pb.div(scope.weightedColor, pb.max(scope.finalAlpha, 1e-4));
       this.outputFragmentColor(scope, scope.$inputs.worldPos, pb.vec4(scope.finalColor, scope.finalAlpha));
     } else {
       this.outputFragmentColor(scope, scope.$inputs.worldPos, null);

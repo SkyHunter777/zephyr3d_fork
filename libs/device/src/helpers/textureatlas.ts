@@ -89,6 +89,24 @@ export class TextureAtlasManager {
     return this._atlasList[index]?.get() ?? undefined;
   }
   /**
+   * Width of each atlas bin in texels.
+   */
+  get binWidth() {
+    return this._binWidth;
+  }
+  /**
+   * Height of each atlas bin in texels.
+   */
+  get binHeight() {
+    return this._binHeight;
+  }
+  /**
+   * Border reserved around each packed rectangle in texels.
+   */
+  get rectBorderWidth() {
+    return this._rectBorderWidth;
+  }
+  /**
    * Gets the information about specified atlas
    * @param key - Key of the atlas
    * @returns Information of the atlas
