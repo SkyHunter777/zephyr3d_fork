@@ -7,7 +7,7 @@ export type MenuItemOptions = {
   label: string;
   shortCut?: string;
   id?: string;
-  action?: () => void;
+  action?: () => boolean;
   checked?: () => boolean;
   enabled?: (ctx?: any) => boolean;
   subMenus?: MenuItemOptions[];
@@ -19,7 +19,7 @@ export type MenuBarOptions = {
 
 let UID = 0;
 export class MenubarView extends Observable<{
-  action: [id: string];
+  action: [id: string, result: { handled: boolean }];
 }> {
   private _map: Map<string, { item: MenuItemOptions; parent: MenuItemOptions }>;
   private _options: MenuBarOptions;
@@ -115,9 +115,11 @@ export class MenubarView extends Observable<{
       if (item.shortCut) {
         view.registerShortcut(item.shortCut, () => {
           if (item.action) {
-            item.action();
+            return item.action();
           } else if (item.id) {
-            this.dispatchEvent('action', item.id);
+            const result = { handled: false };
+            this.dispatchEvent('action', item.id, result);
+            return result.handled;
           }
         });
       }
@@ -182,7 +184,7 @@ export class MenubarView extends Observable<{
         if (item.action) {
           item.action();
         } else if (item.id) {
-          this.dispatchEvent('action', item.id);
+          this.dispatchEvent('action', item.id, { handled: false });
         }
       }
     }

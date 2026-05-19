@@ -64,6 +64,7 @@ export function imGuiNewFrame() {
   inFrame = true;
   ImGui_Impl.NewFrame(Date.now());
   ImGui.NewFrame();
+  imGuiWantCaptureKeyboard(false);
 }
 
 /**

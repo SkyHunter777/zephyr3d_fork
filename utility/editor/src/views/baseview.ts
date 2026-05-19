@@ -6,7 +6,7 @@ export abstract class BaseView<
   Controller extends BaseController<Model, BaseView<Model, Controller>>
 > {
   private readonly _controller: Controller;
-  private readonly _shortcuts: Map<string, { handler: (shortcut: string) => void; repeatable: boolean }>;
+  private readonly _shortcuts: Map<string, { handler: (shortcut: string) => boolean; repeatable: boolean }>;
   constructor(controller: Controller) {
     this._controller = controller;
     this._shortcuts = new Map();
@@ -14,7 +14,7 @@ export abstract class BaseView<
   get controller() {
     return this._controller;
   }
-  registerShortcut(key: string, handler: (shortcut: string) => void, repeatable?: boolean) {
+  registerShortcut(key: string, handler: (shortcut: string) => boolean, repeatable?: boolean) {
     this._shortcuts.set(key, { handler, repeatable: !!repeatable });
   }
   unregisterShortcut(key: string) {
@@ -28,9 +28,8 @@ export abstract class BaseView<
         ev.preventDefault();
         const info = this._shortcuts.get(shortcut);
         if (info.handler && (info.repeatable || !e.repeat)) {
-          info.handler(shortcut);
+          return info.handler(shortcut);
         }
-        return true;
       }
     }
     return false;

@@ -7,14 +7,14 @@ export type ToolBarItem = {
   id?: string;
   shortcut?: string;
   render?: (buttonSize: ImGui.ImVec2) => boolean;
-  action?: () => void;
+  action?: () => boolean;
   tooltip?: () => string;
   visible?: () => boolean;
   selected?: () => boolean;
 };
 
 export class ToolBar extends Observable<{
-  action: [id: string];
+  action: [id: string, result: { handled: boolean }];
 }> {
   private readonly _id: string;
   private _tools: ToolBarItem[];
@@ -90,9 +90,11 @@ export class ToolBar extends Observable<{
       if (tool.shortcut) {
         view.registerShortcut(tool.shortcut, () => {
           if (tool.action) {
-            tool.action();
+            return tool.action();
           } else if (tool.id) {
-            this.dispatchEvent('action', tool.id);
+            const result = { handled: false };
+            this.dispatchEvent('action', tool.id, result);
+            return result.handled;
           }
         });
       }
@@ -155,7 +157,7 @@ export class ToolBar extends Observable<{
             if (tool.action) {
               tool.action();
             } else if (tool.id) {
-              this.dispatchEvent('action', tool.id);
+              this.dispatchEvent('action', tool.id, { handled: false });
             }
           }
           ImGui.PopStyleColor();

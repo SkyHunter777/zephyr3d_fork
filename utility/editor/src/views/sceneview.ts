@@ -261,41 +261,65 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
           subMenus: [
             {
               label: 'New Project...',
-              action: () => eventBus.dispatchEvent('action', 'NEW_PROJECT')
+              action: () => {
+                eventBus.dispatchEvent('action', 'NEW_PROJECT');
+                return true;
+              }
             },
             {
               label: 'Open Project...',
-              action: () => eventBus.dispatchEvent('action', 'OPEN_PROJECT')
+              action: () => {
+                eventBus.dispatchEvent('action', 'OPEN_PROJECT');
+                return true;
+              }
             },
             {
               label: 'Close Project',
-              action: () => eventBus.dispatchEvent('action', 'CLOSE_PROJECT')
+              action: () => {
+                eventBus.dispatchEvent('action', 'CLOSE_PROJECT');
+                return true;
+              }
             },
             {
               label: 'Export Project',
-              action: () => eventBus.dispatchEvent('action', 'EXPORT_PROJECT')
+              action: () => {
+                eventBus.dispatchEvent('action', 'EXPORT_PROJECT');
+                return true;
+              }
             },
             {
               label: 'Delete Project',
-              action: () => eventBus.dispatchEvent('action', 'DELETE_PROJECT')
+              action: () => {
+                eventBus.dispatchEvent('action', 'DELETE_PROJECT');
+                return true;
+              }
             },
             {
               label: '-'
             },
             {
               label: 'Project Settings...',
-              action: () => eventBus.dispatchEvent('action', 'PROJECT_SETTINGS')
+              action: () => {
+                eventBus.dispatchEvent('action', 'PROJECT_SETTINGS');
+                return true;
+              }
             },
             {
               label: 'Build Project',
-              action: () => eventBus.dispatchEvent('action', 'BUILD_PROJECT')
+              action: () => {
+                eventBus.dispatchEvent('action', 'BUILD_PROJECT');
+                return true;
+              }
             },
             {
               label: '-'
             },
             {
               label: 'Plugin Manager...',
-              action: () => eventBus.dispatchEvent('action', 'SYSTEM_PLUGINS')
+              action: () => {
+                eventBus.dispatchEvent('action', 'SYSTEM_PLUGINS');
+                return true;
+              }
             }
           ]
         },
@@ -306,22 +330,34 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
             {
               label: 'New Scene',
               shortCut: 'Ctrl+N',
-              action: () => eventBus.dispatchEvent('action', 'NEW_DOC')
+              action: () => {
+                eventBus.dispatchEvent('action', 'NEW_DOC');
+                return true;
+              }
             },
             {
               label: 'Open Scene...',
               shortCut: 'Ctrl+O',
-              action: () => eventBus.dispatchEvent('action', 'OPEN_DOC')
+              action: () => {
+                eventBus.dispatchEvent('action', 'OPEN_DOC');
+                return true;
+              }
             },
             {
               label: 'Save Scene',
               shortCut: 'Ctrl+S',
-              action: () => eventBus.dispatchEvent('action', 'SAVE_DOC')
+              action: () => {
+                eventBus.dispatchEvent('action', 'SAVE_DOC');
+                return true;
+              }
             },
             {
               label: 'Save Scene As...',
               shortCut: 'Ctrl+Alt+S',
-              action: () => eventBus.dispatchEvent('action', 'SAVE_DOC_AS')
+              action: () => {
+                eventBus.dispatchEvent('action', 'SAVE_DOC_AS');
+                return true;
+              }
             }
           ]
         },
@@ -334,6 +370,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
               shortCut: 'Ctrl+Z',
               action: () => {
                 this._cmdManager.undo();
+                return true;
               }
             },
             {
@@ -341,6 +378,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
               shortCut: 'Ctrl+Y',
               action: () => {
                 this._cmdManager.redo();
+                return true;
               }
             },
             {
@@ -348,6 +386,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
               shortCut: 'Ctrl+C',
               action: () => {
                 this.handleCopySelectedNodes();
+                return true;
               }
             },
             {
@@ -355,6 +394,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
               shortCut: 'Ctrl+V',
               action: () => {
                 this.handlePasteNode();
+                return true;
               }
             }
           ]
@@ -368,27 +408,45 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
               subMenus: [
                 {
                   label: 'Box',
-                  action: () => this.handleAddShape('/assets/@builtins/primitives/box.zmsh')
+                  action: () => {
+                    this.handleAddShape('/assets/@builtins/primitives/box.zmsh');
+                    return true;
+                  }
                 },
                 {
                   label: 'Sphere',
-                  action: () => this.handleAddShape('/assets/@builtins/primitives/sphere.zmsh')
+                  action: () => {
+                    this.handleAddShape('/assets/@builtins/primitives/sphere.zmsh');
+                    return true;
+                  }
                 },
                 {
                   label: 'Plane',
-                  action: () => this.handleAddShape('/assets/@builtins/primitives/plane.zmsh')
+                  action: () => {
+                    this.handleAddShape('/assets/@builtins/primitives/plane.zmsh');
+                    return true;
+                  }
                 },
                 {
                   label: 'Cylinder',
-                  action: () => this.handleAddShape('/assets/@builtins/primitives/cylinder.zmsh')
+                  action: () => {
+                    this.handleAddShape('/assets/@builtins/primitives/cylinder.zmsh');
+                    return true;
+                  }
                 },
                 {
                   label: 'Torus',
-                  action: () => this.handleAddShape('/assets/@builtins/primitives/torus.zmsh')
+                  action: () => {
+                    this.handleAddShape('/assets/@builtins/primitives/torus.zmsh');
+                    return true;
+                  }
                 },
                 {
                   label: 'Tetrahedron',
-                  action: () => this.handleAddShape('/assets/@builtins/primitives/tetrahedron.zmsh')
+                  action: () => {
+                    this.handleAddShape('/assets/@builtins/primitives/tetrahedron.zmsh');
+                    return true;
+                  }
                 }
               ]
             },
@@ -397,19 +455,31 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
               subMenus: [
                 {
                   label: 'Directional Light',
-                  action: () => this.handleAddNode(DirectionalLight, 'Add directional light')
+                  action: () => {
+                    this.handleAddNode(DirectionalLight, 'Add directional light');
+                    return true;
+                  }
                 },
                 {
                   label: 'Point Light',
-                  action: () => this.handleAddNode(PointLight, 'Add point light')
+                  action: () => {
+                    this.handleAddNode(PointLight, 'Add point light');
+                    return true;
+                  }
                 },
                 {
                   label: 'Spot Light',
-                  action: () => this.handleAddNode(SpotLight, 'Add spot light')
+                  action: () => {
+                    this.handleAddNode(SpotLight, 'Add spot light');
+                    return true;
+                  }
                 },
                 {
                   label: 'Rect Light',
-                  action: () => this.handleAddNode(RectLight, 'Add rect light')
+                  action: () => {
+                    this.handleAddNode(RectLight, 'Add rect light');
+                    return true;
+                  }
                 }
               ]
             },
@@ -418,7 +488,10 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
               subMenus: [
                 {
                   label: 'Perspective Camera',
-                  action: () => this.handleAddNode(PerspectiveCamera, 'Add perspective camera')
+                  action: () => {
+                    this.handleAddNode(PerspectiveCamera, 'Add perspective camera');
+                    return true;
+                  }
                 }
                 /*
                 {
@@ -433,33 +506,54 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
               subMenus: [
                 {
                   label: 'TextSprite',
-                  action: () => this.handleAddNode(TextSprite, 'Add TextSprite')
+                  action: () => {
+                    this.handleAddNode(TextSprite, 'Add TextSprite');
+                    return true;
+                  }
                 },
                 {
                   label: 'MSDFText',
-                  action: () => this.handleAddNode(MSDFText, 'Add MSDFText')
+                  action: () => {
+                    this.handleAddNode(MSDFText, 'Add MSDFText');
+                    return true;
+                  }
                 },
                 {
                   label: 'MSDFTextSprite',
-                  action: () => this.handleAddNode(MSDFTextSprite, 'Add MSDFTextSprite')
+                  action: () => {
+                    this.handleAddNode(MSDFTextSprite, 'Add MSDFTextSprite');
+                    return true;
+                  }
                 }
               ]
             },
             {
               label: 'Sprite',
-              action: () => this.handleAddNode(Sprite, 'Add Sprite')
+              action: () => {
+                this.handleAddNode(Sprite, 'Add Sprite');
+                return true;
+              }
             },
             {
               label: 'Particle System',
-              action: () => this.handleAddNode(ParticleSystem, 'Add particle system')
+              action: () => {
+                this.handleAddNode(ParticleSystem, 'Add particle system');
+                return true;
+              }
             },
             {
               label: 'Water',
-              action: () => this.handleAddNode(Water, 'Add water')
+              action: () => {
+                this.handleAddNode(Water, 'Add water');
+                return true;
+              }
             },
             {
               label: 'Terrain',
-              action: () => this.handleAddNode(ClipmapTerrain, 'Add terrain')
+              action: () => {
+                this.handleAddNode(ClipmapTerrain, 'Add terrain');
+                return true;
+              }
             }
           ]
         },
@@ -469,19 +563,28 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
           subMenus: [
             {
               label: 'Grid',
-              action: () => (this._postGizmoRenderer!.drawGrid = !this._postGizmoRenderer!.drawGrid),
+              action: () => {
+                this._postGizmoRenderer!.drawGrid = !this._postGizmoRenderer!.drawGrid;
+                return true;
+              },
               checked: () => !!this._postGizmoRenderer!.drawGrid
             },
             {
               label: 'Texture viewer',
               id: 'SHOW_TEXTURE_VIEWER',
-              action: () => (this._showTextureViewer = !this._showTextureViewer),
+              action: () => {
+                this._showTextureViewer = !this._showTextureViewer;
+                return true;
+              },
               checked: () => this._showTextureViewer
             },
             {
               label: 'Device Information',
               id: 'SHOW_DEVICE_INFO',
-              action: () => (this._showDeviceInfo = !this._showDeviceInfo),
+              action: () => {
+                this._showDeviceInfo = !this._showDeviceInfo;
+                return true;
+              },
               checked: () => this._showDeviceInfo
             }
           ]
@@ -492,18 +595,27 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
           subMenus: [
             {
               label: 'About...',
-              action: () => eventBus.dispatchEvent('action', 'HELP_ABOUT')
+              action: () => {
+                eventBus.dispatchEvent('action', 'HELP_ABOUT');
+                return true;
+              }
             },
             ...(isDesktopApp()
               ? [
                   {
                     label: 'Editor Settings...',
-                    action: () => eventBus.dispatchEvent('action', 'EDITOR_SETTINGS')
+                    action: () => {
+                      eventBus.dispatchEvent('action', 'EDITOR_SETTINGS');
+                      return true;
+                    }
                   },
                   {
                     label: 'Toggle DevTools',
                     shortCut: 'F12',
-                    action: () => eventBus.dispatchEvent('action', 'TOGGLE_DEVTOOLS')
+                    action: () => {
+                      eventBus.dispatchEvent('action', 'TOGGLE_DEVTOOLS');
+                      return true;
+                    }
                   }
                 ]
               : [])
@@ -532,9 +644,10 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
             const cameraController = this.controller.model.scene.mainCamera
               ?.controller as EditorCameraController;
             if (cameraController && cameraController.isRightMouseDown()) {
-              return; // 如果正在处理摄像机移动，不激活选择工具
+              return false; // 如果正在处理摄像机移动，不激活选择工具
             }
             this._postGizmoRenderer!.mode = 'select';
+            return true;
           }
         },
         {
@@ -549,9 +662,10 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
             const cameraController = this.controller.model.scene.mainCamera
               ?.controller as EditorCameraController;
             if (cameraController && cameraController.isRightMouseDown()) {
-              return; // 如果正在处理摄像机移动，不激活选择工具
+              return false; // 如果正在处理摄像机移动，不激活选择工具
             }
             this._postGizmoRenderer!.mode = 'translation';
+            return true;
           }
         },
         {
@@ -566,9 +680,10 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
             const cameraController = this.controller.model.scene.mainCamera
               ?.controller as EditorCameraController;
             if (cameraController && cameraController.isRightMouseDown()) {
-              return; // 如果正在处理摄像机移动，不激活选择工具
+              return false; // 如果正在处理摄像机移动，不激活选择工具
             }
             this._postGizmoRenderer!.mode = 'rotation';
+            return true;
           }
         },
         {
@@ -583,9 +698,10 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
             const cameraController = this.controller.model.scene.mainCamera
               ?.controller as EditorCameraController;
             if (cameraController && cameraController.isRightMouseDown()) {
-              return; // 如果正在处理摄像机移动，不激活选择工具
+              return false; // 如果正在处理摄像机移动，不激活选择工具
             }
             this._postGizmoRenderer!.mode = 'scaling';
+            return true;
           }
         },
         {
@@ -601,6 +717,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
           },
           action: () => {
             this._postGizmoRenderer!.mode = 'edit-rect';
+            return true;
           }
         },
         {
@@ -612,6 +729,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
           },
           action: () => {
             this.handleDeleteSelectedNodes();
+            return true;
           }
         },
         {
@@ -629,6 +747,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
           action: () => {
             this._preferredTransformSpace = this._preferredTransformSpace === 'local' ? 'world' : 'local';
             this.updateGizmoTransformSpace();
+            return true;
           }
         },
         {
@@ -666,6 +785,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
           },
           action: () => {
             this.handleCloneSelectedNodes();
+            return true;
           }
         },
         {
@@ -679,7 +799,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
             const node = this._sceneHierarchy!.selectedNode;
             if (node) {
               this.lookAt(this.controller.model.scene.mainCamera!, node);
+              return true;
             }
+            return false;
           }
         },
         {
@@ -701,7 +823,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
             const selectedNode = this._sceneHierarchy!.selectedNode;
             if (selectedNode) {
               this.handleEditNode(selectedNode);
+              return true;
             }
+            return false;
           }
         },
         {
@@ -715,7 +839,11 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
             return (this._sceneHierarchy?.selectedNodes.size ?? 0) > 0;
           },
           action: () => {
-            this.handleCopySelectedNodes();
+            if ((this._sceneHierarchy?.selectedNodes.size ?? 0) > 0) {
+              this.handleCopySelectedNodes();
+              return true;
+            }
+            return false;
           }
         },
         {
@@ -726,7 +854,11 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
             return this._clipBoardNodes.length > 0 || !!this._clipBoardData.get();
           },
           action: () => {
-            this.handlePasteNode();
+            if (this._clipBoardNodes.length > 0 || !!this._clipBoardData.get()) {
+              this.handlePasteNode();
+              return true;
+            }
+            return false;
           }
         },
         {
@@ -744,6 +876,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
           },
           action: () => {
             this._cmdManager.undo();
+            return true;
           }
         },
         {
@@ -759,6 +892,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
           },
           action: () => {
             this._cmdManager.redo();
+            return true;
           }
         },
         {
@@ -773,6 +907,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
           },
           action: () => {
             this.play();
+            return true;
           }
         },
         {
@@ -784,6 +919,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
           },
           action: () => {
             this.playCurrentScene();
+            return true;
           }
         }
       ] as ToolBarItem[]
@@ -1365,7 +1501,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     this._toolbar.registerShortcuts(this);
     this._activePluginContributionShortcuts = true;
     this.registerShortcut('Ctrl+D', () => {
-      this.handleDuplicateShortcut();
+      return this.handleDuplicateShortcut();
     });
     this._toolbar.on('action', this.handleSceneAction, this);
     this.editor.plugins.on('pluginContributionsChanged', this.refreshPluginContributions, this);
@@ -2375,30 +2511,28 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   private handleAssetSelectionChanged() {
     this._lastDuplicateTarget = 'asset';
   }
-  private async handleDuplicateShortcut() {
+  private handleDuplicateShortcut(): boolean {
     const selectedNodes = this.getSelectedSceneNodes();
     const assetRenderer = this._assetView?.renderer;
     if (this._lastDuplicateTarget === 'asset' && assetRenderer) {
-      try {
-        if (await assetRenderer.duplicateSelectedItems()) {
-          return;
-        }
-      } catch (err) {
+      assetRenderer.duplicateSelectedItems().catch((err) => {
         DlgMessage.messageBox('Error', `Duplicate asset failed: ${err}`);
-        return;
-      }
+      });
+      return true;
     }
     if (selectedNodes.length > 0) {
-      await this.handleCloneSelectedNodes();
-      return;
+      this.handleCloneSelectedNodes().catch((err) => {
+        DlgMessage.messageBox('Error', `Duplicate asset failed: ${err}`);
+      });
+      return true;
     }
     if (assetRenderer) {
-      try {
-        await assetRenderer.duplicateSelectedItems();
-      } catch (err) {
+      assetRenderer.duplicateSelectedItems().catch((err) => {
         DlgMessage.messageBox('Error', `Duplicate asset failed: ${err}`);
-      }
+      });
+      return true;
     }
+    return false;
   }
   private handleNodeDragDrop(src: SceneNode, dst: SceneNode) {
     if (src.parent !== dst && !src.isParentOf(dst)) {
@@ -2705,8 +2839,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       this._suspendMultiPropertySync = false;
     }
   }
-  private handleSceneAction(action: string) {
+  private handleSceneAction(action: string, result: { handled: boolean }) {
     eventBus.dispatchEvent('action', action);
+    result.handled = true;
   }
   private handleStartRender(scene: Scene, camera: Camera, compositor: Compositor) {
     if (
