@@ -1,6 +1,13 @@
 # Change Log - @zephyr3d/base
 
-This log was last generated on Tue, 12 May 2026 03:53:58 GMT and should not be manually modified.
+This log was last generated on Tue, 19 May 2026 07:41:46 GMT and should not be manually modified.
+
+## 0.2.5
+Tue, 19 May 2026 07:41:46 GMT
+
+### Patches
+
+- Add splitStringByGraphemes helper function
 
 ## 0.2.4
 Tue, 12 May 2026 03:53:58 GMT

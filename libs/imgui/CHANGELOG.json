@@ -2,6 +2,26 @@
   "name": "@zephyr3d/imgui",
   "entries": [
     {
+      "version": "0.2.4",
+      "tag": "@zephyr3d/imgui_v0.2.4",
+      "date": "Tue, 19 May 2026 07:41:46 GMT",
+      "comments": {
+        "patch": [
+          {
+            "comment": "Fix: custom text input issue"
+          }
+        ],
+        "dependency": [
+          {
+            "comment": "Updating dependency \"@zephyr3d/base\" from `^0.2.4` to `0.2.5`"
+          },
+          {
+            "comment": "Updating dependency \"@zephyr3d/device\" from `^0.2.8` to `0.2.9`"
+          }
+        ]
+      }
+    },
+    {
       "version": "0.2.3",
       "tag": "@zephyr3d/imgui_v0.2.3",
       "date": "Tue, 12 May 2026 03:53:58 GMT",

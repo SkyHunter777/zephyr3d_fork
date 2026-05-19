@@ -1,6 +1,13 @@
 # Change Log - @zephyr3d/device
 
-This log was last generated on Wed, 29 Apr 2026 18:55:40 GMT and should not be manually modified.
+This log was last generated on Tue, 19 May 2026 07:41:46 GMT and should not be manually modified.
+
+## 0.2.9
+Tue, 19 May 2026 07:41:46 GMT
+
+### Patches
+
+- Update draw text helper function
 
 ## 0.2.8
 Wed, 29 Apr 2026 18:55:40 GMT
