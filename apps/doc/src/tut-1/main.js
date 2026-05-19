@@ -24,17 +24,6 @@ myApp.ready().then(function () {
     myApp.device.clearFrameBuffer(clearColor, 1, 0);
     // Render some text onto the screen
     myApp.device.drawText(str, 30, 30, '#ffff00');
-
-    myApp.device.drawText(
-      'Hello world.\nThis is a wrapped paragraph.',
-      { x: 30, y: 30, width: 80, height: 120 },
-      '#ffffff',
-      {
-        halign: 'left',
-        valign: 'top',
-        wordWrap: true
-      }
-    );
   });
   // handle pointer move
   myApp.on('pointermove', function (ev) {
