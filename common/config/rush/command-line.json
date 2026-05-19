@@ -20,14 +20,6 @@
       "incremental": true
     },
     {
-      "name": "deploy",
-      "commandKind": "bulk",
-      "summary": "Deploy homepage",
-      "enableParallelism": true,
-      "ignoreMissingScript": true,
-      "incremental": true
-    },
-    {
       "name": "lint",
       "commandKind": "bulk",
       "summary": "Lint projects",
