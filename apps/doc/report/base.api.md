@@ -68,6 +68,11 @@ export enum BoxSide {
 }
 
 // @public
+export function castObservable<C extends GenericConstructor | ObjectConstructor>(cls: C): <X extends EventMap>() => C & {
+    new (...args: any[]): IEventTarget<[EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>>;
+};
+
+// @public
 export function clamp(v: number, min: number, max: number): number;
 
 // @public
@@ -265,6 +270,12 @@ export { EventListener_2 as EventListener }
 
 // @public
 export type EventMap = Record<string, any[]>;
+
+// @public
+export type EventMapOf<T> = T extends IEventTarget<infer M> ? (M extends EventMap ? M : never) : never;
+
+// @public
+export const EventMapType: unique symbol;
 
 // @public
 export type ExtractMixinReturnType<M> = M extends (target: infer A) => infer R ? R : never;
@@ -568,6 +579,7 @@ export interface IDisposable extends IEventTarget<{
 
 // @public
 export interface IEventTarget<T extends EventMap = any> {
+    readonly [EventMapType]?: T;
     dispatchEvent<K extends keyof T>(type: K, ...args: T[K]): void;
     off<K extends keyof T>(type: K, listener?: Nullable<EventListener_2<T, K>>, context?: unknown): void;
     on<K extends keyof T>(type: K, listener: EventListener_2<T, K>, context?: unknown): void;
@@ -702,14 +714,14 @@ export interface ListOptions {
 // @public
 export function makeObservable<C extends GenericConstructor | ObjectConstructor>(cls: C): <X extends EventMap>() => {
     new (...args: any[]): {
-        _listeners: Nullable<EventListenerMap<InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X>>;
-        on<K extends keyof (InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X)>(type: K, listener: EventListener_2<InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X, K>, context?: unknown): void;
-        once<K extends keyof (InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X)>(type: K, listener: EventListener_2<InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X, K>, context?: unknown): void;
-        off<K extends keyof (InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X)>(type: K, listener: EventListener_2<InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X, K>, context?: unknown): void;
-        dispatchEvent<K extends keyof (InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X)>(type: K, ...args: (InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X)[K]): void;
-        _internalAddEventListener<K extends keyof (InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X)>(listenerMap: Nullable<EventListenerMap<InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X>>, type: K, listener: EventListener_2<InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X, K>, options: REventHandlerOptions): Nullable<EventListenerMap<InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X>>;
-        _internalRemoveEventListener<K extends keyof (InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X)>(listenerMap: Nullable<EventListenerMap<InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X>>, type: K, listener: EventListener_2<InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X, K>, context: unknown): void;
-        _invokeLocalListeners<K extends keyof (InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X)>(type: keyof (InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X), ...args: (InstanceType<C> extends IEventTarget<infer U extends EventMap> ? X & U : X)[K]): void;
+        _listeners: Nullable<EventListenerMap<[EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>>>;
+        on<K extends keyof ([EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>)>(type: K, listener: EventListener_2<[EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>, K>, context?: unknown): void;
+        once<K extends keyof ([EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>)>(type: K, listener: EventListener_2<[EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>, K>, context?: unknown): void;
+        off<K extends keyof ([EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>)>(type: K, listener: EventListener_2<[EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>, K>, context?: unknown): void;
+        dispatchEvent<K extends keyof ([EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>)>(type: K, ...args: ([EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>)[K]): void;
+        _internalAddEventListener<K extends keyof ([EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>)>(listenerMap: Nullable<EventListenerMap<[EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>>>, type: K, listener: EventListener_2<[EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>, K>, options: REventHandlerOptions): Nullable<EventListenerMap<[EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>>>;
+        _internalRemoveEventListener<K extends keyof ([EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>)>(listenerMap: Nullable<EventListenerMap<[EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>>>, type: K, listener: EventListener_2<[EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>, K>, context: unknown): void;
+        _invokeLocalListeners<K extends keyof ([EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>)>(type: keyof ([EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>), ...args: ([EventMapOf<InstanceType<C>>] extends [never] ? X : X & EventMapOf<InstanceType<C>>)[K]): void;
     };
 } & C;
 
@@ -1328,6 +1340,9 @@ export class SH {
 export function smoothStep(from: number, to: number, t: number): number;
 
 // @public
+export function splitStringByGraphemes(text: string): string[];
+
+// @public
 export function textToBase64(text: string): string;
 
 // @public
@@ -1787,7 +1802,7 @@ export interface ZipJSWriterConstructor {
 
 // Warnings were encountered during analysis:
 //
-// dist/index.d.ts:608:9 - (ae-forgotten-export) The symbol "EventListenerMap" needs to be exported by the entry point index.d.ts
+// dist/index.d.ts:631:9 - (ae-forgotten-export) The symbol "EventListenerMap" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 

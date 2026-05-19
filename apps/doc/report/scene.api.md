@@ -55,6 +55,7 @@ import { StructuredBuffer } from '@zephyr3d/device';
 import { Texture2D } from '@zephyr3d/device';
 import { Texture2DArray } from '@zephyr3d/device';
 import { TextureAddressMode } from '@zephyr3d/device';
+import { TextureAtlasManager } from '@zephyr3d/device';
 import { TextureCube } from '@zephyr3d/device';
 import { TextureFilterMode } from '@zephyr3d/device';
 import { TextureFormat } from '@zephyr3d/device';
@@ -464,6 +465,7 @@ export class AssetManager {
     // (undocumented)
     fetchBluePrint(url: string, VFSs?: VFS[]): Promise<Nullable<Record<string, MaterialBlueprintIR>>>;
     fetchBuiltinTexture<T extends BaseTexture>(name: string, texture?: T): T;
+    fetchFontAsset(url: string, options?: FontAssetFetchOptions, VFSs?: VFS[]): Promise<Nullable<FontAsset>>;
     fetchJsonData<T = any>(url: string, postProcess?: (json: T) => T, httpRequest?: HttpRequest, VFSs?: VFS[]): Promise<T>;
     fetchMaterial<T extends Material = Material>(url: string, VFSs?: VFS[]): Promise<Nullable<T>>;
     fetchModel(scene: Scene, url: string, options?: ModelFetchOptions, VFSs?: VFS[]): Promise<{
@@ -473,6 +475,7 @@ export class AssetManager {
     fetchPrimitive<T extends Primitive = Primitive>(url: string, VFSs?: VFS[]): Promise<Nullable<T>>;
     fetchTextData(url: string, postProcess?: (text: string) => string, httpRequest?: HttpRequest, VFSs?: VFS[]): Promise<string>;
     fetchTexture<T extends BaseTexture>(url: string, options?: TextureFetchOptions<T>, VFSs?: VFS[]): Promise<T>;
+    getFontAsset(url: string): Nullable<FontAsset>;
     // (undocumented)
     invalidateBluePrint(path: string): void;
     // (undocumented)
@@ -480,6 +483,7 @@ export class AssetManager {
     // (undocumented)
     loadPrimitive<T extends Primitive = Primitive>(url: string, VFSs?: VFS[]): Promise<Nullable<T>>;
     loadTextureFromBuffer<T extends BaseTexture>(arrayBuffer: ArrayBuffer | TypedArray, mimeType: string, srgb?: boolean, samplerOptions?: SamplerOptions, texture?: BaseTexture): Promise<T>;
+    releaseFontAsset(url: string): boolean;
     // (undocumented)
     reloadBluePrintMaterials(filter?: (m: PBRBluePrintMaterial) => boolean): Promise<void>;
     static setBuiltinTextureLoader(name: string, loader: (assetManager: AssetManager) => BaseTexture): void;
@@ -853,7 +857,6 @@ export class BaseSprite<M extends SpriteMaterial> extends BaseSprite_base implem
     getMaterial(): M;
     getMorphData(): null;
     getMorphInfo(): null;
-    getName(): string;
     getNode(): this;
     getPickTarget(): PickTarget;
     getPrimitive(): Primitive;
@@ -901,6 +904,9 @@ export interface BatchDrawable extends Drawable {
 // @public
 export class BatchGroup extends GraphNode {
     constructor(scene: Scene);
+    // Warning: (ae-unresolved-inheritdoc-reference) The @inheritDoc reference could not be resolved: No member was found with name "getName"
+    //
+    // (undocumented)
     getName(): string;
     invalidate(): void;
     isBatchGroup(): this is BatchGroup;
@@ -1161,6 +1167,9 @@ export function buildConstraints(rootPoints: BoneNode[], options: ConstraintBuil
 
 // @public
 export function buildForwardPlusGraph(graph: RenderGraph, ctx: DrawContext, renderQueue: RenderQueue, options: ForwardPlusOptions): RGHandle;
+
+// @public (undocumented)
+export function buildMSDFShape(contours: GlyphContour[]): MSDFShape;
 
 // @public
 export function buildSurfaceFaces(rootPoints: BoneNode[], isLoop: boolean): number[];
@@ -1650,6 +1659,41 @@ export class ColorAdjust extends AbstractPostEffect {
     get sharpen(): number;
     set sharpen(val: number);
 }
+
+// @public
+export type ColoredEdge = ColoredLineEdge | ColoredQuadraticEdge;
+
+// @public
+export type ColoredLineEdge = {
+    kind: 'line';
+    color: EdgeColor;
+    p0: {
+        x: number;
+        y: number;
+    };
+    p1: {
+        x: number;
+        y: number;
+    };
+};
+
+// @public
+export type ColoredQuadraticEdge = {
+    kind: 'quadratic';
+    color: EdgeColor;
+    p0: {
+        x: number;
+        y: number;
+    };
+    p1: {
+        x: number;
+        y: number;
+    };
+    p2: {
+        x: number;
+        y: number;
+    };
+};
 
 // @public
 export class CompAddNode extends GenericMathNode {
@@ -2295,6 +2339,10 @@ export class CullVisitor implements Visitor<SceneNode | OctreeNode> {
     set renderQueue(renderQueue: RenderQueue);
     visit(target: SceneNode | OctreeNode): boolean;
     // (undocumented)
+    visitMSDFText(node: MSDFText): boolean;
+    // (undocumented)
+    visitMSDFTextSprite(node: MSDFTextSprite): boolean;
+    // (undocumented)
     visitSprite(node: Sprite): boolean;
 }
 
@@ -2459,7 +2507,6 @@ export interface Drawable {
     getMaterial(): Nullable<MeshMaterial>;
     getMorphData(): Nullable<MorphData>;
     getMorphInfo(): Nullable<MorphInfo>;
-    getName(): string;
     getNode(): SceneNode;
     getObjectColor(): Vector4;
     getPickTarget(): PickTarget;
@@ -2525,6 +2572,9 @@ export interface DrawContext {
 }
 
 // @public
+export type EdgeColor = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+// @public
 export type EditorMode = 'editor' | 'editor-preview' | 'none';
 
 // @public
@@ -2567,6 +2617,7 @@ export class Engine {
         hook: Nullable<IRenderHook>;
     }[];
     attachScript<T extends Host>(host: Nullable<T>, module: string, config?: Nullable<RuntimeScriptConfig>): Promise<Nullable<RuntimeScript<T>>>;
+    configureMSDFAtlas(font: string, pageSize: number, glyphSize: number, distanceRange?: number, padding?: number): boolean;
     detachAllScripts(): void;
     detachScript<T extends Host>(host: T, idOrInstance: string | RuntimeScript<T>): void;
     getScriptObjects<T extends RuntimeScript<any>>(host: unknown): T[];
@@ -2576,8 +2627,10 @@ export class Engine {
     }>>;
     // (undocumented)
     loadSceneFromFile(path: string): Promise<Nullable<Scene>>;
+    get msdfTextAtlasManager(): MSDFTextAtlasManager;
     // (undocumented)
     readFile<T extends ReadOptions['encoding'] = 'binary'>(path: string, encoding?: T): Promise<(T extends "binary" ? ArrayBuffer : string) | null>;
+    releaseFontAsset(font: string): boolean;
     // (undocumented)
     render(): void;
     get resourceManager(): ResourceManager;
@@ -2922,6 +2975,49 @@ export class FmaNode extends GenericMathNode {
 export type FogType = 'height_fog' | 'none';
 
 // @public
+export class FontAsset {
+    // (undocumented)
+    static fromBuffer(buffer: ArrayBuffer, options?: FontAssetFetchOptions): FontAsset;
+    // (undocumented)
+    getGlyph(glyphIndex: number): GlyphData | null;
+    // (undocumented)
+    getGlyphIndex(codePoint: number): number;
+    // (undocumented)
+    getKerning(leftGlyphIndex: number, rightGlyphIndex: number): number;
+    // (undocumented)
+    getPairAdjustment(leftGlyphIndex: number, rightGlyphIndex: number): PairAdjustment | null;
+    // (undocumented)
+    get metrics(): FontMetrics;
+    // (undocumented)
+    get msdfAtlasPageSize(): number;
+    // (undocumented)
+    get msdfAtlasSettings(): FontAssetMSDFAtlasSettings;
+    // (undocumented)
+    get msdfGlyphSize(): number;
+}
+
+// @public (undocumented)
+export type FontAssetFetchOptions = {
+    pageSize?: number;
+    glyphSize?: number;
+};
+
+// @public (undocumented)
+export type FontAssetMSDFAtlasSettings = Readonly<{
+    pageSize: number;
+    glyphSize: number;
+}>;
+
+// @public
+export type FontMetrics = {
+    unitsPerEm: number;
+    ascent: number;
+    descent: number;
+    lineGap: number;
+    glyphCount: number;
+};
+
+// @public
 export interface ForwardPlusOptions {
     depthPrepass: boolean;
     gpuPicking: boolean;
@@ -3089,6 +3185,9 @@ export class GaussianBlurBlitter extends Blitter {
 }
 
 // @public
+export function generateMSDF(glyph: GlyphData, options: MSDFOptions): MSDFBitmap;
+
+// @public
 export abstract class GenericMathNode extends BaseGraphNode {
     constructor(func: string, numArgs: number, outType?: Nullable<string>, inTypes?: Nullable<string[]>, explicitInTypes?: Nullable<Record<number, string[]>>, additionalInTypes?: Nullable<Record<number, string[]>>, originTypes?: string[]);
     readonly additionalInTypes: Nullable<Record<number, string[]>>;
@@ -3174,6 +3273,28 @@ export function getInput(): InputManager;
 
 // @public
 export function getRuntimeScriptProperties(ctor: GenericConstructor): RuntimeScriptPropertyInfo[];
+
+// @public
+export type GlyphContour = GlyphPoint[];
+
+// @public
+export type GlyphData = {
+    glyphIndex: number;
+    advanceWidth: number;
+    leftSideBearing: number;
+    xMin: number;
+    yMin: number;
+    xMax: number;
+    yMax: number;
+    contours: GlyphContour[];
+};
+
+// @public
+export type GlyphPoint = {
+    x: number;
+    y: number;
+    onCurve: boolean;
+};
 
 // @public
 export class GPUClothSystem {
@@ -3931,6 +4052,19 @@ export interface InstanceData {
 }
 
 // @public
+export class InstanceIndexNode extends BaseGraphNode {
+    constructor();
+    static getSerializationCls(): {
+        ctor: typeof InstanceIndexNode;
+        name: string;
+        getProps(): never[];
+    };
+    protected getType(): string;
+    toString(): string;
+    protected validate(): string;
+}
+
+// @public
 export type InstanceUniformType = 'float' | 'vec2' | 'vec3' | 'vec4' | 'rgb' | 'rgba';
 
 // @public
@@ -4392,10 +4526,10 @@ export class MaxNode extends GenericMathNode {
     };
 }
 
-// Warning: (ae-forgotten-export) The symbol "Mesh_base" needs to be exported by the entry point index.d.ts
+// Warning: (ae-forgotten-export) The symbol "MeshBase" needs to be exported by the entry point index.d.ts
 //
 // @public
-export class Mesh extends Mesh_base implements BatchDrawable {
+export class Mesh extends MeshBase implements BatchDrawable {
     constructor(scene: Scene, primitive?: Primitive, material?: MeshMaterial);
     get castShadow(): boolean;
     set castShadow(b: boolean);
@@ -4404,27 +4538,26 @@ export class Mesh extends Mesh_base implements BatchDrawable {
     getBoneMatrices(): Nullable<Texture2D<unknown>>;
     getInstanceId(_renderPass: RenderPass): string;
     getInstanceUniforms(): Float32Array<ArrayBuffer>;
-    getMaterial(): Nullable<MeshMaterial>;
+    getMaterial(): MeshMaterial | null;
     getMorphData(): Nullable<MorphData>;
     getMorphInfo(): Nullable<MorphInfo>;
     getMorphTargetName(index: number): Nullable<string>;
     getMorphWeight(name: string): number;
-    getName(): string;
     getNode(): this;
     getNumMorphTargets(): number;
     getPickTarget(): PickTarget;
-    getPrimitive(): Nullable<Primitive>;
+    getPrimitive(): Primitive | null;
     getQueueType(): number;
     isBatchable(): this is BatchDrawable;
     isMesh(): this is Mesh;
     isUnlit(): boolean;
-    get material(): Nullable<MeshMaterial>;
-    set material(m: Nullable<MeshMaterial>);
+    get material(): MeshMaterial | null;
+    set material(m: MeshMaterial | null);
     needSceneColor(): boolean;
     needSceneDepth(): boolean;
     protected onDispose(): void;
-    get primitive(): Nullable<Primitive>;
-    set primitive(prim: Nullable<Primitive>);
+    get primitive(): Primitive | null;
+    set primitive(prim: Primitive | null);
     setAnimatedBoundingBox(bbox: Nullable<BoundingBox>): void;
     setBoneMatrices(matrices: Nullable<Texture2D>): void;
     setMorphData(data: Nullable<MorphData>): void;
@@ -4655,6 +4788,201 @@ export class MorphTargetTrack extends AnimationTrack<MorphState> {
     get originBoundingBox(): Nullable<AABB>;
     set originBoundingBox(box: Nullable<AABB>);
     reset(node: SceneNode): void;
+}
+
+// @public
+export type MSDFBitmap = {
+    width: number;
+    height: number;
+    pixels: Uint8Array<ArrayBuffer>;
+    scale: number;
+    translateX: number;
+    translateY: number;
+};
+
+// @public
+export type MSDFOptions = {
+    width: number;
+    height: number;
+    range: number;
+    padding?: number;
+};
+
+// @public
+export type MSDFShape = {
+    contours: ColoredEdge[][];
+    sourceContours: GlyphContour[];
+};
+
+// @public
+export class MSDFText extends GraphNode {
+    constructor(scene: Scene);
+    // (undocumented)
+    get anchor(): Immutable<Vector2>;
+    set anchor(value: Immutable<Vector2>);
+    // (undocumented)
+    get anchorX(): number;
+    set anchorX(value: number);
+    // (undocumented)
+    get anchorY(): number;
+    set anchorY(value: number);
+    // Warning: (ae-forgotten-export) The symbol "MeshDrawable" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    get batches(): MeshDrawable<MSDFTextMaterial>[];
+    // (undocumented)
+    get castShadow(): boolean;
+    set castShadow(value: boolean);
+    // (undocumented)
+    get fontAsset(): FontAsset | null;
+    set fontAsset(font: FontAsset | null);
+    // (undocumented)
+    get fontSize(): number;
+    set fontSize(value: number);
+    // (undocumented)
+    isMSDFText(): this is MSDFText;
+    // (undocumented)
+    get maxWidth(): number;
+    set maxWidth(value: number);
+    // (undocumented)
+    protected onDispose(): void;
+    // (undocumented)
+    get outlineColor(): Immutable<Vector3>;
+    set outlineColor(value: Immutable<Vector3>);
+    // (undocumented)
+    get outlineWidth(): number;
+    set outlineWidth(value: number);
+    // (undocumented)
+    get text(): string;
+    set text(value: string);
+    // Warning: (ae-forgotten-export) The symbol "TextAlign" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    get textAlign(): TextAlign;
+    set textAlign(value: TextAlign);
+    // (undocumented)
+    get textColor(): Immutable<Vector3>;
+    set textColor(value: Immutable<Vector3>);
+    // (undocumented)
+    update(): void;
+}
+
+// @public (undocumented)
+export class MSDFTextAtlasManager {
+    constructor();
+    // (undocumented)
+    clear(): void;
+    // (undocumented)
+    configureAtlas(font: FontAsset, glyphSize: number, atlasSize: number, distanceRange?: number, padding?: number): MSDFGlyphAtlas;
+    // Warning: (ae-forgotten-export) The symbol "MSDFGlyphAtlas" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    getAtlas(font: FontAsset): MSDFGlyphAtlas;
+    // (undocumented)
+    releaseAtlas(font: FontAsset): boolean;
+}
+
+// @public
+export class MSDFTextMaterial extends MeshMaterial implements Clonable<MSDFTextMaterial> {
+    constructor();
+    // (undocumented)
+    applyUniformValues(bindGroup: BindGroup, ctx: DrawContext, pass: number): void;
+    // (undocumented)
+    get atlasTexture(): _zephyr3d_base.Nullable<Texture2D<unknown>>;
+    set atlasTexture(tex: _zephyr3d_base.Nullable<Texture2D<unknown>>);
+    // (undocumented)
+    clone(): MSDFTextMaterial;
+    // (undocumented)
+    copyFrom(other: this): void;
+    // (undocumented)
+    get distanceRange(): number;
+    set distanceRange(value: number);
+    // (undocumented)
+    static FEATURE_TEXT_ATLAS: number;
+    // (undocumented)
+    fragmentShader(scope: PBFunctionScope): void;
+    // (undocumented)
+    protected onDispose(): void;
+    // (undocumented)
+    get outlineColor(): Immutable<Vector3>;
+    set outlineColor(value: Immutable<Vector3>);
+    // (undocumented)
+    get outlineWidth(): number;
+    set outlineWidth(value: number);
+    // (undocumented)
+    get smallGlyphThreshold(): number;
+    set smallGlyphThreshold(value: number);
+    // (undocumented)
+    get textColor(): Immutable<Vector3>;
+    set textColor(value: Immutable<Vector3>);
+    // (undocumented)
+    vertexShader(scope: PBFunctionScope): void;
+}
+
+// @public
+export class MSDFTextSprite extends GraphNode {
+    constructor(scene: Scene);
+    // (undocumented)
+    get anchor(): Immutable<Vector2>;
+    set anchor(value: Immutable<Vector2>);
+    // (undocumented)
+    get anchorX(): number;
+    set anchorX(value: number);
+    // (undocumented)
+    get anchorY(): number;
+    set anchorY(value: number);
+    // (undocumented)
+    get batches(): MeshDrawable<MSDFTextSpriteMaterial>[];
+    // (undocumented)
+    calculateLocalTransform(outMatrix: Matrix4x4): void;
+    // (undocumented)
+    computeWorldBoundingVolume(localBV: Nullable<BoundingVolume>): BoundingBox | null;
+    // (undocumented)
+    get fontAsset(): FontAsset | null;
+    set fontAsset(font: FontAsset | null);
+    // (undocumented)
+    get fontSize(): number;
+    set fontSize(value: number);
+    // (undocumented)
+    isMSDFTextSprite(): this is MSDFTextSprite;
+    // (undocumented)
+    get maxWidth(): number;
+    set maxWidth(value: number);
+    // (undocumented)
+    protected onDispose(): void;
+    // (undocumented)
+    get outlineColor(): Immutable<Vector3>;
+    set outlineColor(value: Immutable<Vector3>);
+    // (undocumented)
+    get outlineWidth(): number;
+    set outlineWidth(value: number);
+    // (undocumented)
+    get text(): string;
+    set text(value: string);
+    // (undocumented)
+    get textAlign(): TextAlign;
+    set textAlign(value: TextAlign);
+    // (undocumented)
+    get textColor(): Immutable<Vector3>;
+    set textColor(value: Immutable<Vector3>);
+    // (undocumented)
+    update(): void;
+}
+
+// @public
+export class MSDFTextSpriteMaterial extends MSDFTextMaterial implements Clonable<MSDFTextSpriteMaterial> {
+    constructor();
+    // (undocumented)
+    applyUniformValues(bindGroup: BindGroup, ctx: DrawContext, pass: number): void;
+    // (undocumented)
+    clone(): MSDFTextSpriteMaterial;
+    // (undocumented)
+    copyFrom(other: this): void;
+    // (undocumented)
+    get rotation(): number;
+    set rotation(value: number);
+    // (undocumented)
+    vertexShader(scope: PBFunctionScope): void;
 }
 
 // @public @deprecated
@@ -5025,6 +5353,14 @@ export class OrthoCamera extends Camera {
     get window(): Nullable<Immutable<number[]>>;
     set window(val: Nullable<Immutable<number[]>>);
 }
+
+// @public
+export type PairAdjustment = {
+    firstXPlacement: number;
+    firstXAdvance: number;
+    secondXPlacement: number;
+    secondXAdvance: number;
+};
 
 // @public
 class PannerNode_2 extends BaseGraphNode {
@@ -5702,6 +6038,7 @@ export type PropertyAccessorOptions = {
     edit?: PropEdit;
     minValue?: number;
     maxValue?: number;
+    multiline?: boolean;
     speed?: number;
     animatable?: boolean;
     mimeTypes?: string[];
@@ -6099,14 +6436,15 @@ export class ResourceManager {
     deserializeObject<T extends object>(ctx: any, json: Record<string, unknown>): Promise<Nullable<T>>;
     deserializeObjectProps(obj: any, json: any, info?: SerializableClass): Promise<void>;
     get editorMode(): boolean;
-    fetchBinary(id: string): Promise<Nullable<ArrayBuffer>>;
-    fetchMaterial<T extends Material = MeshMaterial>(id: string): Promise<Nullable<T>>;
-    fetchModel(id: string, scene: Scene, options?: ModelFetchOptions): Promise<{
+    fetchBinary(path: string): Promise<Nullable<ArrayBuffer>>;
+    fetchFontAsset(path: string, options?: FontAssetFetchOptions): Promise<Nullable<FontAsset>>;
+    fetchMaterial<T extends Material = MeshMaterial>(path: string): Promise<Nullable<T>>;
+    fetchModel(path: string, scene: Scene, options?: ModelFetchOptions): Promise<{
         group: SceneNode;
         animationSet: AnimationSet;
     }>;
-    fetchPrimitive<T extends Primitive = Primitive>(id: string): Promise<Nullable<T>>;
-    fetchTexture<T extends Texture2D | TextureCube | Texture2DArray>(id: string, options?: TextureFetchOptions<T>): Promise<T>;
+    fetchPrimitive<T extends Primitive = Primitive>(path: string): Promise<Nullable<T>>;
+    fetchTexture<T extends Texture2D | TextureCube | Texture2DArray>(path: string, options?: TextureFetchOptions<T>): Promise<T>;
     findAnimationTarget(node: SceneNode, track: PropertyTrack): object | null;
     getAllPropertiesByClass(cls: Nullable<SerializableClass>): PropertyAccessor[];
     getAssetId(asset: unknown): string | null;
@@ -6115,6 +6453,7 @@ export class ResourceManager {
     getClassByObject(obj: object): SerializableClass | null;
     getClassByProperty(prop: PropertyAccessor): Nullable<SerializableClass>;
     getClasses(): SerializableClass[];
+    getFontAsset(path: string): Nullable<FontAsset>;
     getPropertiesByClass(cls: SerializableClass): PropertyAccessor[] | null;
     getPropertyByClass(cls: SerializableClass, name: string): PropertyAccessor | null;
     getPropertyByName(name: string): PropertyAccessor;
@@ -6130,6 +6469,7 @@ export class ResourceManager {
     loadScene(filename: string): Promise<Nullable<Scene>>;
     loadTextureFromBuffer<T extends BaseTexture>(arrayBuffer: ArrayBuffer | TypedArray, mimeType: string, srgb?: boolean, samplerOptions?: SamplerOptions, texture?: BaseTexture): Promise<T>;
     registerClass(cls: SerializableClass): void;
+    releaseFontAsset(asset: FontAsset | string): boolean;
     reloadBluePrintMaterials(filter?: (m: PBRBluePrintMaterial) => boolean): Promise<void>;
     saveScene(scene: Scene, filename: string): Promise<void>;
     serializeObject(obj: any, json?: any, asyncTasks?: Nullable<Promise<unknown>[]>): Promise<any>;
@@ -6447,6 +6787,8 @@ export class SceneNode extends SceneNode_base implements IDisposable {
     isGraphNode(): this is GraphNode;
     isLight(): this is BaseLight;
     isMesh(): this is Mesh;
+    isMSDFText(): this is MSDFText;
+    isMSDFTextSprite(): this is MSDFTextSprite;
     isParentOf(child: Nullable<SceneNode>): boolean;
     isParticleSystem(): this is ParticleSystem;
     isPunctualLight(): this is PunctualLight;
@@ -7558,6 +7900,30 @@ export class TetrahedronShape extends Shape<TetrahedronCreationOptions> implemen
 }
 
 // @public
+export class TextSprite extends BaseSprite<StandardSpriteMaterial> {
+    constructor(scene: Scene);
+    // (undocumented)
+    get font(): string;
+    set font(value: string);
+    // (undocumented)
+    isSprite(): this is Sprite;
+    // (undocumented)
+    get resolutionX(): number;
+    set resolutionX(value: number);
+    // (undocumented)
+    get resolutionY(): number;
+    set resolutionY(value: number);
+    // (undocumented)
+    get text(): string;
+    set text(value: string);
+    // (undocumented)
+    get textColor(): Immutable<Vector3>;
+    set textColor(value: Immutable<Vector3>);
+    // (undocumented)
+    update(): void;
+}
+
+// @public
 export type TextureFetchOptions<T extends BaseTexture> = {
     mimeType?: string;
     linearColorSpace?: boolean;
@@ -7769,6 +8135,19 @@ export class VertexColorNode extends BaseGraphNode {
 }
 
 // @public
+export class VertexIndexNode extends BaseGraphNode {
+    constructor();
+    static getSerializationCls(): {
+        ctor: typeof VertexIndexNode;
+        name: string;
+        getProps(): never[];
+    };
+    protected getType(): string;
+    toString(): string;
+    protected validate(): string;
+}
+
+// @public
 export class VertexNormalNode extends BaseGraphNode {
     constructor();
     static getSerializationCls(): {
@@ -7777,6 +8156,18 @@ export class VertexNormalNode extends BaseGraphNode {
         getProps(): never[];
     };
     protected getType(id: number): "float" | "vec3";
+    toString(): string;
+    protected validate(): string;
+}
+
+// @public
+export class VertexOutputNode extends BaseGraphNode {
+    constructor(index: number);
+    // (undocumented)
+    static getSerializationCls(): SerializableClass;
+    protected getType(id: number): "float" | "vec4";
+    // (undocumented)
+    get index(): number;
     toString(): string;
     protected validate(): string;
 }

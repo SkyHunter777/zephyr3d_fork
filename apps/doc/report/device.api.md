@@ -11,7 +11,9 @@ import { Immutable } from '@zephyr3d/base';
 import { MaybeArray } from '@zephyr3d/base';
 import { Nullable } from '@zephyr3d/base';
 import { Observable } from '@zephyr3d/base';
+import { Rect } from '@zephyr3d/base';
 import { TypedArray } from '@zephyr3d/base';
+import { Vector3 } from '@zephyr3d/base';
 import { Vector4 } from '@zephyr3d/base';
 import { VectorBase } from '@zephyr3d/base';
 
@@ -57,7 +59,8 @@ export interface AbstractDevice extends IEventTarget<DeviceEventMap> {
     deviceYToScreen(val: number): number;
     draw(primitiveType: PrimitiveType, first: number, count: number): void;
     drawInstanced(primitiveType: PrimitiveType, first: number, count: number, numInstances: number): void;
-    drawText(text: string, x: number, y: number, color: string, viewport?: Immutable<number[]>): void;
+    drawText(text: string, x: number, y: number, color: string | Vector3 | Vector4): void;
+    drawText(text: string, rect: Immutable<Rect>, color: string | Vector3 | Vector4, options?: DrawTextLayoutOptions): void;
     endCapture(): RenderBundle;
     endFrame(): void;
     executeRenderBundle(renderBundle: RenderBundle): void;
@@ -103,7 +106,7 @@ export interface AbstractDevice extends IEventTarget<DeviceEventMap> {
     screenXToDevice(val: number): number;
     screenYToDevice(val: number): number;
     setBindGroup(index: number, bindGroup: BindGroup, dynamicOffsets?: Nullable<Iterable<number>>): void;
-    setFont(fontName: string): void;
+    setFont(fontName: Nullable<string>): void;
     setFramebuffer(rt: Nullable<FrameBuffer>): void;
     setFramebuffer(color: BaseTexture[], depth?: BaseTexture, sampleCount?: number): void;
     // (undocumented)
@@ -111,6 +114,7 @@ export interface AbstractDevice extends IEventTarget<DeviceEventMap> {
     setProgram(program: Nullable<GPUProgram>): void;
     setRenderStates(renderStates: Nullable<RenderStateSet>): void;
     setScissor(scissor: Nullable<Immutable<DeviceViewport | number[]>>): void;
+    setTextRenderStates(states: Nullable<RenderStateSet>): void;
     setVertexLayout(vertexData: Nullable<VertexLayout>): void;
     setViewport(vp: Nullable<Immutable<DeviceViewport | number[]>>): void;
     type: string;
@@ -268,7 +272,9 @@ export abstract class BaseDevice extends Observable<DeviceEventMap> {
     // (undocumented)
     protected abstract _drawInstanced(primitiveType: PrimitiveType, first: number, count: number, numInstances: number): void;
     // (undocumented)
-    drawText(text: string, x: number, y: number, color: string, viewport?: Immutable<number[]>): void;
+    drawText(text: string, x: number, y: number, color: string | Vector3 | Vector4): void;
+    // (undocumented)
+    drawText(text: string, rect: Immutable<Rect>, color: string | Vector3 | Vector4, options?: DrawTextLayoutOptions): void;
     // (undocumented)
     enableGPUTimeRecording(enable: boolean): void;
     // (undocumented)
@@ -415,7 +421,7 @@ export abstract class BaseDevice extends Observable<DeviceEventMap> {
     // (undocumented)
     abstract setBindGroup(index: number, bindGroup: BindGroup, dynamicOffsets?: Nullable<Iterable<number>>): void;
     // (undocumented)
-    setFont(fontName: string): void;
+    setFont(fontName: Nullable<string>): void;
     // (undocumented)
     setFramebuffer(rt: Nullable<FrameBuffer>): void;
     // (undocumented)
@@ -428,6 +434,8 @@ export abstract class BaseDevice extends Observable<DeviceEventMap> {
     abstract setRenderStates(renderStates: Nullable<RenderStateSet>): void;
     // (undocumented)
     abstract setScissor(scissor: Nullable<Immutable<number[] | DeviceViewport>>): void;
+    // (undocumented)
+    setTextRenderStates(renderStates: Nullable<RenderStateSet>): void;
     // (undocumented)
     abstract setVertexLayout(vertexData: Nullable<VertexLayout>): void;
     // (undocumented)
@@ -692,8 +700,17 @@ export type DeviceViewport = {
 
 // @public
 export class DrawText {
-    static drawText(device: AbstractDevice, text: string, color: string, x: number, y: number, viewport?: Immutable<number[]>): void;
-    static setFont(device: AbstractDevice, name: string): void;
+    static drawText(device: AbstractDevice, text: string, color: string | Vector3 | Vector4, x: number, y: number): void;
+    static drawText(device: AbstractDevice, text: string, color: string | Vector3 | Vector4, rect: Immutable<Rect>, options?: DrawTextLayoutOptions): void;
+    static setFont(device: AbstractDevice, name: Nullable<string>): void;
+    static setRenderStates(renderStates: Nullable<RenderStateSet>): void;
+}
+
+// @public
+export interface DrawTextLayoutOptions {
+    halign?: TextHorizontalAlignment;
+    valign?: TextVerticalAlignment;
+    wordWrap?: boolean;
 }
 
 // @public
@@ -2339,6 +2356,9 @@ export type StructuredValue = number | TypedArray | VectorBase | {
 };
 
 // @public
+export type TextHorizontalAlignment = 'left' | 'center' | 'right';
+
+// @public
 export interface Texture2D<T = unknown> extends BaseTexture<T> {
     // (undocumented)
     createWithMipmapData(data: TextureMipmapData, sRGB: boolean, creationFlags?: number): void;
@@ -2376,12 +2396,15 @@ export class TextureAtlasManager {
     constructor(device: AbstractDevice, binWidth: number, binHeight: number, rectBorderWidth: number, linearSpace?: boolean);
     get atlasTextureRestoreHandler(): Nullable<(tex: BaseTexture) => void>;
     set atlasTextureRestoreHandler(f: Nullable<(tex: BaseTexture) => void>);
+    get binHeight(): number;
+    get binWidth(): number;
     clear(): void;
     getAtlasInfo(key: string): AtlasInfo | null;
     getAtlasTexture(index: number): Texture2D<unknown> | undefined;
     isEmpty(): boolean;
     pushBitmap(key: string, bitmap: ImageData | ImageBitmap): AtlasInfo | null;
     pushCanvas(key: string, ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): AtlasInfo | null;
+    get rectBorderWidth(): number;
 }
 
 // @public
@@ -2526,6 +2549,9 @@ export interface TextureVideo<T = unknown> extends BaseTexture<T> {
     // (undocumented)
     updateVideoFrame(): boolean;
 }
+
+// @public
+export type TextVerticalAlignment = 'top' | 'center' | 'bottom';
 
 // @public
 export type TypeDetailInfo = PrimitiveTypeDetail | StructTypeDetail | ArrayTypeDetail | PointerTypeDetail | AtomicTypeInfoDetail | SamplerTypeDetail | TextureTypeDetail | FunctionTypeDetail | null;
