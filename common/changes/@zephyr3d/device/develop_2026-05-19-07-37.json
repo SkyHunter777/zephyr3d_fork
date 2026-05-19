@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "packageName": "@zephyr3d/device",
+      "comment": "Update draw text helper function",
+      "type": "patch"
+    }
+  ],
+  "packageName": "@zephyr3d/device"
+}
