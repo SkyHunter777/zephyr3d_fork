@@ -37,6 +37,7 @@
     "build:assistant-types-index": "node ./scripts/build-assistant-types-index.cjs",
     "build:lib": "cross-env NODE_OPTIONS=--max_old_space_size=8192 rollup -c --silent",
     "serve": "web-dev-server --no-cache --open dist/index.html",
+    "deploy": "npm run build && shx rm -rf ../../apps/homepage/editor && shx cp -R dist ../../apps/homepage/editor",
     "electron:start": "electron .",
     "electron:dev": "rush build -t editor && electron .",
     "electron:prepare": "node ./scripts/prepare-electron-app.cjs",

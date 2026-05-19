@@ -17,9 +17,10 @@
     "build:web": "npm run build:copy && cross-env NODE_OPTIONS=--max_old_space_size=8192 rollup -c --silent",
     "build:site": "shx rm -rf dist && shx rm -f .buildcache.json && shx rm -f .buildcache.tmp.json && npm run build:web && npm run build:doc",
     "build:check": "tsc -p . --noEmit",
+    "deploy": "npm run build:site && shx rm -rf ../homepage/doc && shx cp -R dist/web ../homepage/doc",
     "lint": "cross-env NODE_OPTIONS=--max_old_space_size=8192 eslint \"src/**/*.js\" -f compact",
     "lint-fix": "cross-env NODE_OPTIONS=--max_old_space_size=8192 eslint --fix \"src/**/*.ts\" -f compact",
-    "serve": "web-dev-server --no-cache --watch --open dist/web/index.html"
+    "serve": "web-dev-server --no-cache --watch --open ../homepage/doc/index.html"
   },
   "engines": {
     "node": ">=16.18.0"
