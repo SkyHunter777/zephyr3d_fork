@@ -1,0 +1,3 @@
+[submodule "apps/homepage"]
+	path = apps/homepage
+	url = git@github.com:gavinyork/zephyr3d-homepage.git
