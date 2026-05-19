@@ -23,6 +23,8 @@ import {
   normalizeScriptAttachments,
   ScriptAttachment
 } from './script_attachment';
+import type { MSDFTextSprite } from './msdftextsprite';
+import type { MSDFText } from './msdftext';
 
 /**
  * Iteration callback used by traversal helpers.
@@ -584,6 +586,14 @@ export class SceneNode
   }
   /** Type guard: true if this node is a sprite */
   isSprite(): this is Sprite {
+    return false;
+  }
+  /** Type guard: true if this node is a MSDF text sprite */
+  isMSDFTextSprite(): this is MSDFTextSprite {
+    return false;
+  }
+  /** Type guard: true if this node is a MSDF text sprite */
+  isMSDFText(): this is MSDFText {
     return false;
   }
   /** Type guard: true if this node is a water node. */

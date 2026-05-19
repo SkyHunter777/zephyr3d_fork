@@ -163,8 +163,6 @@ export type MorphInfo = { data: TypedArray; buffer?: DRef<GPUDataBuffer>; names:
  * @public
  */
 export interface Drawable {
-  /** Gets the display name of the drawable object (for debugging/UI). */
-  getName(): string;
   /** Unique, stable identifier for the drawable, used in caches and picking. */
   getDrawableId(): number;
   /** Returns the owning scene node (transform and hierarchy). */

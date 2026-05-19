@@ -188,7 +188,8 @@ import type { BlueprintDAG, GraphStructure, IGraphNode, NodeConnection } from '.
 import type { Material, MeshMaterial, PBRBluePrintMaterial } from '../../material';
 import type { Primitive } from '../../render';
 import { FunctionCallNode, FunctionInputNode, FunctionOutputNode } from '../blueprint/material/func';
-import { getMSDFTextSpriteClass, getSpriteClass, getTextSpriteClass } from './scene/sprite';
+import { getSpriteClass } from './scene/sprite';
+import { getMSDFTextSpriteClass, getTextSpriteClass, getMSDFTextClass } from './scene/text';
 
 const defaultValues: Record<PropertyType, any> = {
   bool: false,
@@ -282,6 +283,7 @@ export class ResourceManager {
         getSpriteClass(),
         getTextSpriteClass(),
         getMSDFTextSpriteClass(),
+        getMSDFTextClass(),
         getWaterClass(this),
         getTerrainClass(this),
         getFFTWaveGeneratorClass(),

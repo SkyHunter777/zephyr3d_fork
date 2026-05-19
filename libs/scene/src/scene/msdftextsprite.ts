@@ -1,29 +1,23 @@
 import type { Immutable, Matrix4x4, Nullable } from '@zephyr3d/base';
 import { Vector2, Vector3 } from '@zephyr3d/base';
 import type { Scene } from './scene';
-import { Mesh } from './mesh';
 import type { BoundingVolume } from '../utility/bounding_volume';
 import { BoundingBox } from '../utility/bounding_volume';
-import type { BatchDrawable, DrawContext, RenderQueue } from '../render';
 import { Primitive } from '../render';
 import { MSDFTextSpriteMaterial } from '../material/msdf_text_sprite';
 import type { FontAsset } from '../text/font';
 import type { MSDFGlyphAtlas } from '../text/runtime';
 import { layoutText, type TextAlign, type TextLayoutResult } from '../text/runtime';
 import { getEngine } from '../app/api';
-import { RenderBundleWrapper } from '../render/renderbundle_wrapper';
+import { MeshDrawable } from './meshdrawable';
+import { GraphNode } from './graph_node';
 
-type TextSpritePageBatch = {
-  atlasIndex: number;
-  primitive: Primitive;
-  material: MSDFTextSpriteMaterial;
-};
 /**
  * Billboard MSDF text node.
  *
  * @public
  */
-export class MSDFTextSprite extends Mesh {
+export class MSDFTextSprite extends GraphNode {
   private _fontAsset: FontAsset | null;
   private _atlas: MSDFGlyphAtlas | null;
   private _text: string;
@@ -32,10 +26,11 @@ export class MSDFTextSprite extends Mesh {
   private _textAlign: TextAlign;
   private _anchor: Vector2;
   private _color: Vector3;
-  private _pageBatches: TextSpritePageBatch[];
-  private _materialSyncTag: number;
+  private _outlineWidth: number;
+  private _outlineColor: Vector3;
+  private _pageBatches: MeshDrawable<MSDFTextSpriteMaterial>[];
   constructor(scene: Scene) {
-    super(scene, new Primitive(), new MSDFTextSpriteMaterial());
+    super(scene);
     this._fontAsset = null;
     this._atlas = null;
     this._text = '';
@@ -44,26 +39,10 @@ export class MSDFTextSprite extends Mesh {
     this._textAlign = 'left';
     this._anchor = new Vector2(0.5, 0.5);
     this._color = new Vector3(1, 1, 1);
+    this._outlineWidth = 0;
+    this._outlineColor = new Vector3(0, 0, 0);
     this._pageBatches = [];
-    this._materialSyncTag = -1;
-    this._useRenderBundle = false;
-    this.castShadow = false;
-    this.material.textColor = this._color;
     this.scene!.queueUpdateNode(this);
-  }
-  get material() {
-    return super.material as MSDFTextSpriteMaterial;
-  }
-  set material(m) {
-    if (super.material !== m) {
-      super.material = m;
-      this._materialSyncTag = -1;
-      if (m) {
-        m.textColor = this._color ?? new Vector3(1, 1, 1);
-        m.distanceRange = this._atlas?.distanceRange ?? m.distanceRange;
-        m.atlasTexture = this._pageBatches?.[0]?.material.atlasTexture ?? null;
-      }
-    }
   }
   get fontAsset() {
     return this._fontAsset;
@@ -72,7 +51,6 @@ export class MSDFTextSprite extends Mesh {
     if (this._fontAsset !== font) {
       this._fontAsset = font;
       this._atlas = font ? getEngine().msdfTextAtlasManager.getAtlas(font) : null;
-      this._materialSyncTag = -1;
       this.scene!.queueUpdateNode(this);
     }
   }
@@ -148,27 +126,39 @@ export class MSDFTextSprite extends Mesh {
   set textColor(value: Immutable<Vector3>) {
     if (!this._color.equalsTo(value)) {
       this._color.set(value);
-      this.material.textColor = value;
       for (const batch of this._pageBatches) {
-        batch.material.textColor = value;
+        batch.material!.textColor = value;
       }
     }
   }
-  update(): void {
-    const shellPrimitive = this.primitive ?? new Primitive();
-    if (!this.primitive) {
-      this.primitive = shellPrimitive;
+  get outlineWidth() {
+    return this._outlineWidth;
+  }
+  set outlineWidth(value) {
+    if (this._outlineWidth !== value) {
+      this._outlineWidth = value;
+      for (const batch of this._pageBatches) {
+        batch.material!.outlineWidth = value;
+      }
     }
+  }
+  get outlineColor(): Immutable<Vector3> {
+    return this._outlineColor;
+  }
+  set outlineColor(value: Immutable<Vector3>) {
+    if (!this._outlineColor.equalsTo(value)) {
+      this._outlineColor.set(value);
+      for (const batch of this._pageBatches) {
+        batch.material!.outlineColor = value;
+      }
+    }
+  }
+  get batches() {
+    return this._pageBatches;
+  }
+  update(): void {
     if (!this._fontAsset || !this._atlas || !this._text) {
-      shellPrimitive.removeVertexBuffer('position');
-      shellPrimitive.removeVertexBuffer('texCoord0');
-      shellPrimitive.setIndexBuffer(null);
-      shellPrimitive.indexCount = 0;
-      shellPrimitive.setBoundingVolume(new BoundingBox());
-      this.material.atlasTexture = null;
       this.disposePageBatches();
-      this._materialSyncTag = this.material.changeTag;
-      RenderBundleWrapper.drawableChanged(this);
       return;
     }
     const layout = layoutText(this._atlas, this._fontAsset, this._text, this._fontSize, this._maxWidth);
@@ -188,41 +178,22 @@ export class MSDFTextSprite extends Mesh {
     for (let i = 0; i < pageIndices.length; i++) {
       const pageIndex = pageIndices[i];
       const geometry = geometries.pages.get(pageIndex)!;
-      const batch = this.ensurePageBatch(i, pageIndex);
-      updatePrimitiveGeometry(batch.primitive, geometry.positions, geometry.uvs, geometry.indices);
-      batch.primitive.setBoundingVolume(combinedBounds.clone());
-      batch.material.atlasTexture = this._atlas.getAtlasTexture(pageIndex) ?? null;
+      const batch = this.ensurePageBatch(i);
+      updatePrimitiveGeometry(batch.primitive!, geometry.positions, geometry.uvs, geometry.indices);
+      batch.primitive!.setBoundingVolume(combinedBounds.clone());
+      batch.material!.atlasTexture = this._atlas.getAtlasTexture(pageIndex) ?? null;
+      batch.material!.textColor = this._color;
+      batch.material!.distanceRange = this._atlas.distanceRange;
+      batch.material!.outlineWidth = this._outlineWidth;
+      batch.material!.outlineColor = this._outlineColor;
     }
     this.disposePageBatches(pageIndices.length);
-    shellPrimitive.setBoundingVolume(combinedBounds);
-    shellPrimitive.indexCount = 0;
-    this.material.atlasTexture = this._pageBatches[0]?.material.atlasTexture ?? null;
-    this.material.textColor = this._color;
-    this.material.distanceRange = this._atlas.distanceRange;
-    this.syncPageMaterials(true);
-    RenderBundleWrapper.drawableChanged(this);
-  }
-  draw(ctx: DrawContext, renderQueue: RenderQueue | null, _hash?: string) {
-    if (this._pageBatches.length === 0) {
-      return;
-    }
-    this.syncPageMaterials();
-    this.bind(ctx, renderQueue);
-    for (const batch of this._pageBatches) {
-      if (!batch.material.atlasTexture || batch.primitive.indexCount <= 0) {
-        continue;
-      }
-      batch.material.apply(ctx);
-      batch.material.draw(batch.primitive, ctx);
-    }
-  }
-  isBatchable(): this is BatchDrawable {
-    return false;
+    this.setBoundingVolume(combinedBounds);
   }
   calculateLocalTransform(outMatrix: Matrix4x4) {
     super.calculateLocalTransform(outMatrix);
-    if (this.material) {
-      this.material.rotation = -this.rotation.toEulerAngles().z;
+    for (const batch of this._pageBatches) {
+      batch.material!.rotation = -this.rotation.toEulerAngles().z;
     }
   }
   computeWorldBoundingVolume(localBV: Nullable<BoundingVolume>) {
@@ -241,45 +212,26 @@ export class MSDFTextSprite extends Mesh {
       new Vector3(p.x + extent, p.y + extent, p.z + extent)
     );
   }
+  isMSDFTextSprite(): this is MSDFTextSprite {
+    return true;
+  }
   protected onDispose() {
     this._atlas = null;
     this.disposePageBatches();
     super.onDispose();
   }
-  private ensurePageBatch(index: number, atlasIndex: number) {
+  private ensurePageBatch(index: number) {
     let batch = this._pageBatches[index];
     if (!batch) {
-      batch = {
-        atlasIndex,
-        primitive: new Primitive(),
-        material: new MSDFTextSpriteMaterial()
-      };
+      batch = new MeshDrawable(this, new MSDFTextSpriteMaterial(), new Primitive());
       this._pageBatches[index] = batch;
-    } else {
-      batch.atlasIndex = atlasIndex;
     }
     return batch;
   }
   private disposePageBatches(fromIndex = 0) {
     for (let i = this._pageBatches.length - 1; i >= fromIndex; i--) {
-      this._pageBatches[i].primitive.dispose();
-      this._pageBatches[i].material.dispose();
+      this._pageBatches[i].dispose();
       this._pageBatches.splice(i, 1);
-    }
-  }
-  private syncPageMaterials(force = false) {
-    const tag = this.material.changeTag;
-    if (!force && this._materialSyncTag === tag) {
-      return;
-    }
-    for (const batch of this._pageBatches) {
-      const tex = batch.material.atlasTexture;
-      batch.material.copyFrom(this.material);
-      batch.material.atlasTexture = tex;
-    }
-    this._materialSyncTag = tag;
-    if (!force) {
-      RenderBundleWrapper.drawableChanged(this);
     }
   }
 }

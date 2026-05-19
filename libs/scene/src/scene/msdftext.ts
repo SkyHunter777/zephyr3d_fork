@@ -1,62 +1,55 @@
+import type { AABB, Immutable } from '@zephyr3d/base';
+import { Vector2, Vector3 } from '@zephyr3d/base';
 import type { Scene } from './scene';
-import { Mesh } from './mesh';
 import { BoundingBox } from '../utility/bounding_volume';
-import type { BatchDrawable, DrawContext, RenderQueue } from '../render';
 import { Primitive } from '../render';
-import { MSDFTextMaterial } from '../material/msdf_text';
-import { type Immutable, Vector3 } from '@zephyr3d/base';
 import type { FontAsset } from '../text/font';
 import type { MSDFGlyphAtlas } from '../text/runtime';
-import { layoutText, type TextLayoutResult } from '../text/runtime';
+import { layoutText, type TextAlign, type TextLayoutResult } from '../text/runtime';
 import { getEngine } from '../app/api';
-import { RenderBundleWrapper } from '../render/renderbundle_wrapper';
+import { MeshDrawable } from './meshdrawable';
+import { GraphNode } from './graph_node';
+import { MSDFTextMaterial } from '../material/msdf_text';
 
-type TextPageBatch = {
-  atlasIndex: number;
-  primitive: Primitive;
-  material: MSDFTextMaterial;
-};
 /**
- * Atlas-based runtime MSDF text mesh.
+ * Billboard MSDF text node.
  *
  * @public
  */
-export class MSDFText extends Mesh {
+export class MSDFText extends GraphNode {
   private _fontAsset: FontAsset | null;
   private _atlas: MSDFGlyphAtlas | null;
+  private _castShadow: boolean;
   private _text: string;
   private _fontSize: number;
   private _maxWidth: number;
+  private _textAlign: TextAlign;
+  private _anchor: Vector2;
   private _color: Vector3;
-  private _pageBatches: TextPageBatch[];
-  private _materialSyncTag: number;
+  private _outlineWidth: number;
+  private _outlineColor: Vector3;
+  private _pageBatches: MeshDrawable<MSDFTextMaterial>[];
   constructor(scene: Scene) {
-    super(scene, new Primitive(), new MSDFTextMaterial());
+    super(scene);
+    this._castShadow = false;
     this._fontAsset = null;
     this._atlas = null;
     this._text = '';
     this._fontSize = 32;
     this._maxWidth = 0;
+    this._textAlign = 'left';
+    this._anchor = new Vector2(0.5, 0.5);
     this._color = new Vector3(1, 1, 1);
+    this._outlineWidth = 0;
+    this._outlineColor = new Vector3(0, 0, 0);
     this._pageBatches = [];
-    this._materialSyncTag = -1;
-    this._useRenderBundle = false;
-    this.material.textColor = this._color;
     this.scene!.queueUpdateNode(this);
   }
-  get material() {
-    return super.material as MSDFTextMaterial;
+  get castShadow() {
+    return this._castShadow;
   }
-  set material(m) {
-    if (super.material !== m) {
-      super.material = m;
-      this._materialSyncTag = -1;
-      if (m) {
-        m.textColor = this._color;
-        m.distanceRange = this._atlas?.distanceRange ?? m.distanceRange;
-        m.atlasTexture = this._pageBatches[0]?.material.atlasTexture ?? null;
-      }
-    }
+  set castShadow(value) {
+    this._castShadow = value;
   }
   get fontAsset() {
     return this._fontAsset;
@@ -65,7 +58,6 @@ export class MSDFText extends Mesh {
     if (this._fontAsset !== font) {
       this._fontAsset = font;
       this._atlas = font ? getEngine().msdfTextAtlasManager.getAtlas(font) : null;
-      this._materialSyncTag = -1;
       this.scene!.queueUpdateNode(this);
     }
   }
@@ -96,122 +88,167 @@ export class MSDFText extends Mesh {
       this.scene!.queueUpdateNode(this);
     }
   }
+  get textAlign() {
+    return this._textAlign;
+  }
+  set textAlign(value: TextAlign) {
+    if (this._textAlign !== value) {
+      this._textAlign = value;
+      this.scene!.queueUpdateNode(this);
+    }
+  }
+  get anchorX() {
+    return this._anchor.x;
+  }
+  set anchorX(value) {
+    if (this._anchor.x !== value) {
+      this._anchor.x = value;
+      this.scene!.queueUpdateNode(this);
+      this.invalidateWorldBoundingVolume(false);
+    }
+  }
+  get anchorY() {
+    return this._anchor.y;
+  }
+  set anchorY(value) {
+    if (this._anchor.y !== value) {
+      this._anchor.y = value;
+      this.scene!.queueUpdateNode(this);
+      this.invalidateWorldBoundingVolume(false);
+    }
+  }
+  get anchor(): Immutable<Vector2> {
+    return this._anchor;
+  }
+  set anchor(value: Immutable<Vector2>) {
+    if (!this._anchor.equalsTo(value)) {
+      this._anchor.set(value);
+      this.scene!.queueUpdateNode(this);
+      this.invalidateWorldBoundingVolume(false);
+    }
+  }
   get textColor(): Immutable<Vector3> {
     return this._color;
   }
   set textColor(value: Immutable<Vector3>) {
     if (!this._color.equalsTo(value)) {
       this._color.set(value);
-      this.material.textColor = value;
       for (const batch of this._pageBatches) {
-        batch.material.textColor = value;
+        batch.material!.textColor = value;
       }
     }
   }
-  update(): void {
-    const shellPrimitive = this.primitive ?? new Primitive();
-    if (!this.primitive) {
-      this.primitive = shellPrimitive;
+  get outlineWidth() {
+    return this._outlineWidth;
+  }
+  set outlineWidth(value) {
+    if (this._outlineWidth !== value) {
+      this._outlineWidth = value;
+      for (const batch of this._pageBatches) {
+        batch.material!.outlineWidth = value;
+      }
     }
+  }
+  get outlineColor(): Immutable<Vector3> {
+    return this._outlineColor;
+  }
+  set outlineColor(value: Immutable<Vector3>) {
+    if (!this._outlineColor.equalsTo(value)) {
+      this._outlineColor.set(value);
+      for (const batch of this._pageBatches) {
+        batch.material!.outlineColor = value;
+      }
+    }
+  }
+  get batches() {
+    return this._pageBatches;
+  }
+  update(): void {
     if (!this._fontAsset || !this._atlas || !this._text) {
-      shellPrimitive.removeVertexBuffer('position');
-      shellPrimitive.removeVertexBuffer('texCoord0');
-      shellPrimitive.setIndexBuffer(null);
-      shellPrimitive.indexCount = 0;
-      shellPrimitive.setBoundingVolume(new BoundingBox());
-      this.material.atlasTexture = null;
       this.disposePageBatches();
-      this._materialSyncTag = this.material.changeTag;
-      RenderBundleWrapper.drawableChanged(this);
       return;
     }
     const layout = layoutText(this._atlas, this._fontAsset, this._text, this._fontSize, this._maxWidth);
-    const geometries = buildPagedGeometry(layout, this._fontAsset.metrics.unitsPerEm, this._fontSize);
-    const combinedBounds = new BoundingBox(
-      new Vector3(0, -layout.height, 0),
-      new Vector3(layout.width, layout.lineHeight, 0)
+    const bv = new BoundingBox();
+    bv.beginExtend();
+    const geometries = buildPagedSpriteGeometry(
+      layout,
+      this._fontAsset.metrics.unitsPerEm,
+      this._fontAsset.metrics.ascent,
+      this._fontSize,
+      this._anchor,
+      this._textAlign,
+      bv
     );
-    const pageIndices = [...geometries.keys()].sort((a, b) => a - b);
+    const pageIndices = [...geometries.pages.keys()].sort((a, b) => a - b);
     for (let i = 0; i < pageIndices.length; i++) {
       const pageIndex = pageIndices[i];
-      const geometry = geometries.get(pageIndex)!;
-      const batch = this.ensurePageBatch(i, pageIndex);
-      updatePrimitiveGeometry(batch.primitive, geometry.positions, geometry.uvs, geometry.indices);
-      batch.primitive.setBoundingVolume(combinedBounds.clone());
-      batch.material.atlasTexture = this._atlas.getAtlasTexture(pageIndex) ?? null;
+      const geometry = geometries.pages.get(pageIndex)!;
+      const batch = this.ensurePageBatch(i);
+      updatePrimitiveGeometry(batch.primitive!, geometry.positions, geometry.uvs, geometry.indices);
+      batch.primitive!.setBoundingVolume(bv);
+      batch.material!.atlasTexture = this._atlas.getAtlasTexture(pageIndex) ?? null;
+      batch.material!.textColor = this._color;
+      batch.material!.distanceRange = this._atlas.distanceRange;
+      batch.material!.outlineWidth = this._outlineWidth;
+      batch.material!.outlineColor = this._outlineColor;
     }
     this.disposePageBatches(pageIndices.length);
-    shellPrimitive.setBoundingVolume(combinedBounds);
-    shellPrimitive.indexCount = 0;
-    const primaryBatch = this._pageBatches[0];
-    this.material.atlasTexture = primaryBatch?.material.atlasTexture ?? null;
-    this.material.textColor = this._color;
-    this.material.distanceRange = this._atlas.distanceRange;
-    this.syncPageMaterials(true);
-    RenderBundleWrapper.drawableChanged(this);
+    this.setBoundingVolume(bv);
   }
-  draw(ctx: DrawContext, renderQueue: RenderQueue | null, _hash?: string) {
-    if (this._pageBatches.length === 0) {
-      return;
-    }
-    this.syncPageMaterials();
-    this.bind(ctx, renderQueue);
-    for (const batch of this._pageBatches) {
-      if (!batch.material.atlasTexture || batch.primitive.indexCount <= 0) {
-        continue;
-      }
-      batch.material.apply(ctx);
-      batch.material.draw(batch.primitive, ctx);
-    }
-  }
-  isBatchable(): this is BatchDrawable {
-    return false;
+  isMSDFText(): this is MSDFText {
+    return true;
   }
   protected onDispose() {
     this._atlas = null;
     this.disposePageBatches();
     super.onDispose();
   }
-  private ensurePageBatch(index: number, atlasIndex: number) {
+  private ensurePageBatch(index: number) {
     let batch = this._pageBatches[index];
     if (!batch) {
-      batch = {
-        atlasIndex,
-        primitive: new Primitive(),
-        material: new MSDFTextMaterial()
-      };
+      batch = new MeshDrawable(this, new MSDFTextMaterial(), new Primitive());
       this._pageBatches[index] = batch;
-    } else {
-      batch.atlasIndex = atlasIndex;
     }
     return batch;
   }
   private disposePageBatches(fromIndex = 0) {
     for (let i = this._pageBatches.length - 1; i >= fromIndex; i--) {
-      this._pageBatches[i].primitive.dispose();
-      this._pageBatches[i].material.dispose();
+      this._pageBatches[i].dispose();
       this._pageBatches.splice(i, 1);
-    }
-  }
-  private syncPageMaterials(force = false) {
-    const tag = this.material.changeTag;
-    if (!force && this._materialSyncTag === tag) {
-      return;
-    }
-    for (const batch of this._pageBatches) {
-      const tex = batch.material.atlasTexture;
-      batch.material.copyFrom(this.material);
-      batch.material.atlasTexture = tex;
-    }
-    this._materialSyncTag = tag;
-    if (!force) {
-      RenderBundleWrapper.drawableChanged(this);
     }
   }
 }
 
-function buildPagedGeometry(layout: TextLayoutResult, unitsPerEm: number, fontSize: number) {
+function buildPagedSpriteGeometry(
+  layout: TextLayoutResult,
+  unitsPerEm: number,
+  ascent: number,
+  fontSize: number,
+  anchor: Immutable<Vector2>,
+  textAlign: TextAlign,
+  bv: AABB
+) {
   const scale = fontSize / unitsPerEm;
+  const top = ascent * scale;
+  const bottom = top - layout.height;
+  const anchorOffsetX = layout.boxWidth * anchor.x;
+  const anchorOffsetY = bottom + layout.height * anchor.y;
+  const lineOffsets = layout.lines.map((line) => {
+    const gap = Math.max(layout.boxWidth - line.width, 0);
+    switch (textAlign) {
+      case 'center':
+        return gap * 0.5;
+      case 'right':
+        return gap;
+      default:
+        return 0;
+    }
+  });
+  let minX = -anchorOffsetX;
+  let maxX = layout.boxWidth - anchorOffsetX;
+  let minY = bottom - anchorOffsetY;
+  let maxY = top - anchorOffsetY;
   const pageGlyphs = new Map<number, TextLayoutResult['glyphs']>();
   for (const glyph of layout.glyphs) {
     let list = pageGlyphs.get(glyph.atlasGlyph.atlasIndex);
@@ -234,10 +271,15 @@ function buildPagedGeometry(layout: TextLayoutResult, unitsPerEm: number, fontSi
     for (let i = 0; i < glyphCount; i++) {
       const glyph = glyphs[i];
       const atlasGlyph = glyph.atlasGlyph;
-      const x0 = glyph.x + glyph.xOffset + atlasGlyph.planeLeft * scale;
-      const y0 = -glyph.y + atlasGlyph.planeTop * scale;
-      const x1 = glyph.x + glyph.xOffset + atlasGlyph.planeRight * scale;
-      const y1 = -glyph.y + atlasGlyph.planeBottom * scale;
+      const lineOffsetX = lineOffsets[glyph.lineIndex] ?? 0;
+      const x0 = lineOffsetX + glyph.x + glyph.xOffset + atlasGlyph.planeLeft * scale - anchorOffsetX;
+      const y0 = -glyph.y + atlasGlyph.planeTop * scale - anchorOffsetY;
+      const x1 = lineOffsetX + glyph.x + glyph.xOffset + atlasGlyph.planeRight * scale - anchorOffsetX;
+      const y1 = -glyph.y + atlasGlyph.planeBottom * scale - anchorOffsetY;
+      minX = Math.min(minX, x0, x1);
+      maxX = Math.max(maxX, x0, x1);
+      minY = Math.min(minY, y0, y1);
+      maxY = Math.max(maxY, y0, y1);
       const p = i * 12;
       positions[p + 0] = x0;
       positions[p + 1] = y0;
@@ -251,6 +293,9 @@ function buildPagedGeometry(layout: TextLayoutResult, unitsPerEm: number, fontSi
       positions[p + 9] = x1;
       positions[p + 10] = y1;
       positions[p + 11] = 0;
+      for (let k = 0; k < 4; k++) {
+        bv.extend3(positions[p + k * 3], positions[p + k * 3 + 1], positions[p + k * 3 + 2]);
+      }
       const t = i * 8;
       uvs[t + 0] = atlasGlyph.uMin;
       uvs[t + 1] = atlasGlyph.vMin;
@@ -271,7 +316,15 @@ function buildPagedGeometry(layout: TextLayoutResult, unitsPerEm: number, fontSi
     }
     pages.set(atlasIndex, { positions, uvs, indices });
   }
-  return pages;
+  return {
+    pages,
+    bounds: {
+      minX,
+      minY,
+      maxX,
+      maxY
+    }
+  };
 }
 
 function updatePrimitiveGeometry(

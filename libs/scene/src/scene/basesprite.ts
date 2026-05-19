@@ -58,12 +58,6 @@ export class BaseSprite<M extends SpriteMaterial>
     this._materialChangeTag = null;
   }
   /**
-   * {@inheritDoc Drawable.getName}
-   */
-  getName() {
-    return this._name;
-  }
-  /**
    * Returns the batch instance ID for the current render pass.
    */
   getInstanceId(_renderPass: RenderPass) {

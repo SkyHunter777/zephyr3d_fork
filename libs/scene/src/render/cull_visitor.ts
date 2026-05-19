@@ -12,7 +12,7 @@ import type { Visitor } from '../scene/visitor';
 import type { Camera } from '../camera/camera';
 import type { SceneNode } from '../scene/scene_node';
 import type { BatchGroup } from '../scene/batchgroup';
-import type { ParticleSystem, Sprite } from '../scene';
+import type { MSDFText, MSDFTextSprite, ParticleSystem, Sprite } from '../scene';
 import type { Water } from '../scene/water';
 
 /**
@@ -105,6 +105,10 @@ export class CullVisitor implements Visitor<SceneNode | OctreeNode> {
       return this.visitPunctualLight(target);
     } else if (target.isBatchGroup()) {
       return this.visitBatchGroup(target);
+    } else if (target.isMSDFTextSprite()) {
+      return this.visitMSDFTextSprite(target);
+    } else if (target.isMSDFText()) {
+      return this.visitMSDFText(target);
     } else {
       return false;
     }
@@ -162,6 +166,34 @@ export class CullVisitor implements Visitor<SceneNode | OctreeNode> {
       const clipState = this.getClipStateWithNode(node);
       if (clipState !== ClipState.NOT_CLIPPED) {
         this.push(this._camera, node);
+        return true;
+      }
+    }
+    return false;
+  }
+  visitMSDFText(node: MSDFText) {
+    if (
+      !node.hidden &&
+      (node.castShadow || !this._isShadowMapping) &&
+      (node.gpuPickable || !this._isGPUPicking)
+    ) {
+      const clipState = this.getClipStateWithNode(node);
+      if (clipState !== ClipState.NOT_CLIPPED) {
+        for (const batch of node.batches) {
+          this.push(this._camera, batch);
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+  visitMSDFTextSprite(node: MSDFTextSprite) {
+    if (!node.hidden && !this._isShadowMapping && (node.gpuPickable || !this._isGPUPicking)) {
+      const clipState = this.getClipStateWithNode(node);
+      if (clipState !== ClipState.NOT_CLIPPED) {
+        for (const batch of node.batches) {
+          this.push(this._camera, batch);
+        }
         return true;
       }
     }
