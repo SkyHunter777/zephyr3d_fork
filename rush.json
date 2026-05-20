@@ -444,6 +444,11 @@
       "shouldPublish": true
     },
     {
+      "packageName": "@zephyr3d/loaders",
+      "projectFolder": "libs/loaders",
+      "shouldPublish": true
+    },
+    {
       "packageName": "@zephyr3d/backend-webgl",
       "projectFolder": "libs/backend-webgl",
       "shouldPublish": true
