@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "packageName": "@zephyr3d/scene",
+      "comment": "Update resource management API",
+      "type": "patch"
+    }
+  ],
+  "packageName": "@zephyr3d/scene"
+}

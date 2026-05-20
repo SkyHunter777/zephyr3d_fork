@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "packageName": "@zephyr3d/editor",
+      "comment": "Integrate new loader API",
+      "type": "patch"
+    }
+  ],
+  "packageName": "@zephyr3d/editor"
+}
