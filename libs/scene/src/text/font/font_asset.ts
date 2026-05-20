@@ -1,10 +1,6 @@
+import type { FontAssetFetchOptions } from '../../asset/assetmanager';
 import { SFNTReader } from './sfnt_reader';
 import type { FontMetrics, GlyphContour, GlyphData, GlyphPoint } from './types';
-
-export type FontAssetFetchOptions = {
-  pageSize?: number;
-  glyphSize?: number;
-};
 
 export type FontAssetMSDFAtlasSettings = Readonly<{
   pageSize: number;

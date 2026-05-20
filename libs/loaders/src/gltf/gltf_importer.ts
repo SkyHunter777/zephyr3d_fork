@@ -1,8 +1,18 @@
-import type { DecoderModule } from 'draco3d';
-import type { InterpolationMode, Nullable, TypedArray, VFS } from '@zephyr3d/base';
-import { Vector3, Vector4, Matrix4x4, Quaternion, Interpolator, DRef } from '@zephyr3d/base';
+import type * as draco3d from 'draco3d';
+import type { InterpolationMode, Nullable, TypedArray } from '@zephyr3d/base';
+import {
+  Vector3,
+  Vector4,
+  Matrix4x4,
+  Quaternion,
+  Interpolator,
+  InterpolatorScalar,
+  ASSERT
+} from '@zephyr3d/base';
+import { AssetHierarchyNode } from '../model';
 import type {
-  AssetHierarchyNode,
+  AssetJointDynamicsCollider,
+  AssetJointDynamicsFlatPlane,
   AssetMeshData,
   AssetAnimationData,
   AssetSubMeshData,
@@ -11,33 +21,19 @@ import type {
   AssetPBRMaterialMR,
   AssetPBRMaterialSG,
   AssetMaterialCommon,
-  MaterialTextureInfo,
   AssetPBRMaterialCommon,
-  AssetAnimationTrack
-} from '../../model';
-import { SharedModel, AssetSkeleton, AssetScene } from '../../model';
-import { BoundingBox } from '../../../utility/bounding_volume';
-import { Primitive } from '../../../render/primitive';
-import type { MeshMaterial as M } from '../../../material/meshmaterial';
-import { UnlitMaterial } from '../../../material';
-import { ComponentType, GLTFAccessor } from './helpers';
-import { AbstractModelLoader } from '../loader';
-import type {
-  VertexSemantic,
-  GPUDataBuffer,
-  Texture2D,
-  IndexBuffer,
-  StructuredBuffer,
-  TextureAddressMode,
-  TextureFilterMode,
-  AbstractDevice
-} from '@zephyr3d/device';
-import type { AssetManager } from '../../assetmanager';
-import type { GlTf, Material, TextureInfo } from './gltf';
-import { PBRMetallicRoughnessMaterial } from '../../../material/pbrmr';
-import { PBRSpecularGlossinessMaterial } from '../../../material/pbrsg';
-import { DracoMeshDecoder } from '../../../utility/draco/decoder';
+  AssetAnimationTrack,
+  AssetPrimitiveInfo,
+  AssetTextureInfo,
+  AssetSpringBoneCollider,
+  AssetSpringBoneColliderGroup,
+  AssetSpringBoneJoint,
+  SharedModel
+} from '../model';
+import { AssetSkeleton, AssetScene } from '../model';
 import {
+  BoundingBox,
+  DracoMeshDecoder,
   MORPH_TARGET_COLOR,
   MORPH_TARGET_NORMAL,
   MORPH_TARGET_POSITION,
@@ -46,56 +42,62 @@ import {
   MORPH_TARGET_TEX1,
   MORPH_TARGET_TEX2,
   MORPH_TARGET_TEX3
-} from '../../../values';
-import { getDevice } from '../../../app/api';
+} from '@zephyr3d/scene';
+import { ColliderForce, getDevice } from '@zephyr3d/scene';
+import { ComponentType, GLTFAccessor } from './helpers';
+import type { VertexAttribFormat } from '@zephyr3d/device';
+import {
+  type VertexSemantic,
+  type TextureAddressMode,
+  type TextureFilterMode,
+  type AbstractDevice,
+  getVertexFormatComponentCount,
+  getVertexAttribName,
+  getVertexAttributeIndex
+} from '@zephyr3d/device';
+import type { AnimationChannel, AnimationSampler, GlTf, Material, TextureInfo } from './gltf_types';
+import { AbstractModelImporter } from '../importer';
+
 /** @internal */
 export interface GLTFContent extends GlTf {
-  _manager: AssetManager;
-  _VFS?: VFS;
   _loadedBuffers: Nullable<ArrayBuffer[]>;
   _accessors: GLTFAccessor[];
-  _bufferCache: Record<string, GPUDataBuffer>;
-  _textureCache: Record<string, Texture2D>;
-  _materialCache: Record<string, M>;
   _nodes: AssetHierarchyNode[];
   _meshes: AssetMeshData[];
   _device: AbstractDevice;
-  _dracoModule?: DecoderModule;
+  _dracoModule?: draco3d.DecoderModule;
+}
+
+declare global {
+  const DracoDecoderModule: draco3d.DracoDecoderModule;
 }
 
 /**
  * The GLTF/GLB model loader
- * @internal
+ * @public
  */
-export class GLTFLoader extends AbstractModelLoader {
-  supportMIMEType(mimeType: string) {
-    return mimeType === 'model/gltf+json' || mimeType === 'model/gltf-binary';
+export class GLTFImporter extends AbstractModelImporter {
+  async initDraco3d(gltf: GLTFContent) {
+    return new Promise<void>((resolve) => {
+      DracoDecoderModule({
+        onModuleLoaded: (module) => {
+          gltf._dracoModule = module;
+          resolve();
+        }
+      });
+    });
   }
-  async load(
-    assetManager: AssetManager,
-    url: string,
-    mimeType: string,
-    data: Blob,
-    decoderModule?: DecoderModule,
-    vfs?: VFS
-  ) {
+  async import(data: Blob, model: SharedModel) {
     const buffer = await data.arrayBuffer();
     if (this.isGLB(buffer)) {
-      return this.loadBinary(assetManager, url, buffer, vfs, decoderModule);
+      await this.loadBinary(buffer, model);
+      return;
     }
     const gltf = (await new Response(data).json()) as GLTFContent;
-    gltf._manager = assetManager;
-    gltf._VFS = vfs;
     gltf._loadedBuffers = null;
-    return this.loadJson(url, gltf, decoderModule);
+    await this.loadJson(gltf, model);
   }
-  async loadBinary(
-    assetManager: AssetManager,
-    url: string,
-    buffer: ArrayBuffer,
-    VFS?: VFS,
-    decoderModule?: DecoderModule
-  ) {
+  async loadBinary(buffer: ArrayBuffer, model: SharedModel) {
     const jsonChunkType = 0x4e4f534a;
     const binaryChunkType = 0x004e4942;
     let gltf: Nullable<GLTFContent> = null;
@@ -110,111 +112,453 @@ export class GLTFLoader extends AbstractModelLoader {
         buffers.push(buffer.slice(info.start, info.start + info.length));
       }
     }
-    if (gltf) {
-      gltf._manager = assetManager;
-      gltf._VFS = VFS;
-      gltf._loadedBuffers = buffers;
-      return this.loadJson(url, gltf, decoderModule);
-    }
-    return null;
+    ASSERT(!!gltf, 'Invalid GLTF format');
+    gltf._loadedBuffers = buffers;
+    await this.loadJson(gltf, model);
   }
-  async loadJson(url: string, gltf: GLTFContent, dracoDecoderModule?: DecoderModule) {
+  async loadJson(gltf: GLTFContent, model: SharedModel) {
     // check extensions
     if (
-      !dracoDecoderModule &&
+      !gltf._dracoModule &&
       gltf.extensionsRequired &&
       gltf.extensionsRequired.indexOf('KHR_draco_mesh_compression') >= 0
     ) {
-      console.error('Draco3d is required for loading model');
-      return null;
+      await this.initDraco3d(gltf);
+      ASSERT(!!gltf._dracoModule, 'Draco3d is required for loading model');
     }
-    gltf._dracoModule = dracoDecoderModule;
     gltf._accessors = [];
-    gltf._bufferCache = {};
-    gltf._textureCache = {};
-    gltf._materialCache = {};
     gltf._nodes = [];
     gltf._meshes = [];
     // check asset property
     const asset = gltf.asset;
     if (asset) {
       const gltfVersion = asset.version;
-      if (gltfVersion !== '2.0') {
-        console.error(`Invalid GLTF version: ${gltfVersion}`);
-        return null;
-      }
+      ASSERT(gltfVersion === '2.0', `Invalid GLTF version: ${gltfVersion}`);
     }
-    gltf._baseURI = url.substring(0, url.lastIndexOf('/') + 1);
+    gltf._baseURI = model.pathName;
     if (!gltf._loadedBuffers) {
       gltf._loadedBuffers = [];
       const buffers = gltf.buffers;
       if (buffers) {
         for (const buffer of buffers) {
-          const uri = this._normalizeURI(gltf._baseURI, buffer.uri!);
-          const buf = await gltf._manager.fetchBinaryData(uri, null, null, { overrideVFS: gltf._VFS });
-          if (buffer.byteLength !== buf!.byteLength) {
-            console.error(`Invalid GLTF: buffer byte length error.`);
-            return null;
-          }
-          gltf._loadedBuffers.push(buf!);
+          const uri =
+            model.VFS.parseDataURI(buffer.uri!) || model.VFS.isAbsoluteURL(buffer.uri!)
+              ? buffer.uri
+              : model.VFS.normalizePath(model.VFS.join(gltf._baseURI, buffer.uri!));
+          const buf = (await model.VFS.readFile(uri!, { encoding: 'binary' })) as ArrayBuffer;
+          ASSERT(buffer.byteLength === buf.byteLength, 'Invalid GLTF: buffer byte length error.');
+          gltf._loadedBuffers.push(buf);
         }
       }
     }
     const accessors = gltf.accessors;
     if (accessors) {
-      for (const accessor of accessors) {
+      for (const accessor of gltf.accessors!) {
         gltf._accessors.push(new GLTFAccessor(accessor));
       }
     }
     const scenes = gltf.scenes;
-    if (scenes) {
-      const sharedModel = new SharedModel();
-      await this._loadMeshes(gltf);
-      this._loadNodes(gltf, sharedModel);
-      this._loadSkins(gltf, sharedModel);
-      for (let i = 0; i < (gltf.nodes?.length ?? 0); i++) {
-        if (typeof gltf.nodes![i].skin === 'number' && gltf.nodes![i].skin! >= 0) {
-          gltf._nodes[i].skeleton = sharedModel.skeletons[gltf.nodes![i].skin!];
-        }
+    ASSERT(!!scenes, 'No scenes found in model');
+    const sharedModel = model;
+    await this._loadMeshes(sharedModel, gltf);
+    this._loadNodes(gltf, sharedModel);
+    this._loadSkins(gltf, sharedModel);
+    for (let i = 0; i < (gltf.nodes?.length ?? 0); i++) {
+      if (typeof gltf.nodes![i].skin === 'number' && gltf.nodes![i].skin! >= 0) {
+        gltf._nodes[i].skeleton = sharedModel.skeletons[gltf.nodes![i].skin!];
       }
-      this._loadAnimations(gltf, sharedModel);
-      for (const scene of scenes) {
-        const assetScene = new AssetScene(scene.name);
-        for (const node of scene.nodes!) {
-          assetScene.rootNodes.push(gltf._nodes[node]);
-        }
-        sharedModel.scenes.push(assetScene);
-      }
-      if (typeof gltf.scene === 'number') {
-        sharedModel.activeScene = gltf.scene;
-      }
-      return sharedModel;
     }
-    return null;
+    this._loadSpringBones(gltf, sharedModel);
+    this._loadAnimations(gltf, sharedModel);
+    for (const scene of scenes) {
+      const assetScene = new AssetScene(scene.name);
+      for (const node of scene.nodes!) {
+        assetScene.rootNodes.push(gltf._nodes[node]);
+      }
+      sharedModel.scenes.push(assetScene);
+    }
+    if (typeof gltf.scene === 'number') {
+      sharedModel.activeScene = gltf.scene;
+    }
   }
   /** @internal */
-  private _normalizeURI(baseURI: string, uri: string) {
-    const s = uri.toLowerCase();
-    if (
-      s.startsWith('http://') ||
-      s.startsWith('https://') ||
-      s.startsWith('blob:') ||
-      s.startsWith('data:')
-    ) {
-      // absolute path
-      return encodeURI(uri);
-    }
-    uri = uri.replace(/\.\//g, '');
-    uri = decodeURIComponent(uri);
-    if (uri[0] === '/') {
-      uri = uri.slice(1);
-    }
-    uri = uri
-      .split('/')
-      .map((val) => encodeURIComponent(val))
-      .join('/');
-    return baseURI + uri;
+  private _loadSpringBones(gltf: GLTFContent, model: SharedModel) {
+    this._loadVRMC0SpringBones(gltf, model);
+    this._loadVRMC1SpringBones(gltf, model);
+    this._buildJointDynamicsSpringBones(model);
   }
+
+  private _loadVRMC1SpringBones(gltf: GLTFContent, model: SharedModel) {
+    const ext = gltf.extensions?.VRMC_springBone;
+    if (!ext) {
+      return;
+    }
+
+    const colliders: AssetSpringBoneCollider[] = [];
+    for (const colliderInfo of ext.colliders ?? []) {
+      const node = this._getNode(gltf, colliderInfo.node);
+      if (!node || !colliderInfo.shape) {
+        continue;
+      }
+      const sphere = colliderInfo.shape.sphere;
+      const capsule = colliderInfo.shape.capsule;
+      const extendedShape = colliderInfo.extensions?.VRMC_springBone_extended_collider?.shape;
+      const extendedSphere = extendedShape?.sphere;
+      const extendedCapsule = extendedShape?.capsule;
+      const extendedPlane = extendedShape?.plane;
+      let collider: Nullable<AssetSpringBoneCollider> = null;
+      if (sphere) {
+        collider = {
+          name: colliderInfo.name,
+          node,
+          shape: {
+            type: 'sphere',
+            offset: this._arrayToVector3(sphere.offset, Vector3.zero()),
+            radius: sphere.radius ?? 0,
+            inside: sphere.inside
+          }
+        };
+      } else if (extendedSphere) {
+        collider = {
+          name: colliderInfo.name,
+          node,
+          shape: {
+            type: 'sphere',
+            offset: this._arrayToVector3(extendedSphere.offset, Vector3.zero()),
+            radius: extendedSphere.radius ?? 0,
+            inside: extendedSphere.inside
+          }
+        };
+      } else if (capsule) {
+        collider = {
+          name: colliderInfo.name,
+          node,
+          shape: {
+            type: 'capsule',
+            offset: this._arrayToVector3(capsule.offset, Vector3.zero()),
+            tail: this._arrayToVector3(capsule.tail, Vector3.zero()),
+            radius: capsule.radius ?? 0,
+            inside: capsule.inside
+          }
+        };
+      } else if (extendedCapsule) {
+        collider = {
+          name: colliderInfo.name,
+          node,
+          shape: {
+            type: 'capsule',
+            offset: this._arrayToVector3(extendedCapsule.offset, Vector3.zero()),
+            tail: this._arrayToVector3(extendedCapsule.tail, Vector3.zero()),
+            radius: extendedCapsule.radius ?? 0,
+            inside: extendedCapsule.inside
+          }
+        };
+      } else if (extendedPlane) {
+        collider = {
+          name: colliderInfo.name,
+          node,
+          shape: {
+            type: 'plane',
+            offset: this._arrayToVector3(extendedPlane.offset, Vector3.zero()),
+            normal: this._arrayToVector3(extendedPlane.normal, Vector3.axisPY())
+          }
+        };
+      }
+      if (collider) {
+        colliders.push(collider);
+        model.springBoneColliders.push(collider);
+      }
+    }
+
+    const colliderGroups: AssetSpringBoneColliderGroup[] = [];
+    for (const groupInfo of ext.colliderGroups ?? []) {
+      const group: AssetSpringBoneColliderGroup = {
+        name: groupInfo.name,
+        colliders: (groupInfo.colliders ?? [])
+          .map((index: number) => colliders[index])
+          .filter((collider: AssetSpringBoneCollider) => !!collider)
+      };
+      colliderGroups.push(group);
+      model.springBoneColliderGroups.push(group);
+    }
+
+    for (const springInfo of ext.springs ?? []) {
+      const joints: AssetSpringBoneJoint[] = [];
+      for (const jointRef of springInfo.joints ?? []) {
+        const jointInfo = typeof jointRef === 'number' ? ext.joints?.[jointRef] : jointRef;
+        const node = this._getNode(gltf, jointInfo?.node);
+        if (!node) {
+          continue;
+        }
+        joints.push({
+          node,
+          hitRadius: jointInfo.hitRadius ?? 0,
+          stiffness: jointInfo.stiffness ?? 0,
+          gravityPower: jointInfo.gravityPower ?? 0,
+          gravityDir: this._arrayToVector3(jointInfo.gravityDir, new Vector3(0, -1, 0)),
+          dragForce: jointInfo.dragForce ?? 0
+        });
+      }
+      model.springBones.push({
+        name: springInfo.name,
+        center: this._getNode(gltf, springInfo.center)!,
+        joints,
+        colliderGroups: (springInfo.colliderGroups ?? [])
+          .map((index: number) => colliderGroups[index])
+          .filter((group: AssetSpringBoneColliderGroup) => !!group)
+      });
+    }
+  }
+
+  private _loadVRMC0SpringBones(gltf: GLTFContent, model: SharedModel) {
+    const secondaryAnimation = gltf.extensions?.VRM?.secondaryAnimation;
+    if (!secondaryAnimation) {
+      return;
+    }
+
+    const colliderGroups: AssetSpringBoneColliderGroup[] = [];
+    for (const groupInfo of secondaryAnimation.colliderGroups ?? []) {
+      const node = this._getNode(gltf, groupInfo.node);
+      if (!node) {
+        continue;
+      }
+      const group: AssetSpringBoneColliderGroup = {
+        colliders: []
+      };
+      for (const colliderInfo of groupInfo.colliders ?? []) {
+        const collider: AssetSpringBoneCollider = {
+          node,
+          shape: {
+            type: 'sphere',
+            offset: this._arrayToVector3(colliderInfo.offset, Vector3.zero()),
+            radius: colliderInfo.radius ?? 0
+          }
+        };
+        group.colliders.push(collider);
+        model.springBoneColliders.push(collider);
+      }
+      colliderGroups.push(group);
+      model.springBoneColliderGroups.push(group);
+    }
+
+    for (const boneGroupInfo of secondaryAnimation.boneGroups ?? []) {
+      const rootBones = (boneGroupInfo.bones ?? [])
+        .map((index: number) => this._getNode(gltf, index))
+        .filter((node: AssetHierarchyNode) => !!node);
+      const joints: AssetSpringBoneJoint[] = rootBones.map((node: AssetHierarchyNode) => ({
+        node,
+        hitRadius: boneGroupInfo.hitRadius ?? 0,
+        stiffness: boneGroupInfo.stiffiness ?? boneGroupInfo.stiffness ?? 0,
+        gravityPower: boneGroupInfo.gravityPower ?? 0,
+        gravityDir: this._arrayToVector3(boneGroupInfo.gravityDir, new Vector3(0, -1, 0)),
+        dragForce: boneGroupInfo.dragForce ?? 0
+      }));
+      model.springBones.push({
+        name: boneGroupInfo.comment,
+        center: this._getNode(gltf, boneGroupInfo.center)!,
+        joints,
+        rootBones,
+        colliderGroups: (boneGroupInfo.colliderGroups ?? [])
+          .map((index: number) => colliderGroups[index])
+          .filter((group: AssetSpringBoneColliderGroup) => !!group)
+      });
+    }
+  }
+
+  private _getNode(gltf: GLTFContent, index: unknown): Nullable<AssetHierarchyNode> {
+    return typeof index === 'number' && index >= 0 ? gltf._nodes[index] : null;
+  }
+
+  private _arrayToVector3(value: unknown, fallback: Vector3): Vector3 {
+    if (Array.isArray(value)) {
+      return new Vector3(value[0] ?? fallback.x, value[1] ?? fallback.y, value[2] ?? fallback.z);
+    }
+    return fallback.clone();
+  }
+
+  private _buildJointDynamicsSpringBones(model: SharedModel) {
+    const colliderMap = new Map<AssetSpringBoneCollider, AssetJointDynamicsCollider>();
+    const flatPlaneMap = new Map<AssetSpringBoneCollider, AssetJointDynamicsFlatPlane>();
+    for (const collider of model.springBoneColliders) {
+      const converted = this._toJointDynamicsCollider(collider);
+      if (converted) {
+        colliderMap.set(collider, converted);
+        model.jointDynamicsColliders.push(converted);
+        continue;
+      }
+      const flatPlane = this._toJointDynamicsFlatPlane(collider);
+      if (flatPlane) {
+        flatPlaneMap.set(collider, flatPlane);
+      }
+    }
+
+    for (const spring of model.springBones) {
+      const chains = spring.rootBones
+        ? this._collectJointDynamicsChainsFromRoots(spring.rootBones)
+        : this._collectJointDynamicsChains(spring.joints);
+      if (chains.length === 0 || spring.joints.length === 0) {
+        continue;
+      }
+      const colliders: AssetJointDynamicsCollider[] = [];
+      const flatPlanes: AssetJointDynamicsFlatPlane[] = [];
+      for (const group of spring.colliderGroups) {
+        for (const collider of group.colliders) {
+          const converted = colliderMap.get(collider);
+          if (converted && colliders.indexOf(converted) < 0) {
+            colliders.push(converted);
+          }
+          const flatPlane = flatPlaneMap.get(collider);
+          if (flatPlane && flatPlanes.indexOf(flatPlane) < 0) {
+            flatPlanes.push(flatPlane);
+          }
+        }
+      }
+      model.jointDynamicsSpringBones.push({
+        name: spring.name,
+        center: spring.center,
+        chains,
+        colliders,
+        flatPlanes,
+        controllerConfig: this._mapSpringJointsToControllerConfig(spring.joints)
+      });
+    }
+  }
+
+  private _collectJointDynamicsChains(joints: AssetSpringBoneJoint[]) {
+    const chains: { start: AssetHierarchyNode; end: AssetHierarchyNode }[] = [];
+    if (joints.length === 0) {
+      return chains;
+    }
+    if (joints.length === 1) {
+      const start = joints[0].node;
+      const end = this._findSingleChildChainEnd(start);
+      if (end && end !== start) {
+        chains.push({ start, end });
+      }
+      return chains;
+    }
+    for (let i = 0; i < joints.length - 1; i++) {
+      const parent = joints[i].node;
+      const child = joints[i + 1].node;
+      if (!parent.isParentOf(child)) {
+        return [];
+      }
+    }
+    chains.push({ start: joints[0].node, end: joints[joints.length - 1].node });
+    return chains;
+  }
+
+  private _collectJointDynamicsChainsFromRoots(rootBones: AssetHierarchyNode[]) {
+    const chains: { start: AssetHierarchyNode; end: AssetHierarchyNode }[] = [];
+    for (const start of rootBones) {
+      const end = this._findSingleChildChainEnd(start);
+      if (end && end !== start) {
+        chains.push({ start, end });
+      }
+    }
+    return chains;
+  }
+
+  private _findSingleChildChainEnd(start: AssetHierarchyNode): Nullable<AssetHierarchyNode> {
+    let current = start;
+    while (current.children.length > 0) {
+      if (current.children.length !== 1) {
+        return null;
+      }
+      current = current.children[0];
+    }
+    return current;
+  }
+
+  private _mapSpringJointsToControllerConfig(joints: AssetSpringBoneJoint[]) {
+    let stiffness = 0;
+    let dragForce = 0;
+    let hitRadius = 0;
+    const gravity = Vector3.zero();
+    for (const joint of joints) {
+      stiffness += joint.stiffness;
+      dragForce += joint.dragForce;
+      hitRadius = Math.max(hitRadius, joint.hitRadius);
+      const gravityDir =
+        joint.gravityDir.magnitudeSq > 0 ? Vector3.normalize(joint.gravityDir) : new Vector3(0, -1, 0);
+      Vector3.add(gravity, Vector3.scale(gravityDir, Math.max(0, joint.gravityPower)), gravity);
+    }
+    const invCount = joints.length > 0 ? 1 / joints.length : 1;
+    stiffness *= invCount;
+    dragForce *= invCount;
+    Vector3.scale(gravity, invCount, gravity);
+    return {
+      gravity,
+      curves: {
+        hardness: InterpolatorScalar.constant(Math.max(0, Math.min(1, stiffness * 0.002))),
+        resistance: InterpolatorScalar.constant(Math.max(0, Math.min(1, 1 - dragForce))),
+        pointRadius: InterpolatorScalar.constant(Math.max(0, hitRadius))
+      },
+      constraintOptions: {
+        structuralVertical: true,
+        bendingVertical: true
+      }
+    };
+  }
+
+  private _toJointDynamicsCollider(collider: AssetSpringBoneCollider): Nullable<AssetJointDynamicsCollider> {
+    const shape = collider.shape;
+    if (shape.type === 'plane') {
+      return null;
+    }
+    if (shape.type === 'sphere') {
+      return {
+        name: collider.name,
+        node: collider.node,
+        localPosition: shape.offset.clone(),
+        localRotation: Quaternion.identity(),
+        collider: {
+          radius: shape.radius,
+          radiusTailScale: 1,
+          height: 0,
+          friction: 0,
+          isInverseCollider: shape.inside ?? false,
+          forceType: ColliderForce.Off
+        }
+      };
+    }
+    const localDirection = Vector3.sub(shape.tail, shape.offset);
+    const height = localDirection.magnitude;
+    const localRotation =
+      height > 0
+        ? Quaternion.unitVectorToUnitVector(Vector3.axisPY(), localDirection)
+        : Quaternion.identity();
+    const localPosition = Vector3.scale(Vector3.add(shape.offset, shape.tail), 0.5);
+    return {
+      name: collider.name,
+      node: collider.node,
+      localPosition,
+      localRotation,
+      collider: {
+        radius: shape.radius,
+        radiusTailScale: 1,
+        height,
+        friction: 0,
+        isInverseCollider: shape.inside ?? false,
+        forceType: ColliderForce.Off
+      }
+    };
+  }
+
+  private _toJointDynamicsFlatPlane(
+    collider: AssetSpringBoneCollider
+  ): Nullable<AssetJointDynamicsFlatPlane> {
+    const shape = collider.shape;
+    if (shape.type !== 'plane') {
+      return null;
+    }
+    return {
+      node: collider.node,
+      position: shape.offset.clone(),
+      up: shape.normal.magnitudeSq > 0 ? Vector3.normalize(shape.normal) : Vector3.axisPY()
+    };
+  }
+
   /** @internal */
   private _loadNodes(gltf: GLTFContent, model: SharedModel) {
     if (gltf.nodes) {
@@ -287,7 +631,26 @@ export class GLTFLoader extends AbstractModelLoader {
     return collect;
   }
   /** @internal */
-  private getAnimationInfo(gltf: GLTFContent, index: number) {
+  private getAnimationInfo(
+    gltf: GLTFContent,
+    index: number
+  ): {
+    name: string;
+    channels: AnimationChannel[];
+    samplers: AnimationSampler[];
+    interpolatorTypes: ('translation' | 'scale' | 'rotation' | 'weights')[];
+    interpolators: Interpolator[];
+    maxTime: number;
+    nodes: Map<
+      AssetHierarchyNode,
+      {
+        translate: Vector3;
+        scale: Vector3;
+        rotation: Quaternion;
+        worldTransform: Nullable<Matrix4x4>;
+      }
+    >;
+  } {
     const animationInfo = gltf.animations![index];
     const name = animationInfo.name || null;
     const channels = animationInfo.channels;
@@ -334,7 +697,7 @@ export class GLTFLoader extends AbstractModelLoader {
     return { name, channels, samplers, interpolators, interpolatorTypes, maxTime, nodes };
   }
   /** @internal */
-  private _loadAnimation(gltf: GLTFContent, index: number) {
+  private _loadAnimation(gltf: GLTFContent, index: number): AssetAnimationData {
     const animationInfo = this.getAnimationInfo(gltf, index);
     const animationData: AssetAnimationData = {
       name: animationInfo.name,
@@ -372,7 +735,7 @@ export class GLTFLoader extends AbstractModelLoader {
     nodeIndex: number,
     parent: Nullable<AssetHierarchyNode>,
     model: SharedModel
-  ) {
+  ): AssetHierarchyNode {
     let node: AssetHierarchyNode = gltf._nodes[nodeIndex];
     if (node) {
       if (parent) {
@@ -385,11 +748,14 @@ export class GLTFLoader extends AbstractModelLoader {
     }
     const nodeInfo = gltf.nodes?.[nodeIndex];
     if (nodeInfo) {
-      node = model.addNode(parent, nodeIndex, nodeInfo.name);
+      node = new AssetHierarchyNode(nodeInfo.name, parent!); //model.addNode(parent, nodeInfo.name);
       if (typeof nodeInfo.mesh === 'number') {
         node.mesh = gltf._meshes[nodeInfo.mesh];
         if (node.weights) {
           node.mesh.morphWeights = node.weights;
+          if (!node.mesh.morphNames && (node as any)['extras']?.targetNames) {
+            node.mesh.morphNames = (node as any)['extras'].targetNames;
+          }
         }
         const instancing = nodeInfo.extensions?.['EXT_mesh_gpu_instancing'];
         if (instancing) {
@@ -401,7 +767,7 @@ export class GLTFLoader extends AbstractModelLoader {
               typeof attributes.SCALE === 'number' ? gltf._accessors[attributes.SCALE] : null;
             const accessorRotation =
               typeof attributes.ROTATION === 'number' ? gltf._accessors[attributes.ROTATION] : null;
-            const count = accessorTranslation?.count ?? accessorScale?.count ?? accessorRotation!.count ?? 0;
+            const count = accessorTranslation?.count ?? accessorScale?.count ?? accessorRotation?.count ?? 0;
             const translationValues = accessorTranslation?.getNormalizedDeinterlacedView(
               gltf
             ) as Float32Array;
@@ -426,11 +792,11 @@ export class GLTFLoader extends AbstractModelLoader {
                     rotationValues[i * 4 + 3]
                   )
                 : Quaternion.identity();
-              node.instances!.push({ t, s, r });
+              node.instances.push({ t, s, r });
             }
           }
         } else {
-          node.instances!.push({ t: Vector3.zero(), s: Vector3.one(), r: Quaternion.identity() });
+          node.instances.push({ t: Vector3.zero(), s: Vector3.one(), r: Quaternion.identity() });
         }
       }
       if (!(typeof nodeInfo.skin === 'number') || nodeInfo.skin < 0) {
@@ -462,23 +828,21 @@ export class GLTFLoader extends AbstractModelLoader {
     return node;
   }
   /** @internal */
-  private async _loadMeshes(gltf: GLTFContent) {
+  private async _loadMeshes(model: SharedModel, gltf: GLTFContent) {
     if (gltf.meshes) {
       for (let i = 0; i < gltf.meshes.length; i++) {
-        const mesh = await this._loadMesh(gltf, i);
-        if (mesh) {
-          gltf._meshes[i] = mesh;
-        }
+        gltf._meshes[i] = (await this._loadMesh(model, gltf, i))!;
       }
     }
   }
   /** @internal */
-  private async _loadMesh(gltf: GLTFContent, meshIndex: number) {
+  private async _loadMesh(model: SharedModel, gltf: GLTFContent, meshIndex: number) {
     const meshInfo = gltf.meshes && gltf.meshes[meshIndex];
     let mesh: Nullable<AssetMeshData> = null;
     if (meshInfo) {
       mesh = {
-        morphWeights: meshInfo.weights ?? null,
+        morphWeights: meshInfo.weights ?? undefined,
+        morphNames: meshInfo['extras']?.targetNames ?? null,
         subMeshes: []
       };
       const primitives = meshInfo.primitives;
@@ -488,14 +852,21 @@ export class GLTFLoader extends AbstractModelLoader {
           const p = primitives[i];
           const subMeshData: AssetSubMeshData = {
             name: `${meshName}-${i}`,
-            primitive: new DRef(),
-            material: new DRef(),
+            primitive: null,
+            material: null,
             rawPositions: null,
             rawBlendIndices: null,
             rawJointWeights: null,
             numTargets: 0
           };
-          const primitive = new Primitive();
+          const primitive: AssetPrimitiveInfo = {
+            vertices: {} as any,
+            type: 'triangle-list',
+            indexCount: 0,
+            indices: null,
+            boxMax: Vector3.zero(),
+            boxMin: Vector3.zero()
+          };
           const attributes = p.attributes;
           const dracoExtension = gltf._dracoModule ? p.extensions?.['KHR_draco_mesh_compression'] : null;
           let dracoMeshDecoder: Nullable<DracoMeshDecoder> = null;
@@ -531,11 +902,15 @@ export class GLTFLoader extends AbstractModelLoader {
                 console.error(`Could not load morph target animation`);
                 p.targets = undefined;
               } else {
-                const vertexIndices = new Float32Array(primitive.getNumVertices());
+                const positionInfo = primitive.vertices['position'];
+                const numVertices = positionInfo
+                  ? (positionInfo.data.length / getVertexFormatComponentCount(positionInfo.format)) >> 0
+                  : 0;
+                const vertexIndices = new Float32Array(numVertices);
                 for (let i = 0; i < vertexIndices.length; i++) {
                   vertexIndices[i] = i;
                 }
-                primitive.createAndSetVertexBuffer('tex7_f32', vertexIndices);
+                primitive.vertices['texCoord7'] = { format: 'tex7_f32', data: vertexIndices };
               }
             }
           }
@@ -582,278 +957,55 @@ export class GLTFLoader extends AbstractModelLoader {
           }
           const indices = p.indices;
           if (typeof indices === 'number') {
-            this._loadIndexBuffer(gltf, indices, primitive, subMeshData, dracoExtension, dracoMeshDecoder);
+            this._loadIndexBuffer(gltf, indices, primitive, subMeshData, dracoExtension, dracoMeshDecoder!);
           }
           let primitiveType = p.mode;
           if (typeof primitiveType !== 'number') {
             primitiveType = 4;
           }
-          primitive.primitiveType = this._primitiveType(primitiveType)!;
-          const hasVertexNormal = !!primitive.getVertexBuffer('normal');
-          const hasVertexColor = !!primitive.getVertexBuffer('diffuse');
-          const hasVertexTangent = !!primitive.getVertexBuffer('tangent');
-          const materialHash = `${p.material}.${Number(hasVertexNormal)}.${Number(hasVertexColor)}.${Number(
-            hasVertexTangent
-          )}`;
-          let material: Nullable<M> = gltf._materialCache[materialHash];
+          primitive.type = this._primitiveType(primitiveType)!;
+          const hasVertexNormal = !!primitive.vertices['normal'];
+          const hasVertexColor = !!primitive.vertices['diffuse'];
+          const hasVertexTangent = !!primitive.vertices['tangent'];
+          const flagsHash = [
+            hasVertexNormal ? 'N' : '',
+            hasVertexColor ? 'C' : '',
+            hasVertexTangent ? 'T' : ''
+          ]
+            .filter((v) => !!v)
+            .join('');
+          const materialHash = [p.material ?? 'default', flagsHash].filter((v) => !!v).join('.');
+          let material = model.getMaterial(materialHash);
           if (!material) {
             const materialInfo = p.material !== undefined ? gltf.materials![p.material] : null;
             material = await this._loadMaterial(
+              model,
               gltf,
-              materialInfo,
+              materialInfo!,
               hasVertexColor,
               hasVertexNormal,
               hasVertexTangent
             );
-            if (material) {
-              gltf._materialCache[materialHash] = material;
-            }
+            model.setMaterial(materialHash, material);
           }
-          subMeshData.primitive.set(primitive);
-          subMeshData.material.set(material);
+          subMeshData.primitive = primitive;
+          subMeshData.material = material;
           mesh.subMeshes.push(subMeshData);
+          model.addPrimitive(primitive);
         }
       }
     }
     return mesh;
   }
-  private async _createMaterial(assetMaterial: AssetMaterial) {
-    if (assetMaterial.type === 'unlit') {
-      const unlitAssetMaterial = assetMaterial as AssetUnlitMaterial;
-      const unlitMaterial = new UnlitMaterial();
-      unlitMaterial.albedoColor = unlitAssetMaterial.diffuse ?? Vector4.one();
-      if (unlitAssetMaterial.diffuseMap) {
-        unlitMaterial.albedoTexture = unlitAssetMaterial.diffuseMap.texture;
-        unlitMaterial.albedoTextureSampler = unlitAssetMaterial.diffuseMap.sampler;
-        unlitMaterial.albedoTexCoordIndex = unlitAssetMaterial.diffuseMap.texCoord;
-        unlitMaterial.albedoTexCoordMatrix = unlitAssetMaterial.diffuseMap.transform;
-      }
-      unlitMaterial.vertexColor = unlitAssetMaterial.common.vertexColor!;
-      if (assetMaterial.common.alphaMode === 'blend') {
-        unlitMaterial.blendMode = 'blend';
-      } else if (assetMaterial.common.alphaMode === 'mask') {
-        unlitMaterial.alphaCutoff = assetMaterial.common.alphaCutoff!;
-      }
-      if (assetMaterial.common.doubleSided) {
-        unlitMaterial.cullMode = 'none';
-      }
-      return unlitMaterial;
-    } else if (assetMaterial.type === 'pbrSpecularGlossiness') {
-      const assetPBRMaterial = assetMaterial as AssetPBRMaterialSG;
-      const pbrMaterial = new PBRSpecularGlossinessMaterial();
-      pbrMaterial.ior = assetPBRMaterial.ior!;
-      pbrMaterial.albedoColor = assetPBRMaterial.diffuse!;
-      pbrMaterial.specularFactor = new Vector3(
-        assetPBRMaterial.specular!.x,
-        assetPBRMaterial.specular!.y,
-        assetPBRMaterial.specular!.z
-      );
-      pbrMaterial.glossinessFactor = assetPBRMaterial.glossness!;
-      if (assetPBRMaterial.diffuseMap) {
-        pbrMaterial.albedoTexture = assetPBRMaterial.diffuseMap.texture;
-        pbrMaterial.albedoTextureSampler = assetPBRMaterial.diffuseMap.sampler;
-        pbrMaterial.albedoTexCoordIndex = assetPBRMaterial.diffuseMap.texCoord;
-        pbrMaterial.albedoTexCoordMatrix = assetPBRMaterial.diffuseMap.transform;
-      }
-      if (assetPBRMaterial.common.normalMap) {
-        pbrMaterial.normalTexture = assetPBRMaterial.common.normalMap.texture;
-        pbrMaterial.normalTextureSampler = assetPBRMaterial.common.normalMap.sampler;
-        pbrMaterial.normalTexCoordIndex = assetPBRMaterial.common.normalMap.texCoord;
-        pbrMaterial.normalTexCoordMatrix = assetPBRMaterial.common.normalMap.transform;
-      }
-      pbrMaterial.normalScale = assetPBRMaterial.common.bumpScale!;
-      if (assetPBRMaterial.common.emissiveMap) {
-        pbrMaterial.emissiveTexture = assetPBRMaterial.common.emissiveMap.texture;
-        pbrMaterial.emissiveTextureSampler = assetPBRMaterial.common.emissiveMap.sampler;
-        pbrMaterial.emissiveTexCoordIndex = assetPBRMaterial.common.emissiveMap.texCoord;
-        pbrMaterial.emissiveTexCoordMatrix = assetPBRMaterial.common.emissiveMap.transform;
-      }
-      pbrMaterial.emissiveColor = assetPBRMaterial.common.emissiveColor!;
-      pbrMaterial.emissiveStrength = assetPBRMaterial.common.emissiveStrength!;
-      if (assetPBRMaterial.common.occlusionMap) {
-        pbrMaterial.occlusionTexture = assetPBRMaterial.common.occlusionMap.texture;
-        pbrMaterial.occlusionTextureSampler = assetPBRMaterial.common.occlusionMap.sampler;
-        pbrMaterial.occlusionTexCoordIndex = assetPBRMaterial.common.occlusionMap.texCoord;
-        pbrMaterial.occlusionTexCoordMatrix = assetPBRMaterial.common.occlusionMap.transform;
-      }
-      pbrMaterial.occlusionStrength = assetPBRMaterial.common.occlusionStrength!;
-      if (assetPBRMaterial.specularGlossnessMap) {
-        pbrMaterial.specularTexture = assetPBRMaterial.specularGlossnessMap.texture;
-        pbrMaterial.specularTextureSampler = assetPBRMaterial.specularGlossnessMap.sampler;
-        pbrMaterial.specularTexCoordIndex = assetPBRMaterial.specularGlossnessMap.texCoord;
-        pbrMaterial.specularTexCoordMatrix = assetPBRMaterial.specularGlossnessMap.transform;
-      }
-      pbrMaterial.vertexTangent = assetPBRMaterial.common.useTangent!;
-      pbrMaterial.vertexColor = assetPBRMaterial.common.vertexColor!;
-      if (assetPBRMaterial.common.alphaMode === 'blend') {
-        pbrMaterial.blendMode = 'blend';
-      } else if (assetPBRMaterial.common.alphaMode === 'mask') {
-        pbrMaterial.alphaCutoff = assetPBRMaterial.common.alphaCutoff!;
-      }
-      if (assetPBRMaterial.common.doubleSided) {
-        pbrMaterial.cullMode = 'none';
-      }
-      pbrMaterial.vertexNormal = !!assetMaterial.common.vertexNormal;
-      return pbrMaterial;
-    } else if (assetMaterial.type === 'pbrMetallicRoughness') {
-      const assetPBRMaterial = assetMaterial as AssetPBRMaterialMR;
-      const pbrMaterial = new PBRMetallicRoughnessMaterial();
-      pbrMaterial.ior = assetPBRMaterial.ior!;
-      pbrMaterial.albedoColor = assetPBRMaterial.diffuse!;
-      pbrMaterial.metallic = assetPBRMaterial.metallic!;
-      pbrMaterial.roughness = assetPBRMaterial.roughness!;
-      if (assetPBRMaterial.diffuseMap) {
-        pbrMaterial.albedoTexture = assetPBRMaterial.diffuseMap.texture;
-        pbrMaterial.albedoTextureSampler = assetPBRMaterial.diffuseMap.sampler;
-        pbrMaterial.albedoTexCoordIndex = assetPBRMaterial.diffuseMap.texCoord;
-        pbrMaterial.albedoTexCoordMatrix = assetPBRMaterial.diffuseMap.transform;
-      }
-      if (assetPBRMaterial.common.normalMap) {
-        pbrMaterial.normalTexture = assetPBRMaterial.common.normalMap.texture;
-        pbrMaterial.normalTextureSampler = assetPBRMaterial.common.normalMap.sampler;
-        pbrMaterial.normalTexCoordIndex = assetPBRMaterial.common.normalMap.texCoord;
-        pbrMaterial.normalTexCoordMatrix = assetPBRMaterial.common.normalMap.transform;
-      }
-      pbrMaterial.normalScale = assetPBRMaterial.common.bumpScale!;
-      if (assetPBRMaterial.common.emissiveMap) {
-        pbrMaterial.emissiveTexture = assetPBRMaterial.common.emissiveMap.texture;
-        pbrMaterial.emissiveTextureSampler = assetPBRMaterial.common.emissiveMap.sampler;
-        pbrMaterial.emissiveTexCoordIndex = assetPBRMaterial.common.emissiveMap.texCoord;
-        pbrMaterial.emissiveTexCoordMatrix = assetPBRMaterial.common.emissiveMap.transform;
-      }
-      pbrMaterial.emissiveColor = assetPBRMaterial.common.emissiveColor!;
-      pbrMaterial.emissiveStrength = assetPBRMaterial.common.emissiveStrength!;
-      if (assetPBRMaterial.common.occlusionMap) {
-        pbrMaterial.occlusionTexture = assetPBRMaterial.common.occlusionMap.texture;
-        pbrMaterial.occlusionTextureSampler = assetPBRMaterial.common.occlusionMap.sampler;
-        pbrMaterial.occlusionTexCoordIndex = assetPBRMaterial.common.occlusionMap.texCoord;
-        pbrMaterial.occlusionTexCoordMatrix = assetPBRMaterial.common.occlusionMap.transform;
-        pbrMaterial.occlusionStrength = assetPBRMaterial.common.occlusionStrength!;
-      }
-      if (assetPBRMaterial.metallicMap) {
-        pbrMaterial.metallicRoughnessTexture = assetPBRMaterial.metallicMap.texture;
-        pbrMaterial.metallicRoughnessTextureSampler = assetPBRMaterial.metallicMap.sampler;
-        pbrMaterial.metallicRoughnessTexCoordIndex = assetPBRMaterial.metallicMap.texCoord;
-        pbrMaterial.metallicRoughnessTexCoordMatrix = assetPBRMaterial.metallicMap.transform;
-      }
-      pbrMaterial.specularFactor = assetPBRMaterial.specularFactor!;
-      if (assetPBRMaterial.specularMap) {
-        pbrMaterial.specularTexture = assetPBRMaterial.specularMap.texture;
-        pbrMaterial.specularTextureSampler = assetPBRMaterial.specularMap.sampler;
-        pbrMaterial.specularTexCoordIndex = assetPBRMaterial.specularMap.texCoord;
-        pbrMaterial.specularTexCoordMatrix = assetPBRMaterial.specularMap.transform;
-      }
-      if (assetPBRMaterial.specularColorMap) {
-        pbrMaterial.specularColorTexture = assetPBRMaterial.specularColorMap.texture;
-        pbrMaterial.specularColorTextureSampler = assetPBRMaterial.specularColorMap.sampler;
-        pbrMaterial.specularColorTexCoordIndex = assetPBRMaterial.specularColorMap.texCoord;
-        pbrMaterial.specularColorTexCoordMatrix = assetPBRMaterial.specularColorMap.transform;
-      }
-      if (assetPBRMaterial.sheen) {
-        const sheen = assetPBRMaterial.sheen;
-        pbrMaterial.sheen = true;
-        pbrMaterial.sheenColorFactor = sheen.sheenColorFactor!;
-        pbrMaterial.sheenRoughnessFactor = sheen.sheenRoughnessFactor!;
-        if (sheen.sheenColorMap) {
-          pbrMaterial.sheenColorTexture = sheen.sheenColorMap.texture;
-          pbrMaterial.sheenColorTextureSampler = sheen.sheenColorMap.sampler;
-          pbrMaterial.sheenColorTexCoordIndex = sheen.sheenColorMap.texCoord;
-          pbrMaterial.sheenColorTexCoordMatrix = sheen.sheenColorMap.transform;
-        }
-        if (sheen.sheenRoughnessMap) {
-          pbrMaterial.sheenRoughnessTexture = sheen.sheenRoughnessMap.texture;
-          pbrMaterial.sheenRoughnessTextureSampler = sheen.sheenRoughnessMap.sampler;
-          pbrMaterial.sheenRoughnessTexCoordIndex = sheen.sheenRoughnessMap.texCoord;
-          pbrMaterial.sheenRoughnessTexCoordMatrix = sheen.sheenRoughnessMap.transform;
-        }
-      }
-      if (assetPBRMaterial.iridescence) {
-        const iridescence = assetPBRMaterial.iridescence;
-        pbrMaterial.iridescence = true;
-        pbrMaterial.iridescenceFactor = iridescence.iridescenceFactor!;
-        pbrMaterial.iridescenceIor = iridescence.iridescenceIor!;
-        if (iridescence.iridescenceMap) {
-          pbrMaterial.iridescenceTexture = iridescence.iridescenceMap.texture;
-          pbrMaterial.iridescenceTextureSampler = iridescence.iridescenceMap.sampler;
-          pbrMaterial.iridescenceTexCoordIndex = iridescence.iridescenceMap.texCoord;
-          pbrMaterial.iridescenceTexCoordMatrix = iridescence.iridescenceMap.transform;
-        }
-        pbrMaterial.iridescenceThicknessMin = iridescence.iridescenceThicknessMinimum!;
-        pbrMaterial.iridescenceThicknessMax = iridescence.iridescenceThicknessMaximum!;
-        if (iridescence.iridescenceThicknessMap) {
-          pbrMaterial.iridescenceThicknessTexture = iridescence.iridescenceThicknessMap.texture;
-          pbrMaterial.iridescenceThicknessTextureSampler = iridescence.iridescenceThicknessMap.sampler;
-          pbrMaterial.iridescenceThicknessTexCoordIndex = iridescence.iridescenceThicknessMap.texCoord;
-          pbrMaterial.iridescenceThicknessTexCoordMatrix = iridescence.iridescenceThicknessMap.transform;
-        }
-      }
-      if (assetPBRMaterial.transmission) {
-        const transmission = assetPBRMaterial.transmission;
-        pbrMaterial.transmission = true;
-        pbrMaterial.transmissionFactor = transmission.transmissionFactor!;
-        if (transmission.transmissionMap) {
-          pbrMaterial.transmissionTexture = transmission.transmissionMap.texture;
-          pbrMaterial.transmissionTextureSampler = transmission.transmissionMap.sampler;
-          pbrMaterial.transmissionTexCoordIndex = transmission.transmissionMap.texCoord;
-          pbrMaterial.transmissionTexCoordMatrix = transmission.transmissionMap.transform;
-        }
-        pbrMaterial.thicknessFactor = transmission.thicknessFactor!;
-        if (transmission.thicknessMap) {
-          pbrMaterial.thicknessTexture = transmission.thicknessMap.texture;
-          pbrMaterial.thicknessTextureSampler = transmission.thicknessMap.sampler;
-          pbrMaterial.thicknessTexCoordIndex = transmission.thicknessMap.texCoord;
-          pbrMaterial.thicknessTexCoordMatrix = transmission.thicknessMap.transform;
-        }
-        pbrMaterial.attenuationDistance = transmission.attenuationDistance!;
-        pbrMaterial.attenuationColor = transmission.attenuationColor!;
-      }
-      if (assetPBRMaterial.clearcoat) {
-        const cc = assetPBRMaterial.clearcoat;
-        pbrMaterial.clearcoat = true;
-        pbrMaterial.clearcoatIntensity = cc.clearCoatFactor!;
-        pbrMaterial.clearcoatRoughnessFactor = cc.clearCoatRoughnessFactor!;
-        if (cc.clearCoatIntensityMap) {
-          pbrMaterial.clearcoatIntensityTexture = cc.clearCoatIntensityMap.texture;
-          pbrMaterial.clearcoatIntensityTextureSampler = cc.clearCoatIntensityMap.sampler;
-          pbrMaterial.clearcoatIntensityTexCoordIndex = cc.clearCoatIntensityMap.texCoord;
-          pbrMaterial.clearcoatIntensityTexCoordMatrix = cc.clearCoatIntensityMap.transform;
-        }
-        if (cc.clearCoatRoughnessMap) {
-          pbrMaterial.clearcoatRoughnessTexture = cc.clearCoatRoughnessMap.texture;
-          pbrMaterial.clearcoatRoughnessTextureSampler = cc.clearCoatRoughnessMap.sampler;
-          pbrMaterial.clearcoatRoughnessTexCoordIndex = cc.clearCoatRoughnessMap.texCoord;
-          pbrMaterial.clearcoatRoughnessTexCoordMatrix = cc.clearCoatRoughnessMap.transform;
-        }
-        if (cc.clearCoatNormalMap) {
-          pbrMaterial.clearcoatNormalTexture = cc.clearCoatNormalMap.texture;
-          pbrMaterial.clearcoatNormalTextureSampler = cc.clearCoatNormalMap.sampler;
-          pbrMaterial.clearcoatNormalTexCoordIndex = cc.clearCoatNormalMap.texCoord;
-          pbrMaterial.clearcoatNormalTexCoordMatrix = cc.clearCoatNormalMap.transform;
-        }
-      }
-      pbrMaterial.vertexTangent = assetPBRMaterial.common.useTangent!;
-      pbrMaterial.vertexColor = assetPBRMaterial.common.vertexColor!;
-      if (assetPBRMaterial.common.alphaMode === 'blend') {
-        pbrMaterial.blendMode = 'blend';
-      } else if (assetPBRMaterial.common.alphaMode === 'mask') {
-        pbrMaterial.alphaCutoff = assetPBRMaterial.common.alphaCutoff!;
-      }
-      if (assetPBRMaterial.common.doubleSided) {
-        pbrMaterial.cullMode = 'none';
-      }
-      pbrMaterial.vertexNormal = !!assetMaterial.common.vertexNormal;
-      return pbrMaterial;
-    }
-    return null;
-  }
   /** @internal */
   private async _loadMaterial(
+    model: SharedModel,
     gltf: GLTFContent,
-    materialInfo: Nullable<Material>,
+    materialInfo: Material,
     vertexColor: boolean,
     vertexNormal: boolean,
     useTangent: boolean
-  ) {
+  ): Promise<AssetMaterial> {
     let assetMaterial: Nullable<AssetMaterial> = null;
     let pbrMetallicRoughness: Nullable<AssetPBRMaterialMR> = null;
     let pbrSpecularGlossness: Nullable<AssetPBRMaterialSG> = null;
@@ -882,16 +1034,16 @@ export class GLTFLoader extends AbstractModelLoader {
     }
     if (materialInfo?.pbrMetallicRoughness || materialInfo?.extensions?.KHR_materials_pbrSpecularGlossiness) {
       pbrCommon.normalMap = materialInfo.normalTexture
-        ? await this._loadTexture(gltf, materialInfo.normalTexture, false)
-        : null;
+        ? await this._loadTexture(model, gltf, materialInfo.normalTexture, false)
+        : undefined;
       pbrCommon.bumpScale = materialInfo.normalTexture?.scale ?? 1;
       pbrCommon.occlusionMap = materialInfo.occlusionTexture
-        ? await this._loadTexture(gltf, materialInfo.occlusionTexture, false)
-        : null;
+        ? await this._loadTexture(model, gltf, materialInfo.occlusionTexture, false)
+        : undefined;
       pbrCommon.occlusionStrength = materialInfo.occlusionTexture?.strength ?? 1;
       pbrCommon.emissiveMap = materialInfo.emissiveTexture
-        ? await this._loadTexture(gltf, materialInfo.emissiveTexture, false)
-        : null;
+        ? await this._loadTexture(model, gltf, materialInfo.emissiveTexture, false)
+        : undefined;
       pbrCommon.emissiveStrength =
         materialInfo?.extensions?.KHR_materials_emissive_strength?.emissiveStrength ?? 1;
       pbrCommon.emissiveColor = materialInfo.emissiveFactor
@@ -910,11 +1062,16 @@ export class GLTFLoader extends AbstractModelLoader {
       pbrMetallicRoughness.metallic = materialInfo.pbrMetallicRoughness.metallicFactor ?? 1;
       pbrMetallicRoughness.roughness = materialInfo.pbrMetallicRoughness.roughnessFactor ?? 1;
       pbrMetallicRoughness.diffuseMap = materialInfo.pbrMetallicRoughness.baseColorTexture
-        ? await this._loadTexture(gltf, materialInfo.pbrMetallicRoughness.baseColorTexture, true)
-        : null;
+        ? await this._loadTexture(model, gltf, materialInfo.pbrMetallicRoughness.baseColorTexture, true)
+        : undefined;
       pbrMetallicRoughness.metallicMap = materialInfo.pbrMetallicRoughness.metallicRoughnessTexture
-        ? await this._loadTexture(gltf, materialInfo.pbrMetallicRoughness.metallicRoughnessTexture, false)
-        : null;
+        ? await this._loadTexture(
+            model,
+            gltf,
+            materialInfo.pbrMetallicRoughness.metallicRoughnessTexture,
+            false
+          )
+        : undefined;
       pbrMetallicRoughness.metallicIndex = 2;
       pbrMetallicRoughness.roughnessIndex = 1;
     }
@@ -929,11 +1086,11 @@ export class GLTFLoader extends AbstractModelLoader {
       pbrSpecularGlossness.specular = new Vector3(sg.specularFactor ?? [1, 1, 1]);
       pbrSpecularGlossness.glossness = sg.glossnessFactor ?? 1;
       pbrSpecularGlossness.diffuseMap = sg.diffuseTexture
-        ? await this._loadTexture(gltf, sg.diffuseTexture, true)
-        : null;
+        ? await this._loadTexture(model, gltf, sg.diffuseTexture, true)
+        : undefined;
       pbrSpecularGlossness.specularGlossnessMap = sg.specularGlossinessTexture
-        ? await this._loadTexture(gltf, sg.specularGlossinessTexture, true)
-        : null;
+        ? await this._loadTexture(model, gltf, sg.specularGlossinessTexture, true)
+        : undefined;
     }
     assetMaterial = pbrSpecularGlossness || pbrMetallicRoughness;
     if (!assetMaterial || materialInfo?.extensions?.KHR_materials_unlit) {
@@ -951,8 +1108,8 @@ export class GLTFLoader extends AbstractModelLoader {
           diffuse: Vector4.one(),
           metallic: 1,
           roughness: 1,
-          diffuseMap: null,
-          metallicMap: null,
+          diffuseMap: undefined,
+          metallicMap: undefined,
           metallicIndex: 2,
           roughnessIndex: 1
         } as AssetPBRMaterialMR;
@@ -972,30 +1129,36 @@ export class GLTFLoader extends AbstractModelLoader {
         materialInfo?.extensions?.KHR_materials_specular?.specularFactor ?? 1
       );
       pbrMetallicRoughness.specularMap = materialInfo?.extensions?.KHR_materials_specular?.specularTexture
-        ? await this._loadTexture(gltf, materialInfo.extensions.KHR_materials_specular.specularTexture, false)
-        : null;
+        ? await this._loadTexture(
+            model,
+            gltf,
+            materialInfo.extensions.KHR_materials_specular.specularTexture,
+            false
+          )
+        : undefined;
       pbrMetallicRoughness.specularColorMap = materialInfo?.extensions?.KHR_materials_specular
         ?.specularColorTexture
         ? await this._loadTexture(
+            model,
             gltf,
             materialInfo.extensions.KHR_materials_specular.specularColorTexture,
             true
           )
-        : null;
+        : undefined;
       // KHR_materials_iridescence
       const iridescence = materialInfo?.extensions?.KHR_materials_iridescence;
       if (iridescence) {
         pbrMetallicRoughness.iridescence = {
           iridescenceFactor: iridescence.iridescenceFactor ?? 0,
           iridescenceMap: iridescence.iridescenceTexture
-            ? await this._loadTexture(gltf, iridescence.iridescenceTexture, false)
-            : null,
+            ? await this._loadTexture(model, gltf, iridescence.iridescenceTexture, false)
+            : undefined,
           iridescenceIor: iridescence.iridescenceIor ?? 1.3,
           iridescenceThicknessMinimum: iridescence.iridescenceThicknessMinimum ?? 100,
           iridescenceThicknessMaximum: iridescence.iridescenceThicknessMaximum ?? 400,
           iridescenceThicknessMap: iridescence.iridescenceThicknessTexture
-            ? await this._loadTexture(gltf, iridescence.iridescenceThicknessTexture, false)
-            : null
+            ? await this._loadTexture(model, gltf, iridescence.iridescenceThicknessTexture, false)
+            : undefined
         };
       }
       // KHR_materials_transmission
@@ -1004,10 +1167,10 @@ export class GLTFLoader extends AbstractModelLoader {
         pbrMetallicRoughness.transmission = {
           transmissionFactor: transmission.transmissionFactor ?? 0,
           transmissionMap: transmission.transmissionTexture
-            ? await this._loadTexture(gltf, transmission.transmissionTexture, false)
-            : null,
+            ? await this._loadTexture(model, gltf, transmission.transmissionTexture, false)
+            : undefined,
           thicknessFactor: 0,
-          thicknessMap: null,
+          thicknessMap: undefined,
           attenuationDistance: 99999,
           attenuationColor: Vector3.one()
         };
@@ -1015,8 +1178,8 @@ export class GLTFLoader extends AbstractModelLoader {
         if (volume) {
           pbrMetallicRoughness.transmission.thicknessFactor = volume.thicknessFactor ?? 0;
           pbrMetallicRoughness.transmission.thicknessMap = volume.thicknessTexture
-            ? await this._loadTexture(gltf, volume.thicknessTexture, false)
-            : null;
+            ? await this._loadTexture(model, gltf, volume.thicknessTexture, false)
+            : undefined;
           pbrMetallicRoughness.transmission.attenuationDistance = volume.attenuationDistance ?? 99999;
           const attenuationColor = (volume.attenuationColor ?? [1, 1, 1]) as [number, number, number];
           pbrMetallicRoughness.transmission.attenuationColor = new Vector3(...attenuationColor);
@@ -1028,12 +1191,12 @@ export class GLTFLoader extends AbstractModelLoader {
         pbrMetallicRoughness.sheen = {
           sheenColorFactor: new Vector3(sheen.sheenColorFactor ?? [0, 0, 0]),
           sheenColorMap: sheen.sheenColorTexture
-            ? await this._loadTexture(gltf, sheen.sheenColorTexture, true)
-            : null,
+            ? await this._loadTexture(model, gltf, sheen.sheenColorTexture, true)
+            : undefined,
           sheenRoughnessFactor: sheen.sheenRoughnessFactor ?? 0,
           sheenRoughnessMap: sheen.sheenRoughnessTexture
-            ? await this._loadTexture(gltf, sheen.sheenRoughnessTexture, true)
-            : null
+            ? await this._loadTexture(model, gltf, sheen.sheenRoughnessTexture, true)
+            : undefined
         };
       }
       // KHR_materials_clearcoat
@@ -1042,24 +1205,29 @@ export class GLTFLoader extends AbstractModelLoader {
         pbrMetallicRoughness.clearcoat = {
           clearCoatFactor: cc.clearcoatFactor ?? 0,
           clearCoatIntensityMap: cc.clearcoatTexture
-            ? await this._loadTexture(gltf, cc.clearcoatTexture, false)
-            : null,
+            ? await this._loadTexture(model, gltf, cc.clearcoatTexture, false)
+            : undefined,
           clearCoatRoughnessFactor: cc.clearcoatRoughnessFactor ?? 0,
           clearCoatRoughnessMap: cc.clearcoatRoughnessTexture
-            ? await this._loadTexture(gltf, cc.clearcoatRoughnessTexture, false)
-            : null,
+            ? await this._loadTexture(model, gltf, cc.clearcoatRoughnessTexture, false)
+            : undefined,
           clearCoatNormalMap: cc.clearcoatNormalTexture
-            ? await this._loadTexture(gltf, cc.clearcoatNormalTexture, false)
-            : null
+            ? await this._loadTexture(model, gltf, cc.clearcoatNormalTexture, false)
+            : undefined
         };
       }
     }
-    return await this._createMaterial(assetMaterial);
+    return assetMaterial;
   }
   /** @internal */
-  private async _loadTexture(gltf: GLTFContent, info: Partial<TextureInfo>, sRGB: boolean) {
-    const mt: MaterialTextureInfo = {
-      texture: null,
+  private async _loadTexture(
+    model: SharedModel,
+    gltf: GLTFContent,
+    info: Partial<TextureInfo>,
+    sRGB: boolean
+  ): Promise<AssetTextureInfo> {
+    const mt: AssetTextureInfo = {
+      image: null,
       sampler: null,
       texCoord: info.texCoord ?? 0,
       transform: null
@@ -1090,8 +1258,8 @@ export class GLTFLoader extends AbstractModelLoader {
       let magFilter: TextureFilterMode = 'linear';
       let minFilter: TextureFilterMode = 'linear';
       let mipFilter: TextureFilterMode = 'linear';
-      const samplerIndex = textureInfo.sampler;
-      const sampler = gltf.samplers && gltf.samplers[samplerIndex!];
+      const samplerIndex: number = textureInfo.sampler!;
+      const sampler = gltf.samplers && gltf.samplers[samplerIndex];
       if (sampler) {
         switch (sampler.wrapS) {
           case 0x2901: // gl.REPEAT
@@ -1150,19 +1318,16 @@ export class GLTFLoader extends AbstractModelLoader {
             break;
         }
       }
-      const imageIndex = textureInfo.source;
-      const hash = `${imageIndex}:${!!sRGB}:${wrapS}:${wrapT}:${minFilter}:${magFilter}:${mipFilter}`;
-      mt.texture = gltf._textureCache[hash];
-      if (!mt.texture) {
-        const image = gltf.images![imageIndex!];
+      const imageIndex: number = textureInfo.source!;
+      mt.image = model.getImage(imageIndex);
+      if (!mt.image) {
+        const image = gltf.images![imageIndex];
         if (image) {
           if (image.uri) {
-            const imageUrl = this._normalizeURI(gltf._baseURI, image.uri);
-            mt.texture = (await gltf._manager.fetchTexture(imageUrl, {
-              linearColorSpace: !sRGB,
-              overrideVFS: gltf._VFS
-            })) as Texture2D;
-            mt.texture.name = imageUrl;
+            const imageUrl = model.VFS.normalizePath(model.VFS.join(gltf._baseURI, image.uri));
+            mt.image = {
+              uri: imageUrl
+            };
           } else if (typeof image.bufferView === 'number' && image.mimeType) {
             const bufferView = gltf.bufferViews && gltf.bufferViews[image.bufferView];
             if (bufferView) {
@@ -1170,23 +1335,27 @@ export class GLTFLoader extends AbstractModelLoader {
               if (arrayBuffer) {
                 const view = new Uint8Array(arrayBuffer, bufferView.byteOffset || 0, bufferView.byteLength);
                 const mimeType = image.mimeType;
-                mt.texture = await gltf._manager.loadTextureFromBuffer<Texture2D>(view, mimeType, sRGB);
+                mt.image = {
+                  data: view,
+                  mimeType
+                };
               }
             }
           }
         }
-        if (mt.texture) {
-          gltf._textureCache[hash] = mt.texture;
+        if (mt.image) {
+          model.setImage(imageIndex, mt.image);
         }
       }
-      if (mt.texture) {
-        mt.sampler = getDevice().createSampler({
-          addressU: wrapS,
-          addressV: wrapT,
-          magFilter: magFilter,
-          minFilter: minFilter,
-          mipFilter: mipFilter
-        });
+      if (mt.image) {
+        mt.sRGB = !!sRGB;
+        mt.sampler = {
+          wrapS,
+          wrapT,
+          magFilter,
+          minFilter,
+          mipFilter
+        };
       }
     }
     return mt;
@@ -1218,10 +1387,10 @@ export class GLTFLoader extends AbstractModelLoader {
   private _loadIndexBuffer(
     gltf: GLTFContent,
     accessorIndex: number,
-    primitive: Primitive,
+    primitive: AssetPrimitiveInfo,
     meshData: AssetSubMeshData,
     dracoExtension?: any,
-    dracoMeshDecoder?: Nullable<DracoMeshDecoder>
+    dracoMeshDecoder?: DracoMeshDecoder
   ) {
     const accessor = gltf._accessors[accessorIndex];
     if (dracoMeshDecoder) {
@@ -1251,7 +1420,7 @@ export class GLTFLoader extends AbstractModelLoader {
     gltf: GLTFContent,
     attribName: string,
     accessorIndex: number,
-    primitive: Primitive,
+    primitive: AssetPrimitiveInfo,
     subMeshData: AssetSubMeshData,
     dracoExtension?: any,
     dracoMeshDecoder?: DracoMeshDecoder
@@ -1354,60 +1523,51 @@ export class GLTFLoader extends AbstractModelLoader {
   private _setBuffer(
     gltf: GLTFContent,
     accessorIndex: number,
-    primitive: Primitive,
+    primitive: AssetPrimitiveInfo,
     semantic: Nullable<VertexSemantic>,
     subMeshData: AssetSubMeshData
   ) {
     const device = getDevice();
     const accessor = gltf._accessors[accessorIndex];
     const componentCount = accessor.getComponentCount(accessor.type);
-    const normalized = !!accessor.normalized;
-    const hash = `${accessorIndex}:${semantic || ''}:${Number(normalized)}`;
-    let buffer = gltf._bufferCache[hash];
-    if (!buffer) {
-      let data = accessor.getNormalizedDeinterlacedView(gltf);
-      if (semantic && !(data instanceof Float32Array)) {
-        const floatData = new Float32Array(data.length);
-        floatData.set(data);
-        data = floatData;
+    let data = accessor.getNormalizedDeinterlacedView(gltf);
+    let buffer: Nullable<TypedArray> = null;
+    let attribFormat: Nullable<VertexAttribFormat> = null;
+    if (semantic && !(data instanceof Float32Array)) {
+      const floatData = new Float32Array(data.length);
+      floatData.set(data);
+      data = floatData;
+    }
+    if (!semantic) {
+      if (!(data instanceof Uint8Array) && !(data instanceof Uint16Array) && !(data instanceof Uint32Array)) {
+        console.error('Invalid index buffer component type');
+        return;
       }
-      if (!semantic) {
-        if (
-          !(data instanceof Uint8Array) &&
-          !(data instanceof Uint16Array) &&
-          !(data instanceof Uint32Array)
-        ) {
-          console.error('Invalid index buffer component type');
-          return;
-        }
-        if (data instanceof Uint32Array && !device.getDeviceCaps().miscCaps.support32BitIndex) {
-          console.error('Device does not support 32bit vertex index');
-          return;
-        }
-        if (data instanceof Uint8Array) {
-          const uint16Data = new Uint16Array(data.length);
-          uint16Data.set(data);
-          data = uint16Data;
-        }
+      if (data instanceof Uint32Array && !device.getDeviceCaps().miscCaps.support32BitIndex) {
+        console.error('Device does not support 32bit vertex index');
+        return;
       }
-      if (!semantic) {
-        buffer = getDevice().createIndexBuffer(data as Uint16Array<ArrayBuffer> | Uint32Array<ArrayBuffer>, {
-          managed: true
-        });
-      } else {
-        const attribFormat = device.getVertexAttribFormat(semantic, 'f32', componentCount);
-        buffer = getDevice().createVertexBuffer(attribFormat!, data)!;
+      if (data instanceof Uint8Array) {
+        const uint16Data = new Uint16Array(data.length);
+        uint16Data.set(data);
+        data = uint16Data;
       }
-      gltf._bufferCache[hash] = buffer;
+    }
+    if (!semantic) {
+      buffer = data as Uint16Array<ArrayBuffer> | Uint32Array<ArrayBuffer>;
+    } else {
+      attribFormat = device.getVertexAttribFormat(semantic, 'f32', componentCount);
+      buffer = data;
     }
     if (buffer) {
       if (!semantic) {
-        primitive.setIndexBuffer(buffer as IndexBuffer);
-        primitive.indexCount = (buffer as IndexBuffer).length;
+        primitive.indices = buffer as Uint16Array<ArrayBuffer> | Uint32Array<ArrayBuffer>;
+        primitive.indexCount = buffer.length;
       } else {
-        primitive.setVertexBuffer(buffer as StructuredBuffer);
+        const semantic = getVertexAttribName(getVertexAttributeIndex(attribFormat!));
+        primitive.vertices[semantic] = { format: attribFormat!, data: buffer };
         if (semantic === 'position') {
-          if (!primitive.getIndexBuffer()) {
+          if (!primitive.indices) {
             primitive.indexCount = Math.floor(buffer.byteLength / 12);
           }
           const data = accessor.getNormalizedDeinterlacedView(gltf);
@@ -1415,7 +1575,8 @@ export class GLTFLoader extends AbstractModelLoader {
           const min = accessor.min;
           const max = accessor.max;
           if (min && max) {
-            primitive.setBoundingVolume(new BoundingBox(new Vector3(min), new Vector3(max)));
+            primitive.boxMin.set(min);
+            primitive.boxMax.set(max);
           } else {
             const bbox = new BoundingBox();
             bbox.beginExtend();
@@ -1428,7 +1589,8 @@ export class GLTFLoader extends AbstractModelLoader {
               bbox.extend(v);
             }
             if (bbox.isValid()) {
-              primitive.setBoundingVolume(bbox);
+              primitive.boxMin.set(bbox.minPoint);
+              primitive.boxMax.set(bbox.maxPoint);
             }
           }
         } else if (semantic === 'blendIndices') {
@@ -1441,7 +1603,7 @@ export class GLTFLoader extends AbstractModelLoader {
     return buffer;
   }
   /** @internal */
-  private isGLB(data: ArrayBuffer) {
+  private isGLB(data: ArrayBuffer): boolean {
     if (data.byteLength > 12) {
       const p = new Uint32Array(data, 0, 3);
       if (p[0] === 0x46546c67 && p[1] === 2 && p[2] === data.byteLength) {
@@ -1451,7 +1613,10 @@ export class GLTFLoader extends AbstractModelLoader {
     return false;
   }
   /** @internal */
-  private getGLBChunkInfo(data: ArrayBuffer, offset: number) {
+  private getGLBChunkInfo(
+    data: ArrayBuffer,
+    offset: number
+  ): { start: number; length: number; type: number } {
     const header = new Uint32Array(data, offset, 2);
     const start = offset + 8;
     const length = header[0];
@@ -1459,7 +1624,7 @@ export class GLTFLoader extends AbstractModelLoader {
     return { start, length, type };
   }
   /** @internal */
-  private getGLBChunkInfos(data: ArrayBuffer) {
+  private getGLBChunkInfos(data: ArrayBuffer): { start: number; length: number; type: number }[] {
     const infos: { start: number; length: number; type: number }[] = [];
     let offset = 12;
     while (offset < data.byteLength) {

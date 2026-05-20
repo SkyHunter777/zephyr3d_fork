@@ -6,7 +6,6 @@ import type { PBRMetallicRoughnessMaterial } from '@zephyr3d/scene';
 import {
   Scene,
   OrbitCameraController,
-  AssetManager,
   DirectionalLight,
   Application,
   PerspectiveCamera,
@@ -14,6 +13,7 @@ import {
   getInput
 } from '@zephyr3d/scene';
 import { Panel } from './ui';
+import { GLTFImporter } from '@zephyr3d/loaders';
 
 let instanceCount = 0;
 let vertexCount = 0;
@@ -49,19 +49,16 @@ instancingApp.ready().then(async () => {
   getInput().use(camera.handleEvent.bind(camera));
 
   const batchGroup = new BatchGroup(scene);
-  const assetManager = new AssetManager();
   await (async function () {
     for (let i = 0; i < 2000; i++) {
-      const stone1 = await assetManager.fetchModel(scene, 'assets/models/stone1.glb', {
-        enableInstancing: true
-      });
-      stone1.group.parent = batchGroup;
-      stone1.group.position.setXYZ(
-        Math.random() * 100 - 50,
-        Math.random() * 100 - 50,
-        Math.random() * 100 - 50
+      const stone1 = await new GLTFImporter().loadModelToScene(
+        scene,
+        'https://cdn.zephyr3d.org/doc/assets/models/stone1.glb',
+        true
       );
-      stone1.group.iterate((node) => {
+      stone1.parent = batchGroup;
+      stone1.position.setXYZ(Math.random() * 100 - 50, Math.random() * 100 - 50, Math.random() * 100 - 50);
+      stone1.iterate((node) => {
         if (node.isMesh()) {
           (node.material as PBRMetallicRoughnessMaterial).albedoColor = new Vector4(
             Math.random(),
@@ -74,16 +71,14 @@ instancingApp.ready().then(async () => {
         }
       });
       instanceCount++;
-      const stone2 = await assetManager.fetchModel(scene, 'assets/models/stone2.glb', {
-        enableInstancing: true
-      });
-      stone2.group.parent = batchGroup;
-      stone2.group.position.setXYZ(
-        Math.random() * 100 - 50,
-        Math.random() * 100 - 50,
-        Math.random() * 100 - 50
+      const stone2 = await new GLTFImporter().loadModelToScene(
+        scene,
+        'https://cdn.zephyr3d.org/doc/assets/models/stone2.glb',
+        true
       );
-      stone2.group.iterate((node) => {
+      stone2.parent = batchGroup;
+      stone2.position.setXYZ(Math.random() * 100 - 50, Math.random() * 100 - 50, Math.random() * 100 - 50);
+      stone2.iterate((node) => {
         if (node.isMesh()) {
           (node.material as PBRMetallicRoughnessMaterial).albedoColor = new Vector4(
             Math.random(),

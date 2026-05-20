@@ -73,6 +73,10 @@ export default defineConfig({
           dest: 'vendor/zephyr3d/scene'
         },
         {
+          src: 'node_modules/@zephyr3d/loaders/dist',
+          dest: 'vendor/zephyr3d/loaders'
+        },
+        {
           src: 'node_modules/@zephyr3d/imgui/dist',
           dest: 'vendor/zephyr3d/imgui'
         },

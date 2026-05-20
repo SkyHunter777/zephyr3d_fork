@@ -73,7 +73,7 @@ export interface AssetVertexBufferInfo {
 
 export interface AssetPrimitiveInfo {
   vertices: Record<VertexSemantic, { format: VertexAttribFormat; data: TypedArray }>;
-  indices: Uint16Array<ArrayBuffer> | Uint32Array<ArrayBuffer>;
+  indices: Nullable<Uint16Array<ArrayBuffer> | Uint32Array<ArrayBuffer>>;
   indexCount: number;
   type: PrimitiveType;
   boxMin: Vector3;
@@ -86,11 +86,11 @@ export interface AssetPrimitiveInfo {
  * @public
  */
 export interface AssetTextureInfo {
-  image: AssetImageInfo;
+  image: Nullable<AssetImageInfo>;
   sRGB?: boolean;
-  sampler: AssetSamplerInfo;
+  sampler: Nullable<AssetSamplerInfo>;
   texCoord: number;
-  transform: Matrix4x4;
+  transform: Nullable<Matrix4x4>;
 }
 
 export interface MaterialTextureInfo {
@@ -230,12 +230,12 @@ export interface AssetPBRMaterialSG extends AssetPBRMaterialCommon {
  * @public
  */
 export interface AssetSubMeshData {
-  primitive: AssetPrimitiveInfo;
-  material: AssetMaterial;
+  primitive: Nullable<AssetPrimitiveInfo>;
+  material: Nullable<AssetMaterial>;
   mesh?: Mesh;
-  rawPositions: Float32Array;
-  rawBlendIndices: TypedArray;
-  rawJointWeights: TypedArray;
+  rawPositions: Nullable<Float32Array>;
+  rawBlendIndices: Nullable<TypedArray>;
+  rawJointWeights: Nullable<TypedArray>;
   name: string;
   numTargets: number;
   targets?: Partial<Record<number, { numComponents: number; data: Float32Array[] }>>;
@@ -355,14 +355,14 @@ export class AssetHierarchyNode extends NamedObject {
   private _position: Vector3;
   private _rotation: Quaternion;
   private _scaling: Vector3;
-  private _mesh: AssetMeshData;
-  private _skeleton: AssetSkeleton;
-  private _attachToSkeleton: Set<AssetSkeleton>;
-  private _matrix: Matrix4x4;
-  private _worldMatrix: Matrix4x4;
-  private _weights: number[];
+  private _mesh: Nullable<AssetMeshData>;
+  private _skeleton: Nullable<AssetSkeleton>;
+  private _attachToSkeleton: Nullable<Set<AssetSkeleton>>;
+  private _matrix: Nullable<Matrix4x4>;
+  private _worldMatrix: Nullable<Matrix4x4>;
+  private _weights: Nullable<number[]>;
   private readonly _children: AssetHierarchyNode[];
-  private readonly _instances?: { t: Vector3; s: Vector3; r: Quaternion }[];
+  private readonly _instances: { t: Vector3; s: Vector3; r: Quaternion }[];
   /**
    * Creates an instance of AssetHierarchyNode
    * @param name - Name of the node
@@ -389,36 +389,36 @@ export class AssetHierarchyNode extends NamedObject {
     return this._parent;
   }
   /** Local transformation matrix of the node */
-  get matrix(): Matrix4x4 {
+  get matrix() {
     return this._matrix;
   }
   /** World transformation matrix of the node */
-  get worldMatrix(): Matrix4x4 {
+  get worldMatrix() {
     return this._worldMatrix;
   }
   /** Mesh data of the node, or null if this is not a mesh node */
-  get mesh(): AssetMeshData {
+  get mesh() {
     return this._mesh;
   }
-  set mesh(data: AssetMeshData) {
+  set mesh(data) {
     this._mesh = data;
   }
   /** instances */
-  get instances(): { t: Vector3; s: Vector3; r: Quaternion }[] {
+  get instances() {
     return this._instances;
   }
   /** Default morph target weights */
-  get weights(): number[] {
+  get weights() {
     return this._weights;
   }
-  set weights(val: number[]) {
+  set weights(val) {
     this._weights = val;
   }
   /** The skeleton used to control the node */
-  get skeleton(): AssetSkeleton {
+  get skeleton() {
     return this._skeleton;
   }
-  set skeleton(skeleton: AssetSkeleton) {
+  set skeleton(skeleton) {
     this._skeleton = skeleton;
   }
   /** The translation of the node */
@@ -447,7 +447,7 @@ export class AssetHierarchyNode extends NamedObject {
     return this._children;
   }
   /** The skeleton to which the node belongs if this is a joint node */
-  get skeletonAttached(): Set<AssetSkeleton> {
+  get skeletonAttached() {
     return this._attachToSkeleton;
   }
   isParentOf(child: Nullable<AssetHierarchyNode>) {
@@ -457,10 +457,10 @@ export class AssetHierarchyNode extends NamedObject {
     return child === this;
   }
   getWorldPosition() {
-    return new Vector3(this.worldMatrix.m03, this.worldMatrix.m13, this.worldMatrix.m23);
+    return new Vector3(this.worldMatrix!.m03, this.worldMatrix!.m13, this.worldMatrix!.m23);
   }
   /** @internal */
-  computeTransforms(parentTransform: Matrix4x4) {
+  computeTransforms(parentTransform: Nullable<Matrix4x4>) {
     this._matrix = Matrix4x4.scaling(this._scaling).rotateLeft(this._rotation).translateLeft(this._position);
     this._worldMatrix = parentTransform
       ? Matrix4x4.multiply(parentTransform, this._matrix)
@@ -511,7 +511,7 @@ export class AssetHierarchyNode extends NamedObject {
  */
 export class AssetSkeleton extends NamedObject {
   /** The pivot node */
-  pivot: AssetHierarchyNode;
+  pivot: Nullable<AssetHierarchyNode>;
   /** Joints of the skeleton */
   joints: AssetHierarchyNode[];
   /** Inverse of the binding matrices of the joints */
@@ -552,7 +552,7 @@ export class AssetSkeleton extends NamedObject {
     let root = this.joints[0];
     for (let i = 1; i < this.joints.length; i++) {
       while (root && !root.isParentOf(this.joints[i])) {
-        root = root.parent;
+        root = root.parent!;
       }
     }
     return root;
@@ -651,6 +651,12 @@ export interface AssetJointDynamicsSpringBone {
   colliders: AssetJointDynamicsCollider[];
   flatPlanes: AssetJointDynamicsFlatPlane[];
 }
+
+export type SaveOptions = {
+  importMeshes: boolean;
+  importSkeletons: boolean;
+  importAnimations: boolean;
+};
 
 /**
  * Model information that can be shared by multiple model nodes
@@ -812,7 +818,7 @@ export class SharedModel extends Disposable {
     };
     for (const k in primitive.vertices) {
       const v = primitive.vertices[k as VertexSemantic];
-      data.vertices[k] = {
+      data.vertices[k as VertexSemantic] = {
         format: v.format,
         data: uint8ArrayToBase64(new Uint8Array(v.data.buffer, v.data.byteOffset, v.data.byteLength))
       };
@@ -854,11 +860,11 @@ export class SharedModel extends Disposable {
         }
         await manager.VFS.writeFile(
           path,
-          img.data.buffer.slice(img.data.byteOffset, img.data.byteOffset + img.data.byteLength),
+          img.data!.buffer.slice(img.data!.byteOffset, img.data!.byteOffset + img.data!.byteLength),
           { encoding: 'binary', create: true }
         );
         img.uri = path;
-        img.data = null;
+        img.data = undefined;
         img.mimeType = '';
       }
     }
@@ -872,7 +878,7 @@ export class SharedModel extends Disposable {
         const content = JSON.stringify({ type: 'Default', data }, null, 2);
         await manager.VFS.writeFile(path, content, { encoding: 'utf8', create: true });
         this._materialList[k].path = path;
-        m.dispose();
+        m!.dispose();
       }
     }
     if (this._primitiveList.length > 0) {
@@ -930,7 +936,7 @@ export class SharedModel extends Disposable {
           const sk = v[0];
           const skeleton = new Skeleton(
             sk.joints.map((val) => {
-              const node = nodeMap.get(val);
+              const node = nodeMap.get(val)!;
               node.jointTypeT = 'static';
               node.jointTypeS = 'static';
               node.jointTypeR = 'static';
@@ -946,16 +952,16 @@ export class SharedModel extends Disposable {
               for (let i = 0; i < nodes.mesh.length; i++) {
                 const mesh = nodes.mesh[i];
                 const v = {
-                  positions: nodes.bounding[i].rawPositions,
-                  blendIndices: nodes.bounding[i].rawBlendIndices,
-                  weights: nodes.bounding[i].rawJointWeights
+                  positions: nodes.bounding[i].rawPositions!,
+                  blendIndices: nodes.bounding[i].rawBlendIndices!,
+                  weights: nodes.bounding[i].rawJointWeights!
                 };
                 mesh.setSkinnedBoundingInfo(nodes.skeleton.getBoundingInfo(v));
                 mesh.skeletonName = nodes.skeleton.persistentId;
               }
             }
           }
-          animationSet.skeletons.push(new DRef(nodes.skeleton));
+          animationSet.skeletons.push(new DRef(nodes!.skeleton));
         }
       }
       if (saveAnimations) {
@@ -973,15 +979,15 @@ export class SharedModel extends Disposable {
               }
             }
           }
-          const animation = animationSet.createAnimation(name, true);
+          const animation = animationSet.createAnimation(name, true)!;
           for (const sk of animationData.skeletons) {
             const nodes = skeletonMeshMap.get(sk);
             if (nodes) {
-              animation.addSkeleton(nodes.skeleton.persistentId);
+              animation.addSkeleton(nodes.skeleton!.persistentId);
             }
           }
           for (const track of animationData.tracks) {
-            const target = nodeMap.get(track.node);
+            const target = nodeMap.get(track.node)!;
             if (track.type === 'translation') {
               animation.addTrack(target, new NodeTranslationTrack(track.interpolator, true));
               target.jointTypeT = 'animated';
@@ -992,7 +998,7 @@ export class SharedModel extends Disposable {
               animation.addTrack(target, new NodeRotationTrack(track.interpolator, true));
               target.jointTypeR = 'animated';
             } else if (track.type === 'weights') {
-              for (const m of track.node.mesh.subMeshes) {
+              for (const m of track.node.mesh!.subMeshes) {
                 if (track.interpolator.stride > MAX_MORPH_TARGETS) {
                   console.error(
                     `Morph target too large: ${track.interpolator.stride}, the maximum is ${MAX_MORPH_TARGETS}`
@@ -1002,10 +1008,10 @@ export class SharedModel extends Disposable {
                     track.interpolator,
                     track.defaultMorphWeights,
                     m.targetBox,
-                    m.mesh.getBoundingVolume().toAABB(),
+                    m.mesh!.getBoundingVolume()!.toAABB(),
                     true
                   );
-                  animation.addTrack(m.mesh, morphTrack);
+                  animation.addTrack(m.mesh!, morphTrack);
                 }
               }
             } else if (track.type === 'geometry-cache') {
@@ -1283,17 +1289,17 @@ export class SharedModel extends Disposable {
           meshNode.name = subMesh.name;
           meshNode.clipTestEnabled = true;
           meshNode.showState = 'inherit';
-          meshNode.primitive = await this.createPrimitive(manager, subMesh.primitive);
-          meshNode.material = await this.createMaterial(manager, subMesh.material);
+          meshNode.primitive = await this.createPrimitive(manager, subMesh.primitive!);
+          meshNode.material = await this.createMaterial(manager, subMesh.material!);
           meshNode.parent = node;
           subMesh.mesh = meshNode;
-          processMorphData(subMesh, meshData.morphWeights, meshData.morphNames);
+          processMorphData(subMesh, meshData.morphWeights!, meshData.morphNames);
           if (skeleton) {
             if (!skeletonMeshMap.has(skeleton)) {
               skeletonMeshMap.set(skeleton, { mesh: [meshNode], bounding: [subMesh] });
             } else {
-              skeletonMeshMap.get(skeleton).mesh.push(meshNode);
-              skeletonMeshMap.get(skeleton).bounding.push(subMesh);
+              skeletonMeshMap.get(skeleton)!.mesh.push(meshNode);
+              skeletonMeshMap.get(skeleton)!.bounding.push(subMesh);
             }
           }
         }
@@ -1315,35 +1321,40 @@ export class SharedModel extends Disposable {
       );
     }
   }
-  private async image2Texture(manager: ResourceManager, info: AssetTextureInfo): Promise<Texture2D> {
-    if (info.image.uri) {
-      const texture = await manager.fetchTexture<Texture2D>(info.image.uri, {
-        linearColorSpace: !info.sRGB
+  private async image2Texture(
+    manager: ResourceManager,
+    info: AssetTextureInfo
+  ): Promise<Nullable<Texture2D>> {
+    if (info.image!.uri) {
+      const texture = await manager.fetchTexture<Texture2D>(info.image!.uri, {
+        linearColorSpace: !info.sRGB,
+        overrideVFS: this.VFS
       });
-      texture.name = info.image.uri;
+      texture.name = info.image!.uri;
       return texture;
-    } else if (info.image.data && info.image.mimeType) {
+    } else if (info.image!.data && info.image!.mimeType) {
       const texture = await manager.loadTextureFromBuffer<Texture2D>(
-        info.image.data,
-        info.image.mimeType,
+        info.image!.data,
+        info.image!.mimeType,
         !!info.sRGB
       );
       return texture;
     }
+    return null;
   }
   private async createTexture(
     manager: ResourceManager,
     info: AssetTextureInfo
   ): Promise<MaterialTextureInfo> {
-    const texture = await this.image2Texture(manager, info);
+    const texture = (await this.image2Texture(manager, info))!;
     const sampler = getDevice().createSampler({
-      addressU: info.sampler.wrapS,
-      addressV: info.sampler.wrapT,
-      magFilter: info.sampler.magFilter,
-      minFilter: info.sampler.minFilter,
-      mipFilter: info.sampler.mipFilter
+      addressU: info.sampler!.wrapS,
+      addressV: info.sampler!.wrapT,
+      magFilter: info.sampler!.magFilter,
+      minFilter: info.sampler!.minFilter,
+      mipFilter: info.sampler!.mipFilter
     });
-    const transform = info.transform;
+    const transform = info.transform!;
     const texCoord = info.texCoord;
     return {
       texture,
@@ -1353,9 +1364,12 @@ export class SharedModel extends Disposable {
     };
   }
 
-  private async createPrimitive(manager: ResourceManager, info: AssetPrimitiveInfo): Promise<Primitive> {
+  private async createPrimitive(
+    manager: ResourceManager,
+    info: AssetPrimitiveInfo
+  ): Promise<Nullable<Primitive>> {
     if (info.path) {
-      return manager.fetchPrimitive(info.path);
+      return manager.fetchPrimitive(info.path, { overrideVFS: this.VFS });
     }
     const primitive = new Primitive();
     for (const k in info.vertices) {
@@ -1373,9 +1387,9 @@ export class SharedModel extends Disposable {
   private async createMaterial(
     manager: ResourceManager,
     assetMaterial: AssetMaterial
-  ): Promise<MeshMaterial> {
+  ): Promise<Nullable<MeshMaterial>> {
     if (assetMaterial.path) {
-      return manager.fetchMaterial<MeshMaterial>(assetMaterial.path);
+      return manager.fetchMaterial<MeshMaterial>(assetMaterial.path, { overrideVFS: this.VFS });
     }
     const infoMap: Map<AssetTextureInfo, MaterialTextureInfo> = new Map();
     const that = this;
@@ -1398,11 +1412,11 @@ export class SharedModel extends Disposable {
         unlitMaterial.albedoTexCoordIndex = info.texCoord;
         unlitMaterial.albedoTexCoordMatrix = info.transform;
       }
-      unlitMaterial.vertexColor = unlitAssetMaterial.common.vertexColor;
+      unlitMaterial.vertexColor = unlitAssetMaterial.common.vertexColor!;
       if (assetMaterial.common.alphaMode === 'blend') {
         unlitMaterial.blendMode = 'blend';
       } else if (assetMaterial.common.alphaMode === 'mask') {
-        unlitMaterial.alphaCutoff = assetMaterial.common.alphaCutoff;
+        unlitMaterial.alphaCutoff = assetMaterial.common.alphaCutoff!;
       }
       if (assetMaterial.common.doubleSided) {
         unlitMaterial.cullMode = 'none';
@@ -1411,14 +1425,14 @@ export class SharedModel extends Disposable {
     } else if (assetMaterial.type === 'pbrSpecularGlossiness') {
       const assetPBRMaterial = assetMaterial as AssetPBRMaterialSG;
       const pbrMaterial = new PBRSpecularGlossinessMaterial();
-      pbrMaterial.ior = assetPBRMaterial.ior;
-      pbrMaterial.albedoColor = assetPBRMaterial.diffuse;
+      pbrMaterial.ior = assetPBRMaterial.ior!;
+      pbrMaterial.albedoColor = assetPBRMaterial.diffuse!;
       pbrMaterial.specularFactor = new Vector3(
-        assetPBRMaterial.specular.x,
-        assetPBRMaterial.specular.y,
-        assetPBRMaterial.specular.z
+        assetPBRMaterial.specular!.x,
+        assetPBRMaterial.specular!.y,
+        assetPBRMaterial.specular!.z
       );
-      pbrMaterial.glossinessFactor = assetPBRMaterial.glossness;
+      pbrMaterial.glossinessFactor = assetPBRMaterial.glossness!;
       if (assetPBRMaterial.diffuseMap) {
         const info = await getTextureInfo(assetPBRMaterial.diffuseMap);
         pbrMaterial.albedoTexture = info.texture;
@@ -1433,7 +1447,7 @@ export class SharedModel extends Disposable {
         pbrMaterial.normalTexCoordIndex = info.texCoord;
         pbrMaterial.normalTexCoordMatrix = info.transform;
       }
-      pbrMaterial.normalScale = assetPBRMaterial.common.bumpScale;
+      pbrMaterial.normalScale = assetPBRMaterial.common.bumpScale!;
       if (assetPBRMaterial.common.emissiveMap) {
         const info = await getTextureInfo(assetPBRMaterial.common.emissiveMap);
         pbrMaterial.emissiveTexture = info.texture;
@@ -1441,8 +1455,8 @@ export class SharedModel extends Disposable {
         pbrMaterial.emissiveTexCoordIndex = info.texCoord;
         pbrMaterial.emissiveTexCoordMatrix = info.transform;
       }
-      pbrMaterial.emissiveColor = assetPBRMaterial.common.emissiveColor;
-      pbrMaterial.emissiveStrength = assetPBRMaterial.common.emissiveStrength;
+      pbrMaterial.emissiveColor = assetPBRMaterial.common.emissiveColor!;
+      pbrMaterial.emissiveStrength = assetPBRMaterial.common.emissiveStrength!;
       if (assetPBRMaterial.common.occlusionMap) {
         const info = await getTextureInfo(assetPBRMaterial.common.occlusionMap);
         pbrMaterial.occlusionTexture = info.texture;
@@ -1450,7 +1464,7 @@ export class SharedModel extends Disposable {
         pbrMaterial.occlusionTexCoordIndex = info.texCoord;
         pbrMaterial.occlusionTexCoordMatrix = info.transform;
       }
-      pbrMaterial.occlusionStrength = assetPBRMaterial.common.occlusionStrength;
+      pbrMaterial.occlusionStrength = assetPBRMaterial.common.occlusionStrength!;
       if (assetPBRMaterial.specularGlossnessMap) {
         const info = await getTextureInfo(assetPBRMaterial.specularGlossnessMap);
         pbrMaterial.specularTexture = info.texture;
@@ -1458,12 +1472,12 @@ export class SharedModel extends Disposable {
         pbrMaterial.specularTexCoordIndex = info.texCoord;
         pbrMaterial.specularTexCoordMatrix = info.transform;
       }
-      pbrMaterial.vertexTangent = assetPBRMaterial.common.useTangent;
-      pbrMaterial.vertexColor = assetPBRMaterial.common.vertexColor;
+      pbrMaterial.vertexTangent = assetPBRMaterial.common.useTangent!;
+      pbrMaterial.vertexColor = assetPBRMaterial.common.vertexColor!;
       if (assetPBRMaterial.common.alphaMode === 'blend') {
         pbrMaterial.blendMode = 'blend';
       } else if (assetPBRMaterial.common.alphaMode === 'mask') {
-        pbrMaterial.alphaCutoff = assetPBRMaterial.common.alphaCutoff;
+        pbrMaterial.alphaCutoff = assetPBRMaterial.common.alphaCutoff!;
       }
       if (assetPBRMaterial.common.doubleSided) {
         pbrMaterial.cullMode = 'none';
@@ -1473,10 +1487,10 @@ export class SharedModel extends Disposable {
     } else if (assetMaterial.type === 'pbrMetallicRoughness') {
       const assetPBRMaterial = assetMaterial as AssetPBRMaterialMR;
       const pbrMaterial = new PBRMetallicRoughnessMaterial();
-      pbrMaterial.ior = assetPBRMaterial.ior;
-      pbrMaterial.albedoColor = assetPBRMaterial.diffuse;
-      pbrMaterial.metallic = assetPBRMaterial.metallic;
-      pbrMaterial.roughness = assetPBRMaterial.roughness;
+      pbrMaterial.ior = assetPBRMaterial.ior!;
+      pbrMaterial.albedoColor = assetPBRMaterial.diffuse!;
+      pbrMaterial.metallic = assetPBRMaterial.metallic!;
+      pbrMaterial.roughness = assetPBRMaterial.roughness!;
       if (assetPBRMaterial.diffuseMap) {
         const info = await getTextureInfo(assetPBRMaterial.diffuseMap);
         pbrMaterial.albedoTexture = info.texture;
@@ -1491,7 +1505,7 @@ export class SharedModel extends Disposable {
         pbrMaterial.normalTexCoordIndex = info.texCoord;
         pbrMaterial.normalTexCoordMatrix = info.transform;
       }
-      pbrMaterial.normalScale = assetPBRMaterial.common.bumpScale;
+      pbrMaterial.normalScale = assetPBRMaterial.common.bumpScale!;
       if (assetPBRMaterial.common.emissiveMap) {
         const info = await getTextureInfo(assetPBRMaterial.common.emissiveMap);
         pbrMaterial.emissiveTexture = info.texture;
@@ -1499,15 +1513,15 @@ export class SharedModel extends Disposable {
         pbrMaterial.emissiveTexCoordIndex = info.texCoord;
         pbrMaterial.emissiveTexCoordMatrix = info.transform;
       }
-      pbrMaterial.emissiveColor = assetPBRMaterial.common.emissiveColor;
-      pbrMaterial.emissiveStrength = assetPBRMaterial.common.emissiveStrength;
+      pbrMaterial.emissiveColor = assetPBRMaterial.common.emissiveColor!;
+      pbrMaterial.emissiveStrength = assetPBRMaterial.common.emissiveStrength!;
       if (assetPBRMaterial.common.occlusionMap) {
         const info = await getTextureInfo(assetPBRMaterial.common.occlusionMap);
         pbrMaterial.occlusionTexture = info.texture;
         pbrMaterial.occlusionTextureSampler = info.sampler;
         pbrMaterial.occlusionTexCoordIndex = info.texCoord;
         pbrMaterial.occlusionTexCoordMatrix = info.transform;
-        pbrMaterial.occlusionStrength = assetPBRMaterial.common.occlusionStrength;
+        pbrMaterial.occlusionStrength = assetPBRMaterial.common.occlusionStrength!;
       }
       if (assetPBRMaterial.metallicMap) {
         const info = await getTextureInfo(assetPBRMaterial.metallicMap);
@@ -1516,7 +1530,7 @@ export class SharedModel extends Disposable {
         pbrMaterial.metallicRoughnessTexCoordIndex = info.texCoord;
         pbrMaterial.metallicRoughnessTexCoordMatrix = info.transform;
       }
-      pbrMaterial.specularFactor = assetPBRMaterial.specularFactor;
+      pbrMaterial.specularFactor = assetPBRMaterial.specularFactor!;
       if (assetPBRMaterial.specularMap) {
         const info = await getTextureInfo(assetPBRMaterial.specularMap);
         pbrMaterial.specularTexture = info.texture;
@@ -1534,8 +1548,8 @@ export class SharedModel extends Disposable {
       if (assetPBRMaterial.sheen) {
         const sheen = assetPBRMaterial.sheen;
         pbrMaterial.sheen = true;
-        pbrMaterial.sheenColorFactor = sheen.sheenColorFactor;
-        pbrMaterial.sheenRoughnessFactor = sheen.sheenRoughnessFactor;
+        pbrMaterial.sheenColorFactor = sheen.sheenColorFactor!;
+        pbrMaterial.sheenRoughnessFactor = sheen.sheenRoughnessFactor!;
         if (sheen.sheenColorMap) {
           const info = await getTextureInfo(sheen.sheenColorMap);
           pbrMaterial.sheenColorTexture = info.texture;
@@ -1554,8 +1568,8 @@ export class SharedModel extends Disposable {
       if (assetPBRMaterial.iridescence) {
         const iridescence = assetPBRMaterial.iridescence;
         pbrMaterial.iridescence = true;
-        pbrMaterial.iridescenceFactor = iridescence.iridescenceFactor;
-        pbrMaterial.iridescenceIor = iridescence.iridescenceIor;
+        pbrMaterial.iridescenceFactor = iridescence.iridescenceFactor!;
+        pbrMaterial.iridescenceIor = iridescence.iridescenceIor!;
         if (iridescence.iridescenceMap) {
           const info = await getTextureInfo(iridescence.iridescenceMap);
           pbrMaterial.iridescenceTexture = info.texture;
@@ -1563,8 +1577,8 @@ export class SharedModel extends Disposable {
           pbrMaterial.iridescenceTexCoordIndex = info.texCoord;
           pbrMaterial.iridescenceTexCoordMatrix = info.transform;
         }
-        pbrMaterial.iridescenceThicknessMin = iridescence.iridescenceThicknessMinimum;
-        pbrMaterial.iridescenceThicknessMax = iridescence.iridescenceThicknessMaximum;
+        pbrMaterial.iridescenceThicknessMin = iridescence.iridescenceThicknessMinimum!;
+        pbrMaterial.iridescenceThicknessMax = iridescence.iridescenceThicknessMaximum!;
         if (iridescence.iridescenceThicknessMap) {
           const info = await getTextureInfo(iridescence.iridescenceThicknessMap);
           pbrMaterial.iridescenceThicknessTexture = info.texture;
@@ -1576,7 +1590,7 @@ export class SharedModel extends Disposable {
       if (assetPBRMaterial.transmission) {
         const transmission = assetPBRMaterial.transmission;
         pbrMaterial.transmission = true;
-        pbrMaterial.transmissionFactor = transmission.transmissionFactor;
+        pbrMaterial.transmissionFactor = transmission.transmissionFactor!;
         if (transmission.transmissionMap) {
           const info = await getTextureInfo(transmission.transmissionMap);
           pbrMaterial.transmissionTexture = info.texture;
@@ -1584,7 +1598,7 @@ export class SharedModel extends Disposable {
           pbrMaterial.transmissionTexCoordIndex = info.texCoord;
           pbrMaterial.transmissionTexCoordMatrix = info.transform;
         }
-        pbrMaterial.thicknessFactor = transmission.thicknessFactor;
+        pbrMaterial.thicknessFactor = transmission.thicknessFactor!;
         if (transmission.thicknessMap) {
           const info = await getTextureInfo(transmission.thicknessMap);
           pbrMaterial.thicknessTexture = info.texture;
@@ -1592,14 +1606,14 @@ export class SharedModel extends Disposable {
           pbrMaterial.thicknessTexCoordIndex = info.texCoord;
           pbrMaterial.thicknessTexCoordMatrix = info.transform;
         }
-        pbrMaterial.attenuationDistance = transmission.attenuationDistance;
-        pbrMaterial.attenuationColor = transmission.attenuationColor;
+        pbrMaterial.attenuationDistance = transmission.attenuationDistance!;
+        pbrMaterial.attenuationColor = transmission.attenuationColor!;
       }
       if (assetPBRMaterial.clearcoat) {
         const cc = assetPBRMaterial.clearcoat;
         pbrMaterial.clearcoat = true;
-        pbrMaterial.clearcoatIntensity = cc.clearCoatFactor;
-        pbrMaterial.clearcoatRoughnessFactor = cc.clearCoatRoughnessFactor;
+        pbrMaterial.clearcoatIntensity = cc.clearCoatFactor!;
+        pbrMaterial.clearcoatRoughnessFactor = cc.clearCoatRoughnessFactor!;
         if (cc.clearCoatIntensityMap) {
           const info = await getTextureInfo(cc.clearCoatIntensityMap);
           pbrMaterial.clearcoatIntensityTexture = info.texture;
@@ -1622,12 +1636,12 @@ export class SharedModel extends Disposable {
           pbrMaterial.clearcoatNormalTexCoordMatrix = info.transform;
         }
       }
-      pbrMaterial.vertexTangent = assetPBRMaterial.common.useTangent;
-      pbrMaterial.vertexColor = assetPBRMaterial.common.vertexColor;
+      pbrMaterial.vertexTangent = assetPBRMaterial.common.useTangent!;
+      pbrMaterial.vertexColor = assetPBRMaterial.common.vertexColor!;
       if (assetPBRMaterial.common.alphaMode === 'blend') {
         pbrMaterial.blendMode = 'blend';
       } else if (assetPBRMaterial.common.alphaMode === 'mask') {
-        pbrMaterial.alphaCutoff = assetPBRMaterial.common.alphaCutoff;
+        pbrMaterial.alphaCutoff = assetPBRMaterial.common.alphaCutoff!;
       }
       if (assetPBRMaterial.common.doubleSided) {
         pbrMaterial.cullMode = 'none';
@@ -1635,6 +1649,7 @@ export class SharedModel extends Disposable {
       pbrMaterial.vertexNormal = !!assetMaterial.common.vertexNormal;
       return pbrMaterial;
     }
+    return null;
   }
 }
 
@@ -1650,7 +1665,7 @@ function processMorphData(
     return;
   }
   const attributes = Object.getOwnPropertyNames(subMesh.targets);
-  const positionInfo = subMesh.primitive.vertices['position'];
+  const positionInfo = subMesh.primitive!.vertices['position'];
   const numVertices = positionInfo
     ? (positionInfo.data.length / getVertexFormatComponentCount(positionInfo.format)) >> 0
     : 0;
@@ -1676,7 +1691,7 @@ function processMorphData(
       continue;
     }
     weightsAndOffsets[4 + MAX_MORPH_TARGETS + attrib] = offset >> 2;
-    const info = subMesh.targets[attrib];
+    const info = subMesh.targets![attrib]!;
     if (info.data.length !== numTargets) {
       console.error(`Invalid morph target data`);
       return;
@@ -1693,11 +1708,11 @@ function processMorphData(
   const morphBoundingBox = new BoundingBox();
   calculateMorphBoundingBox(
     morphBoundingBox,
-    subMesh.targetBox,
+    subMesh.targetBox!,
     weightsAndOffsets.subarray(4, 4 + MAX_MORPH_TARGETS),
     numTargets
   );
-  const meshAABB = subMesh.mesh.getBoundingVolume().toAABB();
+  const meshAABB = subMesh.mesh!.getBoundingVolume()!.toAABB();
   morphBoundingBox.minPoint.addBy(meshAABB.minPoint);
   morphBoundingBox.maxPoint.addBy(meshAABB.maxPoint);
 
@@ -1706,9 +1721,9 @@ function processMorphData(
     const name = morphNames?.[i] ?? `Target${i}`;
     names[name] = i;
   }
-  subMesh.mesh.setMorphData({ width: textureSize, height: textureSize, data: textureData });
-  subMesh.mesh.setMorphInfo({ data: weightsAndOffsets, names });
-  subMesh.mesh.setAnimatedBoundingBox(morphBoundingBox);
+  subMesh.mesh!.setMorphData({ width: textureSize, height: textureSize, data: textureData });
+  subMesh.mesh!.setMorphInfo({ data: weightsAndOffsets, names });
+  subMesh.mesh!.setAnimatedBoundingBox(morphBoundingBox);
 }
 
 /** @internal */

@@ -22,13 +22,13 @@ importers:
         specifier: workspace:^0.1.12
         version: link:../../libs/backend-webgl
       '@zephyr3d/backend-webgpu':
-        specifier: workspace:^0.1.11
+        specifier: workspace:^0.1.12
         version: link:../../libs/backend-webgpu
       '@zephyr3d/base':
-        specifier: workspace:^0.2.3
+        specifier: workspace:^0.2.5
         version: link:../../libs/base
       '@zephyr3d/device':
-        specifier: workspace:^0.2.8
+        specifier: workspace:^0.2.9
         version: link:../../libs/device
     devDependencies:
       '@babel/core':
@@ -146,19 +146,22 @@ importers:
         specifier: workspace:^0.1.12
         version: link:../../libs/backend-webgl
       '@zephyr3d/backend-webgpu':
-        specifier: workspace:^0.1.11
+        specifier: workspace:^0.1.12
         version: link:../../libs/backend-webgpu
       '@zephyr3d/base':
-        specifier: workspace:^0.2.3
+        specifier: workspace:^0.2.5
         version: link:../../libs/base
       '@zephyr3d/device':
-        specifier: workspace:^0.2.8
+        specifier: workspace:^0.2.9
         version: link:../../libs/device
       '@zephyr3d/imgui':
-        specifier: workspace:^0.2.2
+        specifier: workspace:^0.2.4
         version: link:../../libs/imgui
+      '@zephyr3d/loaders':
+        specifier: workspace:^0.1.0
+        version: link:../../libs/loaders
       '@zephyr3d/scene':
-        specifier: workspace:^0.9.1
+        specifier: workspace:^0.9.4
         version: link:../../libs/scene
       '@zip.js/zip.js':
         specifier: ^2.7.54
@@ -306,16 +309,16 @@ importers:
         specifier: workspace:^0.1.12
         version: link:../../libs/backend-webgl
       '@zephyr3d/backend-webgpu':
-        specifier: workspace:^0.1.11
+        specifier: workspace:^0.1.12
         version: link:../../libs/backend-webgpu
       '@zephyr3d/base':
-        specifier: workspace:^0.2.3
+        specifier: workspace:^0.2.5
         version: link:../../libs/base
       '@zephyr3d/device':
-        specifier: workspace:^0.2.8
+        specifier: workspace:^0.2.9
         version: link:../../libs/device
       '@zephyr3d/scene':
-        specifier: workspace:^0.9.1
+        specifier: workspace:^0.9.4
         version: link:../../libs/scene
     devDependencies:
       '@babel/core':
@@ -430,16 +433,16 @@ importers:
         specifier: workspace:^0.1.12
         version: link:../libs/backend-webgl
       '@zephyr3d/backend-webgpu':
-        specifier: workspace:^0.1.11
+        specifier: workspace:^0.1.12
         version: link:../libs/backend-webgpu
       '@zephyr3d/base':
-        specifier: workspace:^0.2.3
+        specifier: workspace:^0.2.5
         version: link:../libs/base
       '@zephyr3d/device':
-        specifier: workspace:^0.2.8
+        specifier: workspace:^0.2.9
         version: link:../libs/device
       '@zephyr3d/imgui':
-        specifier: workspace:^0.2.2
+        specifier: workspace:^0.2.4
         version: link:../libs/imgui
       diff:
         specifier: ^5.0.0
@@ -554,10 +557,10 @@ importers:
         specifier: ^0.1.65
         version: 0.1.69
       '@zephyr3d/base':
-        specifier: workspace:^0.2.3
+        specifier: workspace:^0.2.5
         version: link:../base
       '@zephyr3d/device':
-        specifier: workspace:^0.2.8
+        specifier: workspace:^0.2.9
         version: link:../device
       rollup-plugin-import-css:
         specifier: ~3.5.8
@@ -657,10 +660,10 @@ importers:
         specifier: ^0.1.65
         version: 0.1.69
       '@zephyr3d/base':
-        specifier: workspace:^0.2.3
+        specifier: workspace:^0.2.5
         version: link:../base
       '@zephyr3d/device':
-        specifier: workspace:^0.2.8
+        specifier: workspace:^0.2.9
         version: link:../device
       rollup-plugin-import-css:
         specifier: ~3.5.8
@@ -854,7 +857,7 @@ importers:
         specifier: ^0.1.65
         version: 0.1.69
       '@zephyr3d/base':
-        specifier: workspace:^0.2.3
+        specifier: workspace:^0.2.5
         version: link:../base
       rollup-plugin-import-css:
         specifier: ~3.5.8
@@ -954,10 +957,10 @@ importers:
         specifier: ^0.1.65
         version: 0.1.69
       '@zephyr3d/base':
-        specifier: workspace:^0.2.3
+        specifier: workspace:^0.2.5
         version: link:../base
       '@zephyr3d/device':
-        specifier: workspace:^0.2.8
+        specifier: workspace:^0.2.9
         version: link:../device
       rollup-plugin-import-css:
         specifier: ~3.5.8
@@ -1048,6 +1051,106 @@ importers:
         specifier: ^5.7.3
         version: 5.9.3
 
+  ../../libs/loaders:
+    dependencies:
+      '@types/draco3d':
+        specifier: ^1.4.9
+        version: 1.4.10
+      '@webgpu/types':
+        specifier: ^0.1.65
+        version: 0.1.69
+      '@zephyr3d/base':
+        specifier: workspace:^0.2.5
+        version: link:../base
+      '@zephyr3d/device':
+        specifier: workspace:^0.2.9
+        version: link:../device
+      '@zephyr3d/scene':
+        specifier: workspace:^0.9.4
+        version: link:../scene
+    devDependencies:
+      '@babel/core':
+        specifier: ^7.20.12
+        version: 7.29.0
+      '@babel/preset-env':
+        specifier: ^7.20.2
+        version: 7.29.3(@babel/core@7.29.0)
+      '@eslint/js':
+        specifier: ~9.38.0
+        version: 9.38.0
+      '@rollup/plugin-node-resolve':
+        specifier: ~16.0.0
+        version: 16.0.3(rollup@4.30.1)
+      '@rollup/plugin-strip':
+        specifier: ~3.0.4
+        version: 3.0.4(rollup@4.30.1)
+      '@rollup/plugin-terser':
+        specifier: ~0.4.4
+        version: 0.4.4(rollup@4.30.1)
+      '@rollup/pluginutils':
+        specifier: ~5.1.4
+        version: 5.1.4(rollup@4.30.1)
+      '@swc/core':
+        specifier: ^1.3.62
+        version: 1.15.33
+      '@typescript-eslint/eslint-plugin':
+        specifier: ~8.46.1
+        version: 8.46.4(@typescript-eslint/parser@8.46.4(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
+      '@typescript-eslint/parser':
+        specifier: ~8.46.1
+        version: 8.46.4(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
+      cross-env:
+        specifier: ^7.0.3
+        version: 7.0.3
+      eslint:
+        specifier: ~9.38.0
+        version: 9.38.0(jiti@2.6.1)
+      eslint-config-prettier:
+        specifier: ~10.1.8
+        version: 10.1.8(eslint@9.38.0(jiti@2.6.1))
+      eslint-formatter-compact:
+        specifier: ~8.40.0
+        version: 8.40.0
+      eslint-import-resolver-typescript:
+        specifier: ~4.4.4
+        version: 4.4.4(eslint-plugin-import@2.32.0(eslint@9.38.0(jiti@2.6.1)))(eslint@9.38.0(jiti@2.6.1))
+      eslint-plugin-import:
+        specifier: ~2.32.0
+        version: 2.32.0(eslint@9.38.0(jiti@2.6.1))
+      eslint-plugin-prettier:
+        specifier: ~5.5.4
+        version: 5.5.5(eslint-config-prettier@10.1.8(eslint@9.38.0(jiti@2.6.1)))(eslint@9.38.0(jiti@2.6.1))(prettier@3.6.2)
+      eslint-plugin-tsdoc:
+        specifier: ~0.4.0
+        version: 0.4.0
+      globals:
+        specifier: ^16.4.0
+        version: 16.5.0
+      prettier:
+        specifier: ~3.6.2
+        version: 3.6.2
+      rollup:
+        specifier: ~4.30.1
+        version: 4.30.1
+      rollup-plugin-copy:
+        specifier: ^3.4.0
+        version: 3.5.0
+      rollup-plugin-dts:
+        specifier: ~6.1.1
+        version: 6.1.1(rollup@4.30.1)(typescript@5.9.3)
+      rollup-plugin-swc3:
+        specifier: ~0.12.1
+        version: 0.12.1(@swc/core@1.15.33)(rollup@4.30.1)
+      rollup-plugin-typescript2:
+        specifier: ^0.34.1
+        version: 0.34.1(rollup@4.30.1)(typescript@5.9.3)
+      shx:
+        specifier: ^0.3.4
+        version: 0.3.4
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   ../../libs/scene:
     dependencies:
       '@types/draco3d':
@@ -1057,10 +1160,10 @@ importers:
         specifier: ^0.1.65
         version: 0.1.69
       '@zephyr3d/base':
-        specifier: workspace:^0.2.3
+        specifier: workspace:^0.2.5
         version: link:../base
       '@zephyr3d/device':
-        specifier: workspace:^0.2.8
+        specifier: workspace:^0.2.9
         version: link:../device
       es-module-lexer:
         specifier: ^1.7.0
@@ -1166,19 +1269,19 @@ importers:
         specifier: workspace:^0.1.12
         version: link:../libs/backend-webgl
       '@zephyr3d/backend-webgpu':
-        specifier: workspace:^0.1.11
+        specifier: workspace:^0.1.12
         version: link:../libs/backend-webgpu
       '@zephyr3d/base':
-        specifier: workspace:^0.2.3
+        specifier: workspace:^0.2.5
         version: link:../libs/base
       '@zephyr3d/device':
-        specifier: workspace:^0.2.8
+        specifier: workspace:^0.2.9
         version: link:../libs/device
       '@zephyr3d/imgui':
-        specifier: workspace:^0.2.2
+        specifier: workspace:^0.2.4
         version: link:../libs/imgui
       '@zephyr3d/scene':
-        specifier: workspace:^0.9.1
+        specifier: workspace:^0.9.4
         version: link:../libs/scene
       '@zip.js/zip.js':
         specifier: ^2.7.54
@@ -1320,19 +1423,22 @@ importers:
         specifier: workspace:^0.1.12
         version: link:../../libs/backend-webgl
       '@zephyr3d/backend-webgpu':
-        specifier: workspace:^0.1.11
+        specifier: workspace:^0.1.12
         version: link:../../libs/backend-webgpu
       '@zephyr3d/base':
-        specifier: workspace:^0.2.3
+        specifier: workspace:^0.2.5
         version: link:../../libs/base
       '@zephyr3d/device':
-        specifier: workspace:^0.2.8
+        specifier: workspace:^0.2.9
         version: link:../../libs/device
       '@zephyr3d/imgui':
-        specifier: workspace:^0.2.2
+        specifier: workspace:^0.2.4
         version: link:../../libs/imgui
+      '@zephyr3d/loaders':
+        specifier: workspace:^0.1.0
+        version: link:../../libs/loaders
       '@zephyr3d/scene':
-        specifier: workspace:^0.9.1
+        specifier: workspace:^0.9.4
         version: link:../../libs/scene
       '@zip.js/zip.js':
         specifier: ^2.7.54

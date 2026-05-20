@@ -2,16 +2,13 @@ import * as zip from '@zip.js/zip.js';
 import type * as draco3d from 'draco3d';
 import { Vector4, Vector3, DRef } from '@zephyr3d/base';
 import type { SceneNode, Scene, AnimationSet, OIT } from '@zephyr3d/scene';
-import { Mesh, PlaneShape, LambertMaterial, getDevice, getInput, getEngine } from '@zephyr3d/scene';
+import { Mesh, PlaneShape, LambertMaterial, getDevice, getInput } from '@zephyr3d/scene';
 import { BatchGroup, WeightedBlendedOIT, ABufferOIT, OrbitCameraController } from '@zephyr3d/scene';
 import type { AABB } from '@zephyr3d/base';
 import { BoundingBox, DirectionalLight, PerspectiveCamera } from '@zephyr3d/scene';
 import { EnvMaps } from './envmap';
 import { Panel } from './ui';
-
-declare global {
-  const DracoDecoderModule: draco3d.DracoDecoderModule;
-}
+import { GLTFImporter } from '@zephyr3d/loaders';
 
 export class GLTFViewer {
   private _currentAnimation: string;
@@ -126,41 +123,35 @@ export class GLTFViewer {
     return fileMap;
   }
   async loadModel(url: string) {
-    getEngine()
-      .resourceManager.fetchModel(url, this._scene, {
-        enableInstancing: true,
-        dracoDecoderModule: this._dracoModule
-      })
-      .then((info) => {
-        this._camera.clearHistoryData();
-        this._modelNode.get()?.remove();
-        this._modelNode.set(info.group);
-        this._modelNode.get().parent = this._batchGroup;
-        this._animationSet.set(info.animationSet);
-        this._modelNode.get().pickable = true;
-        this._currentAnimation = null;
-        if (this._animationSet.get()) {
-          const animations = this._animationSet.get().getAnimationNames();
-          if (animations.length > 0) {
-            this._animationSet.get().playAnimation(animations[0]);
-          }
-        }
-        this._ui.update();
-        this._bboxNoScale = this.getBoundingBox();
-        const scaleFactor =
-          Math.max(this._bboxNoScale.maxPoint.x, this._bboxNoScale.maxPoint.y, this._bboxNoScale.maxPoint.z) *
-          8;
-        this._floor.scale.setXYZ(scaleFactor, 1, scaleFactor);
-        this._floor.position.setXYZ(
-          -0.5 * scaleFactor,
-          this._bboxNoScale.minPoint.y - this._bboxNoScale.extents.y * 0.01,
-          -0.5 * scaleFactor
-        );
-        this._floor.parent = this._showFloor ? this._modelNode.get() : null;
-        this.lookAt();
-        this._light0.shadow.shadowRegion = this.getBoundingBox();
-        this._camera.clearHistoryData();
-      });
+    const importer = new GLTFImporter();
+    const node = await importer.loadModelToScene(this._scene, url);
+    this._camera.clearHistoryData();
+    this._modelNode.get()?.remove();
+    this._modelNode.set(node);
+    this._modelNode.get().parent = this._batchGroup;
+    this._animationSet.set(node.animationSet);
+    this._modelNode.get().pickable = true;
+    this._currentAnimation = null;
+    if (this._animationSet.get()) {
+      const animations = this._animationSet.get().getAnimationNames();
+      if (animations.length > 0) {
+        this._animationSet.get().playAnimation(animations[0]);
+      }
+    }
+    this._ui.update();
+    this._bboxNoScale = this.getBoundingBox();
+    const scaleFactor =
+      Math.max(this._bboxNoScale.maxPoint.x, this._bboxNoScale.maxPoint.y, this._bboxNoScale.maxPoint.z) * 8;
+    this._floor.scale.setXYZ(scaleFactor, 1, scaleFactor);
+    this._floor.position.setXYZ(
+      -0.5 * scaleFactor,
+      this._bboxNoScale.minPoint.y - this._bboxNoScale.extents.y * 0.01,
+      -0.5 * scaleFactor
+    );
+    this._floor.parent = this._showFloor ? this._modelNode.get() : null;
+    this.lookAt();
+    this._light0.shadow.shadowRegion = this.getBoundingBox();
+    this._camera.clearHistoryData();
   }
   async handleDrop(data: DataTransfer) {
     this.resolveDraggedItems(data).then(async (fileMap) => {

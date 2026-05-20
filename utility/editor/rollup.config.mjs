@@ -43,7 +43,7 @@ function getTargetWeb(name) {
 }
 
 export default (args) => {
-  return ['base', 'device', 'scene', 'imgui', 'backend-webgl', 'backend-webgpu'].map((name) =>
+  return ['base', 'device', 'scene', 'loaders', 'imgui', 'backend-webgl', 'backend-webgpu'].map((name) =>
     getTargetWeb(name)
   );
 };

@@ -1,8 +1,9 @@
 import { ImGui } from '@zephyr3d/imgui';
+import type { SharedModel } from '@zephyr3d/loaders';
 import { DialogRenderer } from '../../components/modal';
 import type { VFS } from '@zephyr3d/base';
-import type { SaveOptions, SharedModel } from '../../loaders/model';
 import { DlgSkeletonEditor } from './skeletoneditor';
+import type { SaveOptions } from '../../core/services/resource';
 
 export class DlgImportOptions extends DialogRenderer<SaveOptions[]> {
   protected _vfs: VFS;

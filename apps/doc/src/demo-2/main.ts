@@ -1,10 +1,10 @@
 import * as zip from '@zip.js/zip.js';
 import type { AABB } from '@zephyr3d/base';
+import { GLTFImporter } from '@zephyr3d/loaders';
 import { Vector3, Vector4, ZipFS } from '@zephyr3d/base';
 import type { SceneNode } from '@zephyr3d/scene';
 import {
   Scene,
-  AssetManager,
   Application,
   BoundingBox,
   FPSCameraController,
@@ -14,8 +14,7 @@ import {
   DirectionalLight,
   PerspectiveCamera,
   SphereShape,
-  getInput,
-  getEngine
+  getInput
 } from '@zephyr3d/scene';
 import type { DeviceBackend } from '@zephyr3d/device';
 import { backendWebGPU } from '@zephyr3d/backend-webgpu';
@@ -98,13 +97,13 @@ lightApp.ready().then(async () => {
 
   const loadPercent = 0;
   let message = `Loading %${loadPercent} ...`;
+
   fetchAssetArchive('https://cdn.zephyr3d.org/doc/assets/sponza.zip', (percent) => {
     message = `Loading %${percent} ...`;
   }).then(async (zipContent) => {
     const zipfs = new ZipFS(zip);
     await zipfs.initializeFromData(zipContent);
-    const assetManager = new AssetManager(getEngine().resourceManager);
-    assetManager.fetchModel(scene, '/sponza/Sponza.gltf').then((info) => {
+    new GLTFImporter().loadModelToScene(scene, '/sponza/Sponza.gltf', false, zipfs).then((node) => {
       message = '';
       function traverseModel(group: SceneNode, func: (node: SceneNode) => void, context?: any) {
         if (group) {
@@ -217,9 +216,9 @@ lightApp.ready().then(async () => {
           camera.far = Math.max(10, dist + extents.z + 100);
         }
       }
-      lookAt(info.group, camera);
+      lookAt(node, camera);
       console.log(scene.boundingBox);
-      initLights(info.group);
+      initLights(node);
     });
   });
 

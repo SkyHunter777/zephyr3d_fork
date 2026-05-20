@@ -70,10 +70,6 @@ export interface GLTFContent extends GlTf {
   _dracoModule?: draco3d.DecoderModule;
 }
 
-declare global {
-  const DracoDecoderModule: draco3d.DracoDecoderModule;
-}
-
 /**
  * The GLTF/GLB model loader
  * @internal

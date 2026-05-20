@@ -9,6 +9,7 @@ import type {
   IControllerWheelEvent,
   SceneNode
 } from '@zephyr3d/scene';
+import type { AssetHierarchyNode, AssetSkeleton } from '@zephyr3d/loaders';
 import { BatchGroup, CopyBlitter, TetrahedronShape } from '@zephyr3d/scene';
 import { getDevice } from '@zephyr3d/scene';
 import {
@@ -20,7 +21,6 @@ import {
   Scene,
   SphereShape
 } from '@zephyr3d/scene';
-import type { AssetHierarchyNode, AssetSkeleton } from '../loaders/model';
 
 let wasDragging = false;
 

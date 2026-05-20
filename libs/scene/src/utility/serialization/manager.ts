@@ -57,8 +57,13 @@ import {
 import type { Scene } from '../../scene';
 import { SceneNode } from '../../scene';
 import type { PropertyTrack } from '../../animation';
-import type { ModelFetchOptions, TextureFetchOptions } from '../../asset';
-import type { FontAsset, FontAssetFetchOptions } from '../../text';
+import type {
+  BaseFetchOptions,
+  FontAssetFetchOptions,
+  ModelFetchOptions,
+  TextureFetchOptions
+} from '../../asset';
+import type { FontAsset } from '../../text';
 import { AssetManager } from '../../asset';
 import type { BaseTexture, SamplerOptions, Texture2D, Texture2DArray, TextureCube } from '@zephyr3d/device';
 import {
@@ -657,9 +662,9 @@ export class ResourceManager {
    *
    * @returns A Promise that resolves to the binary content, or `null` if not found.
    */
-  async fetchBinary(path: string) {
+  async fetchBinary(path: string, options?: BaseFetchOptions) {
     const id = this.VFS.normalizePath(path);
-    const data = await this._assetManager.fetchBinaryData(id);
+    const data = await this._assetManager.fetchBinaryData(id, null, null, options);
     if (data) {
       this._allocated.set(data, id);
     }
@@ -897,9 +902,9 @@ export class ResourceManager {
    *
    * @returns A Promise resolving to the loaded material, or `null` if failed.
    */
-  async fetchMaterial<T extends Material = MeshMaterial>(path: string) {
+  async fetchMaterial<T extends Material = MeshMaterial>(path: string, options?: BaseFetchOptions) {
     const id = this.VFS.normalizePath(path);
-    const material = await this._assetManager.fetchMaterial<T>(id);
+    const material = await this._assetManager.fetchMaterial<T>(id, options);
     if (material) {
       this._allocated.set(material, id);
     }
@@ -928,9 +933,9 @@ export class ResourceManager {
    *
    * @returns A Promise resolving to the loaded primitive, or `null` if failed.
    */
-  async fetchPrimitive<T extends Primitive = Primitive>(path: string) {
+  async fetchPrimitive<T extends Primitive = Primitive>(path: string, options?: BaseFetchOptions) {
     const id = this.VFS.normalizePath(path);
-    const primitive = await this._assetManager.fetchPrimitive<T>(id);
+    const primitive = await this._assetManager.fetchPrimitive<T>(id, options);
     if (primitive) {
       this._allocated.set(primitive, id);
     }

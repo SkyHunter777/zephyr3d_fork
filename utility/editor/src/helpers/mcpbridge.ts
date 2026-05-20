@@ -15,6 +15,7 @@ import {
   uint8ArrayToBase64,
   Vector3
 } from '@zephyr3d/base';
+import { SharedModel, type AssetPrimitiveInfo } from '@zephyr3d/loaders';
 import { ProjectService } from '../core/services/project';
 import { isDesktopApp } from '../core/services/desktop';
 import { fileListFileName, libDir, templateScript } from '../core/build/templates';
@@ -23,7 +24,6 @@ import { AddShapeCommand } from '../commands/scenecommands';
 import { eventBus } from '../core/eventbus';
 import { EditorCameraController } from './editorcontroller';
 import { shapePrimitivePaths, type ShapePrimitiveType } from './shapeprimitives';
-import { SharedModel, type AssetPrimitiveInfo } from '../loaders/model';
 import { buildPrimitiveGlbFromZmshContent } from './primitiveglb';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };

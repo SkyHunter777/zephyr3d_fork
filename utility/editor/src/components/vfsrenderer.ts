@@ -1,6 +1,7 @@
 import type { FileMetadata, GenericConstructor, Immutable, Nullable, VFS } from '@zephyr3d/base';
 import UPNG from 'upng-js';
 import { DataTransferVFS, Disposable, guessMimeType, makeObservable, PathUtils } from '@zephyr3d/base';
+import type { SharedModel } from '@zephyr3d/loaders';
 import { DockPannel, ResizeDirection } from './dockpanel';
 import { ImGui, imGuiCalcTextSize } from '@zephyr3d/imgui';
 import { convertEmojiString } from '../helpers/emoji';
@@ -25,7 +26,6 @@ import type { MeshMaterial } from '@zephyr3d/scene';
 import { getEngine, PBRBluePrintMaterial, SpriteBlueprintMaterial } from '@zephyr3d/scene';
 import { exportFile, exportMultipleFilesAsZip } from '../helpers/downloader';
 import { matchesMimeType } from '../helpers/mimematch';
-import type { SharedModel } from '../loaders/model';
 import { buildPrimitiveGlbFromZmshContent } from '../helpers/primitiveglb';
 import { DlgImportOptions } from '../views/dlg/importoptionsdlg';
 import { DialogRenderer } from './modal';
@@ -1707,7 +1707,8 @@ export class VFSRenderer extends makeObservable(Disposable)<{
               for (let i = 0; i < result.paths.length; i++) {
                 dlgProgressBar.setProgress(i + 1, result.paths.length);
                 try {
-                  await models[i].savePrefab(
+                  await ResourceService.savePrefab(
+                    models[i],
                     getEngine().resourceManager,
                     info.targetDirectory.path,
                     saveOptions[i]

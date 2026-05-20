@@ -36,7 +36,9 @@ export function generateMSDF(glyph: GlyphData, options: MSDFOptions): MSDFBitmap
   const placedHeight = boundsHeight * scale;
   const translateX = padding + (drawableWidth - placedWidth) * 0.5 - glyph.xMin * scale;
   const translateY = padding + (drawableHeight - placedHeight) * 0.5 + glyph.yMax * scale;
-  const contourInsideSigns = shape.contours.map((contour) => determineContourInsideSign(contour, shape.contours));
+  const contourInsideSigns = shape.contours.map((contour) =>
+    determineContourInsideSign(contour, shape.contours)
+  );
   const fields = new Float32Array(width * height * 4);
 
   for (let y = 0; y < height; y++) {
@@ -59,7 +61,10 @@ export function generateMSDF(glyph: GlyphData, options: MSDFOptions): MSDFBitmap
             minDistance = sample.absDistance;
           }
           for (let channelIndex = 0; channelIndex < CHANNEL_MASKS.length; channelIndex++) {
-            if ((edge.color & CHANNEL_MASKS[channelIndex]) !== 0 && betterSample(sample, channelSamples[channelIndex])) {
+            if (
+              (edge.color & CHANNEL_MASKS[channelIndex]) !== 0 &&
+              betterSample(sample, channelSamples[channelIndex])
+            ) {
               channelSamples[channelIndex] = sample;
             }
           }
@@ -116,7 +121,12 @@ function sampleEdge(edge: ColoredEdge, x: number, y: number, insideSign: number)
     : sampleQuadraticEdge(edge, x, y, insideSign);
 }
 
-function sampleLineEdge(edge: Extract<ColoredEdge, { kind: 'line' }>, x: number, y: number, insideSign: number) {
+function sampleLineEdge(
+  edge: Extract<ColoredEdge, { kind: 'line' }>,
+  x: number,
+  y: number,
+  insideSign: number
+) {
   const dx = edge.p1.x - edge.p0.x;
   const dy = edge.p1.y - edge.p0.y;
   const lenSq = dx * dx + dy * dy;
@@ -206,7 +216,11 @@ function directionDot(dx: number, dy: number, tx: number, ty: number, absDistanc
   return Math.abs((dx * tx + dy * ty) / (absDistance * tangentLength));
 }
 
-function findNearestQuadraticParameter(edge: Extract<ColoredEdge, { kind: 'quadratic' }>, x: number, y: number) {
+function findNearestQuadraticParameter(
+  edge: Extract<ColoredEdge, { kind: 'quadratic' }>,
+  x: number,
+  y: number
+) {
   const ax = edge.p0.x - 2 * edge.p1.x + edge.p2.x;
   const ay = edge.p0.y - 2 * edge.p1.y + edge.p2.y;
   const bx = 2 * (edge.p1.x - edge.p0.x);
@@ -331,7 +345,11 @@ function determineContourInsideSign(contour: ColoredEdge[], allContours: Colored
     const normalX = -probe.tangent.y / tangentLength;
     const normalY = probe.tangent.x / tangentLength;
     for (const distance of CONTOUR_PROBE_DISTANCES) {
-      const leftInside = pointInShape(probe.point.x + normalX * distance, probe.point.y + normalY * distance, allContours);
+      const leftInside = pointInShape(
+        probe.point.x + normalX * distance,
+        probe.point.y + normalY * distance,
+        allContours
+      );
       const rightInside = pointInShape(
         probe.point.x - normalX * distance,
         probe.point.y - normalY * distance,

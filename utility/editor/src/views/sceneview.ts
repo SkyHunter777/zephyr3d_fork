@@ -2681,7 +2681,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       400
     ).then((name) => {
       if (name) {
-        ResourceService.savePrefab(
+        ResourceService.savePrefabNode(
           node,
           getEngine().resourceManager,
           getEngine().VFS.dirname(name),

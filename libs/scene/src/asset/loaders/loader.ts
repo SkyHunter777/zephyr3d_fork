@@ -99,6 +99,6 @@ export abstract class AbstractModelLoader extends LoaderBase {
     mimeType: string,
     data: Blob,
     dracoDecoderModule?: DecoderModule,
-    VFSs?: VFS[]
+    VFS?: VFS
   ): Promise<Nullable<SharedModel>>;
 }

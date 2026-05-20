@@ -1,7 +1,7 @@
 import { ImGui } from '@zephyr3d/imgui';
+import type { AssetSkeleton } from '@zephyr3d/loaders';
 import { DialogRenderer } from '../../components/modal';
 import { SkeletonView } from '../../components/skeletonview';
-import type { AssetSkeleton } from '../../loaders/model';
 
 export class DlgSkeletonEditor extends DialogRenderer<void> {
   private readonly view: SkeletonView;

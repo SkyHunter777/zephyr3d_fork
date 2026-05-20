@@ -1,6 +1,5 @@
-import * as zip from '@zip.js/zip.js';
-import type { HttpFS } from '@zephyr3d/base';
 import { Vector3, Vector4 } from '@zephyr3d/base';
+import { GLTFImporter } from '@zephyr3d/loaders';
 import type { SceneNode, Material, PBRMetallicRoughnessMaterial } from '@zephyr3d/scene';
 import {
   Scene,
@@ -10,10 +9,10 @@ import {
   DirectionalLight,
   Mesh,
   SphereShape,
-  AssetManager,
   BoxShape,
   TorusShape,
-  getInput
+  getInput,
+  getEngine
 } from '@zephyr3d/scene';
 import { WoodMaterial } from './materials/wood';
 import { FurMaterial } from './materials/fur';
@@ -48,35 +47,8 @@ async function getBackend(): Promise<DeviceBackend> {
   return backendWebGL1;
 }
 
-async function readZip(url: string): Promise<Map<string, string>> {
-  const response = await fetch(url);
-  const blob = await response.blob();
-  const reader = new zip.ZipReader(new zip.BlobReader(blob));
-  const entries = await reader.getEntries();
-  const fileMap = new Map();
-  for (const entry of entries) {
-    if (!entry.directory) {
-      const blob = await (entry as zip.FileEntry).getData(new zip.BlobWriter());
-      const fileURL = URL.createObjectURL(blob);
-      fileMap.set(`/${entry.filename}`, fileURL);
-    }
-  }
-  await reader.close();
-  // Make url unique so that a file url in zip will not conflict with other zip
-  for (const key of Array.from(fileMap.keys())) {
-    fileMap.set(url + key, fileMap.get(key));
-  }
-  return fileMap;
-}
-
 async function fetchModel(scene: Scene, url: string) {
-  const assetManager = new AssetManager();
-  if (/(\.zip)$/i.test(url)) {
-    const fileMap = await readZip(url);
-    url = Array.from(fileMap.keys()).find((val) => /(\.gltf|\.glb)$/i.test(val));
-    (assetManager.vfs as HttpFS).urlResolver = (url) => fileMap.get(url) || url;
-  }
-  return url ? await assetManager.fetchModel(scene, url) : null;
+  return url ? await new GLTFImporter().loadModelToScene(scene, url) : null;
 }
 
 const myApp = new Application({
@@ -96,17 +68,16 @@ myApp.ready().then(async function () {
   dlight.color = new Vector4(1, 1, 1, 1);
 
   const meshes: { node: SceneNode; material: Material; name: string }[] = [];
-  const assetManager = new AssetManager();
 
   // Fur material
-  const furColorTex = await assetManager.fetchTexture<Texture2D>(
+  const furColorTex = await getEngine().resourceManager.fetchTexture<Texture2D>(
     'https://cdn.zephyr3d.org/doc/assets/images/fur-color.png'
   );
   furColorTex.samplerOptions = {
     addressU: 'repeat',
     addressV: 'repeat'
   };
-  const furAlphaTex = await assetManager.fetchTexture<Texture2D>(
+  const furAlphaTex = await getEngine().resourceManager.fetchTexture<Texture2D>(
     'https://cdn.zephyr3d.org/doc/assets/images/fur-alpha.png'
   );
   furAlphaTex.samplerOptions = {
@@ -119,24 +90,14 @@ myApp.ready().then(async function () {
   furMaterial.thickness = 0.05;
   furMaterial.numLayers = 30;
   furMaterial.noiseRepeat = 16;
-  //const furMesh = await fetchModel(scene, 'https://cdn.zephyr3d.org/doc/assets/models/stanford-bunny.zip');
   const furMesh = new Mesh(scene, new TorusShape(), furMaterial);
-  /*
-  furMesh.group.iterate(node => {
-    if (node.isMesh()) {
-      furMaterial.albedoTexture = (node.material as PBRMetallicRoughnessMaterial).albedoTexture;
-      node.material = furMaterial;
-    }
-  });
-  */
-  //const furMesh = new Mesh(scene, new SphereShape({ radius: 2 }), furMaterial);
   meshes.push({ node: furMesh, material: furMaterial, name: 'Fur' });
 
   // Parallax mapping material
-  const rocksTex = await assetManager.fetchTexture<Texture2D>(
+  const rocksTex = await getEngine().resourceManager.fetchTexture<Texture2D>(
     'https://cdn.zephyr3d.org/doc/assets/images/rocks.jpg'
   );
-  const rocksNHTex = await assetManager.fetchTexture<Texture2D>(
+  const rocksNHTex = await getEngine().resourceManager.fetchTexture<Texture2D>(
     'https://cdn.zephyr3d.org/doc/assets/images/rocks_NM_height.tga'
   );
   const parallaxMaterial = new ParallaxMapMaterial();
@@ -159,13 +120,13 @@ myApp.ready().then(async function () {
   toonMaterial.bands = 2;
   toonMaterial.edgeThickness = 1;
   const toonMesh = await fetchModel(scene, 'https://cdn.zephyr3d.org/doc/assets/models/Duck.glb');
-  toonMesh.group.iterate((node) => {
+  toonMesh.iterate((node) => {
     if (node.isMesh()) {
       toonMaterial.albedoTexture = (node.material as PBRMetallicRoughnessMaterial).albedoTexture;
       node.material = toonMaterial;
     }
   });
-  meshes.push({ node: toonMesh.group, material: toonMaterial, name: 'Cartoon' });
+  meshes.push({ node: toonMesh, material: toonMaterial, name: 'Cartoon' });
 
   // Scene color material
   const sceneColorMaterial = new SceneColorMaterial();

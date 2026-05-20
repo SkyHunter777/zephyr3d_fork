@@ -1,4 +1,6 @@
 import type { GenericConstructor, Interpolator, VFS } from '@zephyr3d/base';
+import type { MeshMaterial } from '@zephyr3d/scene';
+import type { SharedModel } from '@zephyr3d/loaders';
 import { DlgCurveEditor } from './curveeditordlg';
 import { DlgMessage } from './messagedlg';
 import { DlgPromptName } from './promptnamedlg';
@@ -16,8 +18,6 @@ import type { ImGui } from '@zephyr3d/imgui';
 import { DlgPBRMaterialEditor } from './materialeditor';
 import { DlgImport } from './importdlg';
 import { DlgMaterialFunctionEditor } from './materialfunceditor';
-import type { MeshMaterial } from '@zephyr3d/scene';
-import type { SharedModel } from '../../loaders/model';
 import { DlgImportOptions } from './importoptionsdlg';
 import { DlgOpenFolder } from './openfolderdlg';
 import { DlgCreateProject, type CreateProjectResult } from './createprojectdlg';

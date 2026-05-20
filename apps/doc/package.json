@@ -20,7 +20,7 @@
     "deploy": "npm run build:site && shx rm -rf ../homepage/doc && shx cp -R dist/web ../homepage/doc",
     "lint": "cross-env NODE_OPTIONS=--max_old_space_size=8192 eslint \"src/**/*.js\" -f compact",
     "lint-fix": "cross-env NODE_OPTIONS=--max_old_space_size=8192 eslint --fix \"src/**/*.ts\" -f compact",
-    "serve": "web-dev-server --no-cache --watch --open ../homepage/doc/index.html"
+    "serve": "web-dev-server --no-cache --watch --open ./dist/web/index.html"
   },
   "engines": {
     "node": ">=16.18.0"
@@ -79,6 +79,7 @@
     "@zephyr3d/base": "workspace:^0.2.5",
     "@zephyr3d/device": "workspace:^0.2.9",
     "@zephyr3d/scene": "workspace:^0.9.4",
+    "@zephyr3d/loaders": "workspace:^0.1.0",
     "@zephyr3d/imgui": "workspace:^0.2.4",
     "@zephyr3d/backend-webgl": "workspace:^0.1.12",
     "@zephyr3d/backend-webgpu": "workspace:^0.1.12"
