@@ -272,7 +272,11 @@ async function readBinaryProperty(reader: BinaryReader, type: string): Promise<F
     case 'i':
       return (await readArray(reader, 4, (buffer) => new Int32Array(buffer))) as Int32Array<ArrayBuffer>;
     case 'l':
-      return (await readArray(reader, 8, (buffer) => new BigInt64Array(buffer))) as BigInt64Array<ArrayBuffer>;
+      return (await readArray(
+        reader,
+        8,
+        (buffer) => new BigInt64Array(buffer)
+      )) as BigInt64Array<ArrayBuffer>;
     default:
       throw new Error(`Unsupported FBX property type: ${type}`);
   }

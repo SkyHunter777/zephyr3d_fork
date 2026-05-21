@@ -11,6 +11,7 @@ import {
   AssetHierarchyNode,
   AssetScene,
   AssetSkeleton,
+  getEngine,
   SharedModel,
   type AssetImageInfo,
   type AssetMaterial,
@@ -63,21 +64,32 @@ function toUint8Array(data: Uint8Array<ArrayBufferLike>) {
 }
 
 function toUint16Array(data: Uint16Array<ArrayBufferLike>) {
-  return new Uint16Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer);
+  return new Uint16Array(
+    data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+  );
 }
 
 function toUint32Array(data: Uint32Array<ArrayBufferLike>) {
-  return new Uint32Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer);
+  return new Uint32Array(
+    data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+  );
 }
 
 function toFloat32Array(data: Float32Array<ArrayBufferLike>) {
-  return new Float32Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer);
+  return new Float32Array(
+    data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+  );
 }
 
 function toVertexRecord(
-  vertices: Partial<Record<VertexSemantic, { format: VertexAttribFormat; data: Float32Array | Uint16Array | Uint32Array }>>
+  vertices: Partial<
+    Record<VertexSemantic, { format: VertexAttribFormat; data: Float32Array | Uint16Array | Uint32Array }>
+  >
 ) {
-  const record = {} as Record<VertexSemantic, { format: VertexAttribFormat; data: Float32Array | Uint16Array | Uint32Array }>;
+  const record = {} as Record<
+    VertexSemantic,
+    { format: VertexAttribFormat; data: Float32Array | Uint16Array | Uint32Array }
+  >;
   for (const key of Object.keys(vertices) as VertexSemantic[]) {
     record[key] = vertices[key]!;
   }
@@ -159,11 +171,7 @@ function getObjectName(node: FbxNode) {
 }
 
 function toRadiansTuple(value: [number, number, number]): [number, number, number] {
-  return [
-    (value[0] * Math.PI) / 180,
-    (value[1] * Math.PI) / 180,
-    (value[2] * Math.PI) / 180
-  ];
+  return [(value[0] * Math.PI) / 180, (value[1] * Math.PI) / 180, (value[2] * Math.PI) / 180];
 }
 
 function getEulerOrder(order: number): EulerAngleOrder {
@@ -218,7 +226,11 @@ function readTransformData(node: FbxNode): FbxTransformData {
     scalingOffset: getProperty70Value(node, 'ScalingOffset', [0, 0, 0]) as [number, number, number],
     scalingPivot: getProperty70Value(node, 'ScalingPivot', [0, 0, 0]) as [number, number, number],
     rotationOrder: asNumber(getProperty70Value(node, 'RotationOrder', 0), 0),
-    geometricTranslation: getProperty70Value(node, 'GeometricTranslation', [0, 0, 0]) as [number, number, number],
+    geometricTranslation: getProperty70Value(node, 'GeometricTranslation', [0, 0, 0]) as [
+      number,
+      number,
+      number
+    ],
     geometricRotation: getProperty70Value(node, 'GeometricRotation', [0, 0, 0]) as [number, number, number],
     geometricScaling: getProperty70Value(node, 'GeometricScaling', [1, 1, 1]) as [number, number, number],
     inheritType: asNumber(getProperty70Value(node, 'InheritType', 0), 0)
@@ -268,7 +280,7 @@ function readTextureData(node: FbxNode, ctx: FbxImportContext) {
   const linkedVideoConnection = ctx.connectionChildren
     .get(id)
     ?.find((connection) => ctx.objects.Video?.has(connection.from));
-  const video = linkedVideoConnection ? ctx.videoMap.get(linkedVideoConnection.from) ?? null : null;
+  const video = linkedVideoConnection ? (ctx.videoMap.get(linkedVideoConnection.from) ?? null) : null;
   return {
     id,
     name: getObjectName(node),
@@ -335,7 +347,9 @@ function readMaterialData(node: FbxNode, ctx: FbxImportContext) {
 
 function readClusterData(node: FbxNode, ctx: FbxImportContext) {
   const id = getNodeId(node);
-  const boneConnection = ctx.connectionChildren.get(id)?.find((connection) => ctx.objects.Model?.has(connection.from));
+  const boneConnection = ctx.connectionChildren
+    .get(id)
+    ?.find((connection) => ctx.objects.Model?.has(connection.from));
   return {
     id,
     indices: (getChild(node, 'Indexes')?.properties[0] as Int32Array) ?? new Int32Array(),
@@ -370,7 +384,8 @@ function readLayerElementFloat(node: Nullable<FbxNode>) {
     getChild(node, 'Tangents') ??
     getChild(node, 'Colors') ??
     getChild(node, 'UV');
-  const indexNode = getChild(node, 'NormalsIndex') ?? getChild(node, 'ColorIndex') ?? getChild(node, 'UVIndex');
+  const indexNode =
+    getChild(node, 'NormalsIndex') ?? getChild(node, 'ColorIndex') ?? getChild(node, 'UVIndex');
   const source = dataNode?.properties[0];
   let data: Float32Array;
   if (source instanceof Float64Array) {
@@ -397,7 +412,10 @@ function readLayerElementInt(node: Nullable<FbxNode>) {
   const reference = asString(getChild(node, 'ReferenceInformationType')?.properties[0], '');
   const dataNode = getChild(node, 'Materials');
   const indexNode = getChild(node, 'MaterialsIndex');
-  const source = (dataNode?.properties[0] ?? indexNode?.properties[0]) as Int32Array | Uint32Array | undefined;
+  const source = (dataNode?.properties[0] ?? indexNode?.properties[0]) as
+    | Int32Array
+    | Uint32Array
+    | undefined;
   let data: Int32Array;
   if (source instanceof Int32Array) {
     data = source;
@@ -415,18 +433,17 @@ function readLayerElementInt(node: Nullable<FbxNode>) {
 
 function readGeometryData(node: FbxNode, ctx: FbxImportContext) {
   const id = getNodeId(node);
-  const skinConnection = ctx.connectionChildren
-    .get(id)
-    ?.find((connection) => {
-      const deformerNode = ctx.objects.Deformer?.get(connection.from);
-      return !!deformerNode && deformerNode.properties[2] === 'Skin';
-    });
-  const skin = skinConnection ? ctx.skinMap.get(skinConnection.from) ?? null : null;
+  const skinConnection = ctx.connectionChildren.get(id)?.find((connection) => {
+    const deformerNode = ctx.objects.Deformer?.get(connection.from);
+    return !!deformerNode && deformerNode.properties[2] === 'Skin';
+  });
+  const skin = skinConnection ? (ctx.skinMap.get(skinConnection.from) ?? null) : null;
   return {
     id,
     name: getObjectName(node),
     vertices: (getChild(node, 'Vertices')?.properties[0] as Float64Array) ?? new Float64Array(),
-    polygonVertexIndex: (getChild(node, 'PolygonVertexIndex')?.properties[0] as Int32Array) ?? new Int32Array(),
+    polygonVertexIndex:
+      (getChild(node, 'PolygonVertexIndex')?.properties[0] as Int32Array) ?? new Int32Array(),
     normals: readLayerElementFloat(getChild(node, 'LayerElementNormal')),
     tangents: readLayerElementFloat(getChild(node, 'LayerElementTangent')),
     colors: readLayerElementFloat(getChild(node, 'LayerElementColor')),
@@ -443,9 +460,8 @@ function readModelData(node: FbxNode, ctx: FbxImportContext) {
   const parentConnection = ctx.connectionParents
     .get(id)
     ?.find((connection) => connection.to !== 0 && ctx.objects.Model?.has(connection.to));
-  const childConnections = ctx.connectionChildren
-    .get(id)
-    ?.filter((connection) => ctx.objects.Model?.has(connection.from)) ?? [];
+  const childConnections =
+    ctx.connectionChildren.get(id)?.filter((connection) => ctx.objects.Model?.has(connection.from)) ?? [];
   return {
     id,
     name: getObjectName(node),
@@ -473,19 +489,24 @@ function createSamplerInfo(texture: FbxTextureData) {
 function resolveTextureImage(basePath: string, texture: FbxTextureData, vfs: VFS): AssetImageInfo | null {
   const video = texture.video;
   if (video?.content?.byteLength) {
-    const filename = video.relativeFilename || video.filename || texture.relativeFilename || texture.fileName || '';
+    const filename =
+      video.relativeFilename || video.filename || texture.relativeFilename || texture.fileName || '';
     const mimeType = filename ? vfs.guessMIMEType(filename) : '';
     return {
       data: toUint8Array(video.content),
       mimeType
     };
   }
-  const rawPath = texture.relativeFilename || texture.fileName || video?.relativeFilename || video?.filename || '';
+  const rawPath =
+    texture.relativeFilename || texture.fileName || video?.relativeFilename || video?.filename || '';
   if (!rawPath) {
     return null;
   }
   const normalized = rawPath.replace(/\\/g, '/');
-  const uri = vfs.parseDataURI(normalized) || vfs.isAbsoluteURL(normalized) ? normalized : vfs.normalizePath(vfs.join(basePath, normalized));
+  const uri =
+    vfs.parseDataURI(normalized) || vfs.isAbsoluteURL(normalized)
+      ? normalized
+      : vfs.normalizePath(vfs.join(basePath, normalized));
   return { uri };
 }
 
@@ -511,7 +532,11 @@ function createTextureInfo(basePath: string, texture: Nullable<FbxTextureData>, 
   } as AssetTextureInfo;
 }
 
-function registerTextureInfo(model: SharedModel, ctx: FbxImportContext, textureInfo: Nullable<AssetTextureInfo>) {
+function registerTextureInfo(
+  model: SharedModel,
+  ctx: FbxImportContext,
+  textureInfo: Nullable<AssetTextureInfo>
+) {
   const image = textureInfo?.image;
   if (!image || ctx.imageSet.has(image)) {
     return;
@@ -561,14 +586,17 @@ function createMaterialAsset(
       emissiveColor: material?.emissiveColor ? new Vector3(...material.emissiveColor) : Vector3.zero(),
       emissiveStrength: 1,
       occlusionStrength: 1,
-      normalMap: createTextureInfo(ctx.basePath, material?.textures.normal ?? null, ctx.vfs, false) ?? undefined,
-      emissiveMap: createTextureInfo(ctx.basePath, material?.textures.emissive ?? null, ctx.vfs, true) ?? undefined
+      normalMap:
+        createTextureInfo(ctx.basePath, material?.textures.normal ?? null, ctx.vfs, false) ?? undefined,
+      emissiveMap:
+        createTextureInfo(ctx.basePath, material?.textures.emissive ?? null, ctx.vfs, true) ?? undefined
     },
     ior: 1.5,
     diffuse: new Vector4(diffuse[0], diffuse[1], diffuse[2], alpha),
     metallic: 0,
     roughness: material?.shininess ? Math.max(0.04, 1 - Math.min(material.shininess / 100, 1)) : 1,
-    diffuseMap: createTextureInfo(ctx.basePath, material?.textures.diffuse ?? null, ctx.vfs, true) ?? undefined,
+    diffuseMap:
+      createTextureInfo(ctx.basePath, material?.textures.diffuse ?? null, ctx.vfs, true) ?? undefined,
     specularFactor: Vector4.one()
   };
   return assetMaterial;
@@ -646,13 +674,16 @@ function getGeometryTransform(model: FbxModelData) {
   );
 }
 
-function buildSkinData(geometry: FbxGeometryData, model: FbxModelData) {
+function buildSkinData(geometry: FbxGeometryData) {
   const clusterList = geometry.skin?.clusters ?? [];
   if (clusterList.length === 0) {
     return null;
   }
   const controlPointCount = (geometry.vertices.length / 3) >> 0;
-  const influences = Array.from({ length: controlPointCount }, () => [] as { joint: number; weight: number }[]);
+  const influences = Array.from(
+    { length: controlPointCount },
+    () => [] as { joint: number; weight: number }[]
+  );
   for (let jointIndex = 0; jointIndex < clusterList.length; jointIndex++) {
     const cluster = clusterList[jointIndex];
     const count = Math.min(cluster.indices.length, cluster.weights.length);
@@ -667,19 +698,22 @@ function buildSkinData(geometry: FbxGeometryData, model: FbxModelData) {
 }
 
 function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPrimitiveBuildData[] {
-  const materialBuckets = new Map<number, {
-    positions: number[];
-    normals: number[];
-    tangents: number[];
-    colors: number[];
-    texCoords: number[][];
-    blendIndices: number[];
-    blendWeights: number[];
-    indices: number[];
-    rawPositions: number[];
-    rawBlendIndices: number[];
-    rawJointWeights: number[];
-  }>();
+  const materialBuckets = new Map<
+    number,
+    {
+      positions: number[];
+      normals: number[];
+      tangents: number[];
+      colors: number[];
+      texCoords: number[][];
+      blendIndices: number[];
+      blendWeights: number[];
+      indices: number[];
+      rawPositions: number[];
+      rawBlendIndices: number[];
+      rawJointWeights: number[];
+    }
+  >();
   const geometryTransform = getGeometryTransform(model);
   const normalTransform = new Matrix4x4(geometryTransform).inplaceInvertAffine().transpose();
   const positionScratch = [0, 0, 0];
@@ -687,7 +721,7 @@ function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPri
   const tangentScratch = [0, 0, 0];
   const colorScratch = [1, 1, 1, 1];
   const uvScratch = Array.from({ length: Math.max(1, geometry.uvLayers.length) }, () => [0, 0]);
-  const skinData = buildSkinData(geometry, model);
+  const skinData = buildSkinData(geometry);
   let polygon: number[] = [];
   let polygonIndex = 0;
   let polygonVertexStart = 0;
@@ -734,14 +768,28 @@ function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPri
       bucket.positions.push(TMP_VEC3_B.x, TMP_VEC3_B.y, TMP_VEC3_B.z);
       bucket.rawPositions.push(TMP_VEC3_B.x, TMP_VEC3_B.y, TMP_VEC3_B.z);
 
-      resolveLayerElement(geometry.normals ?? null, polygonIndex, polygonVertexStart + localIndex, cpIndex, 3, normalScratch);
+      resolveLayerElement(
+        geometry.normals ?? null,
+        polygonIndex,
+        polygonVertexStart + localIndex,
+        cpIndex,
+        3,
+        normalScratch
+      );
       TMP_VEC3.setXYZ(normalScratch[0], normalScratch[1], normalScratch[2]);
       normalTransform.transformVector(TMP_VEC3, TMP_VEC4);
       TMP_VEC3.setXYZ(TMP_VEC4.x, TMP_VEC4.y, TMP_VEC4.z).inplaceNormalize();
       bucket.normals.push(TMP_VEC3.x, TMP_VEC3.y, TMP_VEC3.z);
 
       if (geometry.tangents) {
-        resolveLayerElement(geometry.tangents ?? null, polygonIndex, polygonVertexStart + localIndex, cpIndex, 3, tangentScratch);
+        resolveLayerElement(
+          geometry.tangents ?? null,
+          polygonIndex,
+          polygonVertexStart + localIndex,
+          cpIndex,
+          3,
+          tangentScratch
+        );
         TMP_VEC3.setXYZ(tangentScratch[0], tangentScratch[1], tangentScratch[2]);
         normalTransform.transformVector(TMP_VEC3, TMP_VEC4);
         TMP_VEC3.setXYZ(TMP_VEC4.x, TMP_VEC4.y, TMP_VEC4.z).inplaceNormalize();
@@ -749,7 +797,14 @@ function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPri
       }
 
       if (geometry.colors) {
-        resolveLayerElement(geometry.colors ?? null, polygonIndex, polygonVertexStart + localIndex, cpIndex, 4, colorScratch);
+        resolveLayerElement(
+          geometry.colors ?? null,
+          polygonIndex,
+          polygonVertexStart + localIndex,
+          cpIndex,
+          4,
+          colorScratch
+        );
         bucket.colors.push(colorScratch[0], colorScratch[1], colorScratch[2], colorScratch[3]);
       }
 
@@ -766,7 +821,10 @@ function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPri
       }
 
       if (skinData) {
-        const vertexInfluences = skinData.influences[cpIndex].slice().sort((a, b) => b.weight - a.weight).slice(0, 4);
+        const vertexInfluences = skinData.influences[cpIndex]
+          .slice()
+          .sort((a, b) => b.weight - a.weight)
+          .slice(0, 4);
         while (vertexInfluences.length < 4) {
           vertexInfluences.push({ joint: 0, weight: 0 });
         }
@@ -809,8 +867,8 @@ function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPri
       if (uv.length === 0) {
         continue;
       }
-      const semantic = (`texCoord${uvIndex}` as VertexSemantic);
-      const format = (`tex${uvIndex}_f32x2` as VertexAttribFormat);
+      const semantic = `texCoord${uvIndex}` as VertexSemantic;
+      const format = `tex${uvIndex}_f32x2` as VertexAttribFormat;
       vertices[semantic] = { format, data: new Float32Array(uv) };
     }
     if (bucket.blendIndices.length > 0) {
@@ -828,8 +886,10 @@ function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPri
       indices: toUint32Array(new Uint32Array(bucket.indices)),
       vertices: vertices as FbxPrimitiveBuildData['vertices'],
       rawPositions: toFloat32Array(new Float32Array(bucket.rawPositions)),
-      rawBlendIndices: bucket.rawBlendIndices.length > 0 ? toUint16Array(new Uint16Array(bucket.rawBlendIndices)) : null,
-      rawJointWeights: bucket.rawJointWeights.length > 0 ? toFloat32Array(new Float32Array(bucket.rawJointWeights)) : null,
+      rawBlendIndices:
+        bucket.rawBlendIndices.length > 0 ? toUint16Array(new Uint16Array(bucket.rawBlendIndices)) : null,
+      rawJointWeights:
+        bucket.rawJointWeights.length > 0 ? toFloat32Array(new Float32Array(bucket.rawJointWeights)) : null,
       materialIndex,
       name: materialBuckets.size > 1 ? `${geometry.name}_${materialIndex}` : geometry.name
     });
@@ -867,11 +927,15 @@ function computeLocalMatrix(transform: FbxTransformData) {
     const post = quaternionFromDegrees(transform.postRotation, order).inplaceInverse();
     local.rotateLeft(post);
   }
-  local.translateLeft(new Vector3(-transform.rotationPivot[0], -transform.rotationPivot[1], -transform.rotationPivot[2]));
+  local.translateLeft(
+    new Vector3(-transform.rotationPivot[0], -transform.rotationPivot[1], -transform.rotationPivot[2])
+  );
   local.translateLeft(new Vector3(...transform.scalingOffset));
   local.translateLeft(new Vector3(...transform.scalingPivot));
   local.scaleLeft(new Vector3(...transform.scale));
-  local.translateLeft(new Vector3(-transform.scalingPivot[0], -transform.scalingPivot[1], -transform.scalingPivot[2]));
+  local.translateLeft(
+    new Vector3(-transform.scalingPivot[0], -transform.scalingPivot[1], -transform.scalingPivot[2])
+  );
   return local;
 }
 
@@ -886,11 +950,7 @@ function matrixFromFloat64Array(array: Nullable<Float64Array>) {
   return matrix;
 }
 
-function buildSkeleton(
-  geometry: FbxGeometryData,
-  model: SharedModel,
-  ctx: FbxImportContext
-) {
+function buildSkeleton(geometry: FbxGeometryData, model: SharedModel, ctx: FbxImportContext) {
   const cached = ctx.skeletonMap.get(geometry.id);
   if (cached) {
     return cached;
@@ -904,7 +964,8 @@ function buildSkeleton(
     if (cluster.boneModelId == null) {
       continue;
     }
-    const jointNode = ctx.nodeMap.get(cluster.boneModelId) ?? createAssetNode(cluster.boneModelId, model, ctx);
+    const jointNode =
+      ctx.nodeMap.get(cluster.boneModelId) ?? createAssetNode(cluster.boneModelId, model, ctx);
     if (!jointNode) {
       continue;
     }
@@ -951,7 +1012,8 @@ function createMeshData(
     if (materialSource) {
       const materialHash = `fbx_${materialSource.id}_${hasVertexColor ? 'C' : 'N'}_${hasVertexTangent ? 'T' : 'NT'}`;
       material =
-        model.getMaterial(materialHash) ?? createMaterialAsset(materialSource, ctx, hasVertexColor, hasVertexTangent);
+        model.getMaterial(materialHash) ??
+        createMaterialAsset(materialSource, ctx, hasVertexColor, hasVertexTangent);
       if (!model.getMaterial(materialHash)) {
         registerMaterialImages(model, ctx, material);
         model.setMaterial(materialHash, material);
@@ -1102,8 +1164,9 @@ export class FBXImporter extends AbstractModelImporter {
 
   async loadModel(path: string, vfs?: VFS): Promise<SharedModel> {
     if (!vfs) {
-      throw new Error('FBXImporter.loadModel() requires a VFS instance');
+      vfs = getEngine().VFS;
     }
+
     const mimeType = vfs.guessMIMEType(path);
     const data = (await vfs.readFile(path, { encoding: 'binary' })) as ArrayBuffer;
     const blob = new Blob([data], { type: mimeType });
