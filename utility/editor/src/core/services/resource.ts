@@ -1,7 +1,7 @@
-import { ASSERT, type VFS } from '@zephyr3d/base';
+import { ASSERT, PathUtils, type VFS } from '@zephyr3d/base';
 import type { AbstractModelImporter } from '@zephyr3d/loaders';
-import { GLTFImporter, SharedModel } from '@zephyr3d/loaders';
-import { type SceneNode, type ResourceManager, Scene } from '@zephyr3d/scene';
+import { GLTFImporter } from '@zephyr3d/loaders';
+import { type SceneNode, type ResourceManager, Scene, getEngine, SharedModel } from '@zephyr3d/scene';
 
 export type SaveOptions = {
   importMeshes: boolean;
@@ -22,8 +22,8 @@ export class ResourceService {
     ASSERT(!!loader, `Unsupported model type: ${mimeType}`);
     const data = (await srcVFS.readFile(path, { encoding: 'binary' })) as ArrayBuffer;
     const blob = new Blob([data], { type: mimeType });
-    const model = new SharedModel(srcVFS, path);
-    await loader.import(blob, model);
+    const model = new SharedModel();
+    await loader.import(blob, model, PathUtils.dirname(path), srcVFS);
     return model;
   }
   static async savePrefabNode(
@@ -55,10 +55,12 @@ export class ResourceService {
   static async savePrefab(
     model: SharedModel,
     manager: ResourceManager,
+    name: string,
     path: string,
+    srcVFS: VFS,
     saveOptions?: SaveOptions
   ) {
-    await model.preprocess(manager, path);
+    await model.preprocess(manager, name, path, srcVFS, getEngine().resourceManager.VFS);
     const saveMeshes = saveOptions?.importMeshes ?? true;
     const saveSkeletons = saveOptions?.importSkeletons ?? true;
     const saveAnimations = saveOptions?.importAnimations ?? true;
@@ -69,11 +71,12 @@ export class ResourceService {
       false,
       saveMeshes,
       saveSkeletons,
-      saveAnimations
+      saveAnimations,
+      getEngine().resourceManager.VFS
     );
     const numSkeletons = node.animationSet?.skeletons?.length ?? 0;
     const numAnimations = node.animationSet?.getAnimationNames().length ?? 0;
-    await ResourceService.saveNodeToPrefab(node, manager, path, model.name);
+    await ResourceService.saveNodeToPrefab(node, manager, path, name);
     tmpScene.dispose();
     console.info(
       `Successfully created prefab with ${numSkeletons} skeletons and ${numAnimations} animations: ${path}`

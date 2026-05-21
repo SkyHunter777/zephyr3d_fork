@@ -48,7 +48,7 @@ async function getBackend(): Promise<DeviceBackend> {
 }
 
 async function fetchModel(scene: Scene, url: string) {
-  return url ? await new GLTFImporter().loadModelToScene(scene, url) : null;
+  return url ? await getEngine().resourceManager.fetchModel(url, scene) : null;
 }
 
 const myApp = new Application({
@@ -57,6 +57,8 @@ const myApp = new Application({
 });
 
 myApp.ready().then(async function () {
+  getEngine().resourceManager.setModelLoader('model/gltf+json', new GLTFImporter());
+  getEngine().resourceManager.setModelLoader('model/gltf-binary', new GLTFImporter());
   const scene = new Scene();
 
   let dlight: DirectionalLight = null;

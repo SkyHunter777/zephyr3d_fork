@@ -113,7 +113,7 @@ export class AddAssetCommand extends Command<Nullable<SceneNode>> {
     try {
       //const model = await importModel(this._asset);
       //asset = await model.createSceneNode(ProjectService.resourceManager, this._scene, false);
-      asset = (await getEngine().resourceManager.fetchModel(this._asset, this._scene)).group;
+      asset = await getEngine().resourceManager.fetchModel(this._asset, this._scene);
     } catch (err) {
       console.error(`Load asset failed: ${this._asset}: ${err}`);
     }

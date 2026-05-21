@@ -2640,11 +2640,11 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     getEngine()
       .resourceManager.fetchModel(asset, this.controller.model.scene)
       .then((node) => {
-        node.group.parent = null;
-        node.group.iterate((node) => {
+        node.parent = null;
+        node.iterate((node) => {
           node.gpuPickable = false;
         });
-        this._nodeToBePlaced.set(node.group);
+        this._nodeToBePlaced.set(node);
         this._assetToBeAdded = asset;
         this._typeToBePlaced = 'asset';
         this._ctorToBePlaced = null;

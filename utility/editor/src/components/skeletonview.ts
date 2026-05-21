@@ -3,13 +3,14 @@ import { AABB, DRef, Quaternion, Vector3, Vector4 } from '@zephyr3d/base';
 import type { FrameBuffer, Texture2D } from '@zephyr3d/device';
 import { ImGui } from '@zephyr3d/imgui';
 import type {
+  AssetHierarchyNode,
+  AssetSkeleton,
   IControllerPointerDownEvent,
   IControllerPointerMoveEvent,
   IControllerPointerUpEvent,
   IControllerWheelEvent,
   SceneNode
 } from '@zephyr3d/scene';
-import type { AssetHierarchyNode, AssetSkeleton } from '@zephyr3d/loaders';
 import { BatchGroup, CopyBlitter, TetrahedronShape } from '@zephyr3d/scene';
 import { getDevice } from '@zephyr3d/scene';
 import {

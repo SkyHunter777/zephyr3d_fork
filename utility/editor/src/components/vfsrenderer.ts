@@ -1,7 +1,6 @@
 import type { FileMetadata, GenericConstructor, Immutable, Nullable, VFS } from '@zephyr3d/base';
 import UPNG from 'upng-js';
 import { DataTransferVFS, Disposable, guessMimeType, makeObservable, PathUtils } from '@zephyr3d/base';
-import type { SharedModel } from '@zephyr3d/loaders';
 import { DockPannel, ResizeDirection } from './dockpanel';
 import { ImGui, imGuiCalcTextSize } from '@zephyr3d/imgui';
 import { convertEmojiString } from '../helpers/emoji';
@@ -22,7 +21,7 @@ import { DlgZABCCompress, type ZABCCompressDialogResult } from '../views/dlg/zab
 import { ListView, ListViewData } from './listview';
 import { ResourceService } from '../core/services/resource';
 import { DlgSaveFile } from '../views/dlg/savefiledlg';
-import type { MeshMaterial } from '@zephyr3d/scene';
+import type { MeshMaterial, SharedModel } from '@zephyr3d/scene';
 import { getEngine, PBRBluePrintMaterial, SpriteBlueprintMaterial } from '@zephyr3d/scene';
 import { exportFile, exportMultipleFilesAsZip } from '../helpers/downloader';
 import { matchesMimeType } from '../helpers/mimematch';
@@ -1710,7 +1709,9 @@ export class VFSRenderer extends makeObservable(Disposable)<{
                   await ResourceService.savePrefab(
                     models[i],
                     getEngine().resourceManager,
+                    PathUtils.basename(result.paths[i], PathUtils.extname(result.paths[i])),
                     info.targetDirectory.path,
+                    dtVFS,
                     saveOptions[i]
                   );
                 } catch (err) {

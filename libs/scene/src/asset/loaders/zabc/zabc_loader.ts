@@ -4,11 +4,11 @@ import {
   PCAGeometryCacheTrack,
   type PCAGeometryCacheTrackData
 } from '../../../animation/pca_geometry_cache_track';
-import type { AssetSubMeshData } from '../../model';
 import type { VertexBufferInfo } from '@zephyr3d/device';
 import { BoundingBox } from '../../../utility/bounding_volume';
 import type { SceneNode } from '../../../scene/scene_node';
 import type { Mesh } from '../../../scene/mesh';
+import type { AssetSubMeshData } from '../../model';
 
 type ZABCBinaryBufferRef = {
   offset: number;

@@ -1,5 +1,5 @@
 import { ImGui } from '@zephyr3d/imgui';
-import type { AssetSkeleton } from '@zephyr3d/loaders';
+import type { AssetSkeleton } from '@zephyr3d/scene';
 import { DialogRenderer } from '../../components/modal';
 import { SkeletonView } from '../../components/skeletonview';
 

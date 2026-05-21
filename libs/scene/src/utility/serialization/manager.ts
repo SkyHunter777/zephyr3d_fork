@@ -61,6 +61,7 @@ import type {
   BaseFetchOptions,
   FontAssetFetchOptions,
   ModelFetchOptions,
+  ModelLoader,
   TextureFetchOptions
 } from '../../asset';
 import type { FontAsset } from '../../text';
@@ -652,6 +653,15 @@ export class ResourceManager {
     }
   }
   /**
+   * Register a model loader.
+   *
+   * @param mimeType - What MIME type of files this loader can load
+   * @param loader - A concrete model loader implementation.
+   */
+  setModelLoader(mimeType: string, loader: ModelLoader) {
+    this._assetManager.setModelLoader(mimeType, loader);
+  }
+  /**
    * Fetch a binary asset by ID via the asset manager.
    *
    * @remarks
@@ -849,7 +859,7 @@ export class ResourceManager {
     const id = this.VFS.normalizePath(path);
     const model = await this._assetManager.fetchModel(scene, id, options);
     if (model) {
-      this._allocated.set(model.group, id);
+      this._allocated.set(model, id);
     }
     return model;
   }

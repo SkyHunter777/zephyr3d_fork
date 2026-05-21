@@ -2,6 +2,7 @@ import { backendWebGL1, backendWebGL2 } from '@zephyr3d/backend-webgl';
 import { backendWebGPU } from '@zephyr3d/backend-webgpu';
 import { Vector3, Vector4 } from '@zephyr3d/base';
 import type { DeviceBackend } from '@zephyr3d/device';
+import { GLTFImporter } from '@zephyr3d/loaders';
 import {
   Scene,
   Application,
@@ -11,10 +12,10 @@ import {
   FPSCameraController,
   SphereShape,
   UnlitMaterial,
-  AssetManager,
   PointLight,
   SceneNode,
-  getInput
+  getInput,
+  getEngine
 } from '@zephyr3d/scene';
 
 function getQueryString(name: string) {
@@ -39,6 +40,9 @@ const app = new Application({
 });
 
 app.ready().then(async () => {
+  getEngine().resourceManager.setModelLoader('model/gltf+json', new GLTFImporter());
+  getEngine().resourceManager.setModelLoader('model/gltf-binary', new GLTFImporter());
+
   const scene = new Scene();
   scene.env.sky.fogType = 'none';
   scene.env.sky.skyType = 'scatter';
@@ -52,30 +56,29 @@ app.ready().then(async () => {
 
   const batchGroup = new BatchGroup(scene);
 
-  const assetManager = new AssetManager();
-  const room = await assetManager.fetchModel(
-    scene,
-    'https://cdn.zephyr3d.org/doc/assets/models/abandoned_building_room.glb'
+  const room = await getEngine().resourceManager.fetchModel(
+    'https://cdn.zephyr3d.org/doc/assets/models/abandoned_building_room.glb',
+    scene
   );
-  room.group.parent = batchGroup;
+  room.parent = batchGroup;
 
   const lightOrigin = new SceneNode(scene);
-  lightOrigin.parent = room.group;
+  lightOrigin.parent = room;
   lightOrigin.position.y = 151;
 
-  const lightCage = await assetManager.fetchModel(
-    scene,
-    'https://cdn.zephyr3d.org/doc/assets/models/cage/scene.gltf'
+  const lightCage = await getEngine().resourceManager.fetchModel(
+    'https://cdn.zephyr3d.org/doc/assets/models/cage/scene.gltf',
+    scene
   );
-  lightCage.group.scale.setXYZ(15, 15, 15);
-  lightCage.group.position.y = -40;
-  lightCage.group.parent = lightOrigin;
+  lightCage.scale.setXYZ(15, 15, 15);
+  lightCage.position.y = -40;
+  lightCage.parent = lightOrigin;
 
   const lightSourceMat = new UnlitMaterial();
   lightSourceMat.albedoColor = new Vector4(1, 1, 0, 0);
   const lightSource = new Mesh(scene, new SphereShape({ radius: 0.02 }), lightSourceMat);
   lightSource.position.y = 0.6;
-  lightSource.parent = lightCage.group;
+  lightSource.parent = lightCage;
 
   const light = new PointLight(scene)
     .setCastShadow(true)

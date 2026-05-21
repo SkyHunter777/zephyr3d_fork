@@ -1,14 +1,12 @@
 import * as zip from '@zip.js/zip.js';
-import type * as draco3d from 'draco3d';
 import { Vector4, Vector3, DRef } from '@zephyr3d/base';
 import type { SceneNode, Scene, AnimationSet, OIT } from '@zephyr3d/scene';
-import { Mesh, PlaneShape, LambertMaterial, getDevice, getInput } from '@zephyr3d/scene';
+import { Mesh, PlaneShape, LambertMaterial, getDevice, getInput, getEngine } from '@zephyr3d/scene';
 import { BatchGroup, WeightedBlendedOIT, ABufferOIT, OrbitCameraController } from '@zephyr3d/scene';
 import type { AABB } from '@zephyr3d/base';
 import { BoundingBox, DirectionalLight, PerspectiveCamera } from '@zephyr3d/scene';
 import { EnvMaps } from './envmap';
 import { Panel } from './ui';
-import { GLTFImporter } from '@zephyr3d/loaders';
 
 export class GLTFViewer {
   private _currentAnimation: string;
@@ -29,7 +27,6 @@ export class GLTFViewer {
   private _showFloor: boolean;
   private _useScatter: boolean;
   private _autoRotate: boolean;
-  private _dracoModule: draco3d.DecoderModule;
   private _bboxNoScale: AABB;
   constructor(scene: Scene) {
     this._currentAnimation = null;
@@ -72,18 +69,7 @@ export class GLTFViewer {
     this._showGUI = true;
     this._showFloor = false;
     this._useScatter = false;
-    this._dracoModule = null;
-  }
-  async ready() {
-    return new Promise<void>((resolve) => {
-      DracoDecoderModule({
-        onModuleLoaded: (module) => {
-          this._dracoModule = module;
-          getInput().use(this._camera.handleEvent.bind(this._camera));
-          resolve();
-        }
-      });
-    });
+    getInput().use(this._camera.handleEvent, this._camera);
   }
   get envMaps(): EnvMaps {
     return this._envMaps;
@@ -123,8 +109,7 @@ export class GLTFViewer {
     return fileMap;
   }
   async loadModel(url: string) {
-    const importer = new GLTFImporter();
-    const node = await importer.loadModelToScene(this._scene, url);
+    const node = await getEngine().resourceManager.fetchModel(url, this._scene);
     this._camera.clearHistoryData();
     this._modelNode.get()?.remove();
     this._modelNode.set(node);

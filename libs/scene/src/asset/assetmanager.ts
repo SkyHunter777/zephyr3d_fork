@@ -8,10 +8,10 @@ import {
   base64ToUint8Array,
   Vector3,
   ASSERT,
-  Vector4
+  Vector4,
+  guessMimeType
 } from '@zephyr3d/base';
 import type { SharedModel } from './model';
-import { GLTFLoader } from './loaders/gltf/gltf_loader';
 import { WebImageLoader } from './loaders/image/webimage_loader';
 import { DDSLoader } from './loaders/dds/dds_loader';
 import { HDRLoader } from './loaders/hdr/hdr';
@@ -30,7 +30,7 @@ import type {
   VertexSemantic
 } from '@zephyr3d/device';
 import type { Scene } from '../scene/scene';
-import type { AbstractTextureLoader, AbstractModelLoader } from './loaders/loader';
+import type { AbstractTextureLoader } from './loaders/loader';
 import { TGALoader } from './loaders/image/tga_Loader';
 import { getDevice, getEngine } from '../app/api';
 import { Material, PBRBluePrintMaterial, SpriteBlueprintMaterial } from '../material';
@@ -146,6 +146,15 @@ export type ModelInfo = {
 };
 
 /**
+ * Interface for model importers
+ *
+ * @public
+ */
+export interface ModelLoader {
+  loadModel(path: string, vfs?: VFS): Promise<SharedModel>;
+}
+
+/**
  * Centralized asset manager for loading and caching resources.
  *
  * Responsibilities:
@@ -179,7 +188,7 @@ export class AssetManager {
     new TGALoader()
   ];
   /** @internal */
-  private static readonly _modelLoaders: AbstractModelLoader[] = [new GLTFLoader()];
+  private _modelLoaders: Record<string, ModelLoader> = {};
   /** @internal */
   private _textures: {
     [hash: string]: Promise<BaseTexture> | DWeakRef<BaseTexture>;
@@ -322,14 +331,10 @@ export class AssetManager {
   }
   /**
    * Register a model loader (highest priority first).
-   *
-   * Note: This is a static registry shared by all AssetManager instances.
-   *
-   * @param loader - A concrete model loader implementation.
    */
-  static addModelLoader(loader: AbstractModelLoader) {
+  setModelLoader(mimeType: string, loader: ModelLoader) {
     if (loader) {
-      this._modelLoaders.unshift(loader);
+      this._modelLoaders[mimeType] = loader;
     }
   }
   /**
@@ -589,11 +594,21 @@ export class AssetManager {
    * @param options - Model loader options and instancing hint.
    * @param httpRequest - Optional HttpRequest (unused for binary read; present for API symmetry).
    * @returns A promise with the created node group and animation set info.
+   *
+   * @internal
    */
   async fetchModel(scene: Scene, url: string, options?: ModelFetchOptions) {
     const sharedModel = await this.fetchModelData(url, options);
-    const node = sharedModel.createSceneNode(scene, !!options?.enableInstancing);
-    return { group: node, animationSet: node.animationSet };
+    const node = await sharedModel.createSceneNode(
+      getEngine().resourceManager,
+      scene,
+      !!options?.enableInstancing,
+      true,
+      true,
+      true,
+      options?.overrideVFS ?? getEngine().resourceManager.VFS
+    );
+    return node;
   }
   /**
    * Load a text resource via VFS and optionally post-process it.
@@ -1204,22 +1219,10 @@ export class AssetManager {
    * @internal
    */
   async loadModel(url: string, options?: ModelFetchOptions, vfs?: VFS) {
-    const arrayBuffer = (await this.readFileFromVFS(url, { encoding: 'binary' }, vfs)) as ArrayBuffer;
-    const mimeType = options?.mimeType || this.vfs.guessMIMEType(url);
-    const data = new Blob([arrayBuffer], { type: mimeType });
-    const filename = this.vfs.basename(url);
-    for (const loader of AssetManager._modelLoaders) {
-      if (!loader.supportMIMEType(mimeType)) {
-        continue;
-      }
-      let model = await loader.load(
-        this,
-        url,
-        options?.mimeType || data.type,
-        data,
-        options?.dracoDecoderModule,
-        vfs
-      );
+    const mimeType = options?.mimeType || guessMimeType(url);
+    const importer = this._modelLoaders[mimeType];
+    if (importer) {
+      let model = await importer.loadModel(url, vfs);
       if (!model) {
         throw new Error(`Load asset failed: ${url}`);
       }
@@ -1230,7 +1233,6 @@ export class AssetManager {
           throw new Error(`Model loader post process failed: ${err}`);
         }
       }
-      model.name = filename;
       return model;
     }
     throw new Error(`Can not find loader for asset ${url}`);

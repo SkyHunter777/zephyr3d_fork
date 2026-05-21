@@ -1,5 +1,5 @@
 import type * as draco3d from 'draco3d';
-import type { InterpolationMode, Nullable, TypedArray } from '@zephyr3d/base';
+import type { InterpolationMode, Nullable, TypedArray, VFS } from '@zephyr3d/base';
 import {
   Vector3,
   Vector4,
@@ -9,7 +9,7 @@ import {
   InterpolatorScalar,
   ASSERT
 } from '@zephyr3d/base';
-import { AssetHierarchyNode } from '../model';
+import { AssetHierarchyNode } from '@zephyr3d/scene';
 import type {
   AssetJointDynamicsCollider,
   AssetJointDynamicsFlatPlane,
@@ -29,11 +29,12 @@ import type {
   AssetSpringBoneColliderGroup,
   AssetSpringBoneJoint,
   SharedModel
-} from '../model';
-import { AssetSkeleton, AssetScene } from '../model';
+} from '@zephyr3d/scene';
+import { AssetSkeleton, AssetScene } from '@zephyr3d/scene';
 import {
   BoundingBox,
   DracoMeshDecoder,
+  getEngine,
   MORPH_TARGET_COLOR,
   MORPH_TARGET_NORMAL,
   MORPH_TARGET_POSITION,
@@ -68,36 +69,39 @@ export interface GLTFContent extends GlTf {
   _dracoModule?: draco3d.DecoderModule;
 }
 
-declare global {
-  const DracoDecoderModule: draco3d.DracoDecoderModule;
-}
-
 /**
  * The GLTF/GLB model loader
  * @public
  */
 export class GLTFImporter extends AbstractModelImporter {
+  /** @internal */
   async initDraco3d(gltf: GLTFContent) {
     return new Promise<void>((resolve) => {
-      DracoDecoderModule({
-        onModuleLoaded: (module) => {
-          gltf._dracoModule = module;
-          resolve();
-        }
-      });
+      const dracoDecoderModule = (window as any).DracoDecoderModule as draco3d.DracoDecoderModule;
+      if (dracoDecoderModule) {
+        dracoDecoderModule({
+          onModuleLoaded: (module) => {
+            gltf._dracoModule = module;
+            resolve();
+          }
+        });
+      } else {
+        resolve();
+      }
     });
   }
-  async import(data: Blob, model: SharedModel) {
+  async import(data: Blob, model: SharedModel, basePath: string, vfs?: VFS) {
     const buffer = await data.arrayBuffer();
     if (this.isGLB(buffer)) {
-      await this.loadBinary(buffer, model);
+      await this.loadBinary(buffer, model, basePath, vfs);
       return;
     }
     const gltf = (await new Response(data).json()) as GLTFContent;
     gltf._loadedBuffers = null;
-    await this.loadJson(gltf, model);
+    await this.loadJson(gltf, model, basePath, vfs);
   }
-  async loadBinary(buffer: ArrayBuffer, model: SharedModel) {
+  /** @internal */
+  async loadBinary(buffer: ArrayBuffer, model: SharedModel, basePath: string, vfs?: VFS) {
     const jsonChunkType = 0x4e4f534a;
     const binaryChunkType = 0x004e4942;
     let gltf: Nullable<GLTFContent> = null;
@@ -114,9 +118,11 @@ export class GLTFImporter extends AbstractModelImporter {
     }
     ASSERT(!!gltf, 'Invalid GLTF format');
     gltf._loadedBuffers = buffers;
-    await this.loadJson(gltf, model);
+    await this.loadJson(gltf, model, basePath, vfs);
   }
-  async loadJson(gltf: GLTFContent, model: SharedModel) {
+  /** @internal */
+  async loadJson(gltf: GLTFContent, model: SharedModel, basePath: string, vfs?: VFS) {
+    vfs = vfs ?? getEngine().VFS;
     // check extensions
     if (
       !gltf._dracoModule &&
@@ -135,17 +141,17 @@ export class GLTFImporter extends AbstractModelImporter {
       const gltfVersion = asset.version;
       ASSERT(gltfVersion === '2.0', `Invalid GLTF version: ${gltfVersion}`);
     }
-    gltf._baseURI = model.pathName;
+    gltf._baseURI = basePath;
     if (!gltf._loadedBuffers) {
       gltf._loadedBuffers = [];
       const buffers = gltf.buffers;
       if (buffers) {
         for (const buffer of buffers) {
           const uri =
-            model.VFS.parseDataURI(buffer.uri!) || model.VFS.isAbsoluteURL(buffer.uri!)
+            vfs.parseDataURI(buffer.uri!) || vfs.isAbsoluteURL(buffer.uri!)
               ? buffer.uri
-              : model.VFS.normalizePath(model.VFS.join(gltf._baseURI, buffer.uri!));
-          const buf = (await model.VFS.readFile(uri!, { encoding: 'binary' })) as ArrayBuffer;
+              : vfs.normalizePath(vfs.join(gltf._baseURI, buffer.uri!));
+          const buf = (await vfs.readFile(uri!, { encoding: 'binary' })) as ArrayBuffer;
           ASSERT(buffer.byteLength === buf.byteLength, 'Invalid GLTF: buffer byte length error.');
           gltf._loadedBuffers.push(buf);
         }
@@ -160,7 +166,7 @@ export class GLTFImporter extends AbstractModelImporter {
     const scenes = gltf.scenes;
     ASSERT(!!scenes, 'No scenes found in model');
     const sharedModel = model;
-    await this._loadMeshes(sharedModel, gltf);
+    await this._loadMeshes(sharedModel, gltf, vfs);
     this._loadNodes(gltf, sharedModel);
     this._loadSkins(gltf, sharedModel);
     for (let i = 0; i < (gltf.nodes?.length ?? 0); i++) {
@@ -748,7 +754,7 @@ export class GLTFImporter extends AbstractModelImporter {
     }
     const nodeInfo = gltf.nodes?.[nodeIndex];
     if (nodeInfo) {
-      node = new AssetHierarchyNode(nodeInfo.name, parent!); //model.addNode(parent, nodeInfo.name);
+      node = new AssetHierarchyNode(nodeInfo.name, model, parent!); //model.addNode(parent, nodeInfo.name);
       if (typeof nodeInfo.mesh === 'number') {
         node.mesh = gltf._meshes[nodeInfo.mesh];
         if (node.weights) {
@@ -828,15 +834,15 @@ export class GLTFImporter extends AbstractModelImporter {
     return node;
   }
   /** @internal */
-  private async _loadMeshes(model: SharedModel, gltf: GLTFContent) {
+  private async _loadMeshes(model: SharedModel, gltf: GLTFContent, vfs: VFS) {
     if (gltf.meshes) {
       for (let i = 0; i < gltf.meshes.length; i++) {
-        gltf._meshes[i] = (await this._loadMesh(model, gltf, i))!;
+        gltf._meshes[i] = (await this._loadMesh(model, gltf, i, vfs))!;
       }
     }
   }
   /** @internal */
-  private async _loadMesh(model: SharedModel, gltf: GLTFContent, meshIndex: number) {
+  private async _loadMesh(model: SharedModel, gltf: GLTFContent, meshIndex: number, vfs: VFS) {
     const meshInfo = gltf.meshes && gltf.meshes[meshIndex];
     let mesh: Nullable<AssetMeshData> = null;
     if (meshInfo) {
@@ -984,7 +990,8 @@ export class GLTFImporter extends AbstractModelImporter {
               materialInfo!,
               hasVertexColor,
               hasVertexNormal,
-              hasVertexTangent
+              hasVertexTangent,
+              vfs
             );
             model.setMaterial(materialHash, material);
           }
@@ -1004,7 +1011,8 @@ export class GLTFImporter extends AbstractModelImporter {
     materialInfo: Material,
     vertexColor: boolean,
     vertexNormal: boolean,
-    useTangent: boolean
+    useTangent: boolean,
+    vfs: VFS
   ): Promise<AssetMaterial> {
     let assetMaterial: Nullable<AssetMaterial> = null;
     let pbrMetallicRoughness: Nullable<AssetPBRMaterialMR> = null;
@@ -1034,15 +1042,15 @@ export class GLTFImporter extends AbstractModelImporter {
     }
     if (materialInfo?.pbrMetallicRoughness || materialInfo?.extensions?.KHR_materials_pbrSpecularGlossiness) {
       pbrCommon.normalMap = materialInfo.normalTexture
-        ? await this._loadTexture(model, gltf, materialInfo.normalTexture, false)
+        ? await this._loadTexture(model, gltf, materialInfo.normalTexture, false, vfs)
         : undefined;
       pbrCommon.bumpScale = materialInfo.normalTexture?.scale ?? 1;
       pbrCommon.occlusionMap = materialInfo.occlusionTexture
-        ? await this._loadTexture(model, gltf, materialInfo.occlusionTexture, false)
+        ? await this._loadTexture(model, gltf, materialInfo.occlusionTexture, false, vfs)
         : undefined;
       pbrCommon.occlusionStrength = materialInfo.occlusionTexture?.strength ?? 1;
       pbrCommon.emissiveMap = materialInfo.emissiveTexture
-        ? await this._loadTexture(model, gltf, materialInfo.emissiveTexture, false)
+        ? await this._loadTexture(model, gltf, materialInfo.emissiveTexture, false, vfs)
         : undefined;
       pbrCommon.emissiveStrength =
         materialInfo?.extensions?.KHR_materials_emissive_strength?.emissiveStrength ?? 1;
@@ -1062,14 +1070,15 @@ export class GLTFImporter extends AbstractModelImporter {
       pbrMetallicRoughness.metallic = materialInfo.pbrMetallicRoughness.metallicFactor ?? 1;
       pbrMetallicRoughness.roughness = materialInfo.pbrMetallicRoughness.roughnessFactor ?? 1;
       pbrMetallicRoughness.diffuseMap = materialInfo.pbrMetallicRoughness.baseColorTexture
-        ? await this._loadTexture(model, gltf, materialInfo.pbrMetallicRoughness.baseColorTexture, true)
+        ? await this._loadTexture(model, gltf, materialInfo.pbrMetallicRoughness.baseColorTexture, true, vfs)
         : undefined;
       pbrMetallicRoughness.metallicMap = materialInfo.pbrMetallicRoughness.metallicRoughnessTexture
         ? await this._loadTexture(
             model,
             gltf,
             materialInfo.pbrMetallicRoughness.metallicRoughnessTexture,
-            false
+            false,
+            vfs
           )
         : undefined;
       pbrMetallicRoughness.metallicIndex = 2;
@@ -1086,10 +1095,10 @@ export class GLTFImporter extends AbstractModelImporter {
       pbrSpecularGlossness.specular = new Vector3(sg.specularFactor ?? [1, 1, 1]);
       pbrSpecularGlossness.glossness = sg.glossnessFactor ?? 1;
       pbrSpecularGlossness.diffuseMap = sg.diffuseTexture
-        ? await this._loadTexture(model, gltf, sg.diffuseTexture, true)
+        ? await this._loadTexture(model, gltf, sg.diffuseTexture, true, vfs)
         : undefined;
       pbrSpecularGlossness.specularGlossnessMap = sg.specularGlossinessTexture
-        ? await this._loadTexture(model, gltf, sg.specularGlossinessTexture, true)
+        ? await this._loadTexture(model, gltf, sg.specularGlossinessTexture, true, vfs)
         : undefined;
     }
     assetMaterial = pbrSpecularGlossness || pbrMetallicRoughness;
@@ -1133,7 +1142,8 @@ export class GLTFImporter extends AbstractModelImporter {
             model,
             gltf,
             materialInfo.extensions.KHR_materials_specular.specularTexture,
-            false
+            false,
+            vfs
           )
         : undefined;
       pbrMetallicRoughness.specularColorMap = materialInfo?.extensions?.KHR_materials_specular
@@ -1142,7 +1152,8 @@ export class GLTFImporter extends AbstractModelImporter {
             model,
             gltf,
             materialInfo.extensions.KHR_materials_specular.specularColorTexture,
-            true
+            true,
+            vfs
           )
         : undefined;
       // KHR_materials_iridescence
@@ -1151,13 +1162,13 @@ export class GLTFImporter extends AbstractModelImporter {
         pbrMetallicRoughness.iridescence = {
           iridescenceFactor: iridescence.iridescenceFactor ?? 0,
           iridescenceMap: iridescence.iridescenceTexture
-            ? await this._loadTexture(model, gltf, iridescence.iridescenceTexture, false)
+            ? await this._loadTexture(model, gltf, iridescence.iridescenceTexture, false, vfs)
             : undefined,
           iridescenceIor: iridescence.iridescenceIor ?? 1.3,
           iridescenceThicknessMinimum: iridescence.iridescenceThicknessMinimum ?? 100,
           iridescenceThicknessMaximum: iridescence.iridescenceThicknessMaximum ?? 400,
           iridescenceThicknessMap: iridescence.iridescenceThicknessTexture
-            ? await this._loadTexture(model, gltf, iridescence.iridescenceThicknessTexture, false)
+            ? await this._loadTexture(model, gltf, iridescence.iridescenceThicknessTexture, false, vfs)
             : undefined
         };
       }
@@ -1167,7 +1178,7 @@ export class GLTFImporter extends AbstractModelImporter {
         pbrMetallicRoughness.transmission = {
           transmissionFactor: transmission.transmissionFactor ?? 0,
           transmissionMap: transmission.transmissionTexture
-            ? await this._loadTexture(model, gltf, transmission.transmissionTexture, false)
+            ? await this._loadTexture(model, gltf, transmission.transmissionTexture, false, vfs)
             : undefined,
           thicknessFactor: 0,
           thicknessMap: undefined,
@@ -1178,7 +1189,7 @@ export class GLTFImporter extends AbstractModelImporter {
         if (volume) {
           pbrMetallicRoughness.transmission.thicknessFactor = volume.thicknessFactor ?? 0;
           pbrMetallicRoughness.transmission.thicknessMap = volume.thicknessTexture
-            ? await this._loadTexture(model, gltf, volume.thicknessTexture, false)
+            ? await this._loadTexture(model, gltf, volume.thicknessTexture, false, vfs)
             : undefined;
           pbrMetallicRoughness.transmission.attenuationDistance = volume.attenuationDistance ?? 99999;
           const attenuationColor = (volume.attenuationColor ?? [1, 1, 1]) as [number, number, number];
@@ -1191,11 +1202,11 @@ export class GLTFImporter extends AbstractModelImporter {
         pbrMetallicRoughness.sheen = {
           sheenColorFactor: new Vector3(sheen.sheenColorFactor ?? [0, 0, 0]),
           sheenColorMap: sheen.sheenColorTexture
-            ? await this._loadTexture(model, gltf, sheen.sheenColorTexture, true)
+            ? await this._loadTexture(model, gltf, sheen.sheenColorTexture, true, vfs)
             : undefined,
           sheenRoughnessFactor: sheen.sheenRoughnessFactor ?? 0,
           sheenRoughnessMap: sheen.sheenRoughnessTexture
-            ? await this._loadTexture(model, gltf, sheen.sheenRoughnessTexture, true)
+            ? await this._loadTexture(model, gltf, sheen.sheenRoughnessTexture, true, vfs)
             : undefined
         };
       }
@@ -1205,14 +1216,14 @@ export class GLTFImporter extends AbstractModelImporter {
         pbrMetallicRoughness.clearcoat = {
           clearCoatFactor: cc.clearcoatFactor ?? 0,
           clearCoatIntensityMap: cc.clearcoatTexture
-            ? await this._loadTexture(model, gltf, cc.clearcoatTexture, false)
+            ? await this._loadTexture(model, gltf, cc.clearcoatTexture, false, vfs)
             : undefined,
           clearCoatRoughnessFactor: cc.clearcoatRoughnessFactor ?? 0,
           clearCoatRoughnessMap: cc.clearcoatRoughnessTexture
-            ? await this._loadTexture(model, gltf, cc.clearcoatRoughnessTexture, false)
+            ? await this._loadTexture(model, gltf, cc.clearcoatRoughnessTexture, false, vfs)
             : undefined,
           clearCoatNormalMap: cc.clearcoatNormalTexture
-            ? await this._loadTexture(model, gltf, cc.clearcoatNormalTexture, false)
+            ? await this._loadTexture(model, gltf, cc.clearcoatNormalTexture, false, vfs)
             : undefined
         };
       }
@@ -1224,7 +1235,8 @@ export class GLTFImporter extends AbstractModelImporter {
     model: SharedModel,
     gltf: GLTFContent,
     info: Partial<TextureInfo>,
-    sRGB: boolean
+    sRGB: boolean,
+    vfs: VFS
   ): Promise<AssetTextureInfo> {
     const mt: AssetTextureInfo = {
       image: null,
@@ -1324,7 +1336,7 @@ export class GLTFImporter extends AbstractModelImporter {
         const image = gltf.images![imageIndex];
         if (image) {
           if (image.uri) {
-            const imageUrl = model.VFS.normalizePath(model.VFS.join(gltf._baseURI, image.uri));
+            const imageUrl = vfs.normalizePath(vfs.join(gltf._baseURI, image.uri));
             mt.image = {
               uri: imageUrl
             };

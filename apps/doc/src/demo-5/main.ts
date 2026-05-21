@@ -3,6 +3,7 @@ import { backendWebGPU } from '@zephyr3d/backend-webgpu';
 import { Vector3, Vector4 } from '@zephyr3d/base';
 import type { DeviceBackend } from '@zephyr3d/device';
 import type { PBRMetallicRoughnessMaterial } from '@zephyr3d/scene';
+import { getEngine } from '@zephyr3d/scene';
 import {
   Scene,
   OrbitCameraController,
@@ -42,19 +43,22 @@ const instancingApp = new Application({
 });
 
 instancingApp.ready().then(async () => {
+  getEngine().resourceManager.setModelLoader('model/gltf+json', new GLTFImporter());
+  getEngine().resourceManager.setModelLoader('model/gltf-binary', new GLTFImporter());
+
   const scene = new Scene();
   const camera = new PerspectiveCamera(scene, Math.PI / 3, 1, 1000);
   camera.position.setXYZ(0, 0, 60);
   camera.controller = new OrbitCameraController();
-  getInput().use(camera.handleEvent.bind(camera));
+  getInput().use(camera.handleEvent, camera);
 
   const batchGroup = new BatchGroup(scene);
   await (async function () {
     for (let i = 0; i < 2000; i++) {
-      const stone1 = await new GLTFImporter().loadModelToScene(
-        scene,
+      const stone1 = await getEngine().resourceManager.fetchModel(
         'https://cdn.zephyr3d.org/doc/assets/models/stone1.glb',
-        true
+        scene,
+        { enableInstancing: true }
       );
       stone1.parent = batchGroup;
       stone1.position.setXYZ(Math.random() * 100 - 50, Math.random() * 100 - 50, Math.random() * 100 - 50);
@@ -71,10 +75,10 @@ instancingApp.ready().then(async () => {
         }
       });
       instanceCount++;
-      const stone2 = await new GLTFImporter().loadModelToScene(
-        scene,
+      const stone2 = await getEngine().resourceManager.fetchModel(
         'https://cdn.zephyr3d.org/doc/assets/models/stone2.glb',
-        true
+        scene,
+        { enableInstancing: true }
       );
       stone2.parent = batchGroup;
       stone2.position.setXYZ(Math.random() * 100 - 50, Math.random() * 100 - 50, Math.random() * 100 - 50);

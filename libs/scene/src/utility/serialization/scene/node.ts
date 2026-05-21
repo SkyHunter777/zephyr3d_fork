@@ -110,7 +110,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
       }
       if (init?.assetId) {
         const fetchedModel = await manager.fetchModel(init.assetId, scene!);
-        const sceneNode = fetchedModel?.group ?? null;
+        const sceneNode = fetchedModel ?? null;
         if (sceneNode) {
           const originalAssetId = manager.getAssetId(sceneNode);
           try {
@@ -150,7 +150,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
         flags.saveProps = false;
       }
       if (!prefabId && assetId) {
-        const baseNode = (await manager.fetchModel(assetId, obj.scene!))?.group ?? null;
+        const baseNode = (await manager.fetchModel(assetId, obj.scene!)) ?? null;
         if (baseNode) {
           const originalObjectAssetId = manager.getAssetId(obj);
           const originalBaseAssetId = manager.getAssetId(baseNode);

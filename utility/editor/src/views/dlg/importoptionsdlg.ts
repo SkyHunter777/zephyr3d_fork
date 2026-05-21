@@ -1,5 +1,5 @@
 import { ImGui } from '@zephyr3d/imgui';
-import type { SharedModel } from '@zephyr3d/loaders';
+import type { SharedModel } from '@zephyr3d/scene';
 import { DialogRenderer } from '../../components/modal';
 import type { VFS } from '@zephyr3d/base';
 import { DlgSkeletonEditor } from './skeletoneditor';

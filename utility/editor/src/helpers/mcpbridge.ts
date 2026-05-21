@@ -15,7 +15,7 @@ import {
   uint8ArrayToBase64,
   Vector3
 } from '@zephyr3d/base';
-import { SharedModel, type AssetPrimitiveInfo } from '@zephyr3d/loaders';
+import { SharedModel, type AssetPrimitiveInfo } from '@zephyr3d/scene';
 import { ProjectService } from '../core/services/project';
 import { isDesktopApp } from '../core/services/desktop';
 import { fileListFileName, libDir, templateScript } from '../core/build/templates';

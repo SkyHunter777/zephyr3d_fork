@@ -1,8 +1,5 @@
 import type { BaseTexture, SamplerOptions } from '@zephyr3d/device';
-import type { AssetManager } from '../assetmanager';
-import type { SharedModel } from '../model';
-import type { DecoderModule } from 'draco3d';
-import type { Nullable, TypedArray, VFS } from '@zephyr3d/base';
+import type { Nullable, TypedArray } from '@zephyr3d/base';
 
 /**
  * Base interface for any kind loaders
@@ -72,33 +69,4 @@ export abstract class AbstractTextureLoader extends LoaderBase {
     samplerOptions?: SamplerOptions,
     texture?: Nullable<BaseTexture>
   ): Promise<Nullable<BaseTexture>>;
-}
-
-/**
- * Base class for any kind of model loaders
- * @public
- */
-export abstract class AbstractModelLoader extends LoaderBase {
-  /**
-   * Tests whether the loader supports loading a model with given MIME type.
-   * @param mimeType - The MIME type to test
-   * @returns true if it supports
-   */
-  abstract supportMIMEType(mimeType: string): boolean;
-  /**
-   * Loads a model
-   * @param assetManager - The instance of AssetManager
-   * @param url - The request URL
-   * @param mimeType - MIME type for the model data
-   * @param data - The model data
-   * @returns The loaded model
-   */
-  abstract load(
-    assetManager: AssetManager,
-    url: string,
-    mimeType: string,
-    data: Blob,
-    dracoDecoderModule?: DecoderModule,
-    VFS?: VFS
-  ): Promise<Nullable<SharedModel>>;
 }

@@ -1,8 +1,9 @@
-import { Application, getDevice, Scene } from '@zephyr3d/scene';
+import { Application, getDevice, getEngine, Scene } from '@zephyr3d/scene';
 import { GLTFViewer } from './gltfviewer';
 import { backendWebGL2, backendWebGL1 } from '@zephyr3d/backend-webgl';
 import { backendWebGPU } from '@zephyr3d/backend-webgpu';
 import type { DeviceBackend } from '@zephyr3d/device';
+import { GLTFImporter } from '@zephyr3d/loaders';
 
 function getQueryString(name: string) {
   return new URL(window.location.toString()).searchParams.get(name) || null;
@@ -34,10 +35,11 @@ const gltfApp = new Application({
 });
 
 gltfApp.ready().then(async () => {
+  getEngine().resourceManager.setModelLoader('model/gltf+json', new GLTFImporter());
+  getEngine().resourceManager.setModelLoader('model/gltf-binary', new GLTFImporter());
   console.log(gltfApp.device.getAdapterInfo());
   const scene = new Scene();
   const gltfViewer = new GLTFViewer(scene);
-  await gltfViewer.ready();
   gltfViewer.loadModel('https://cdn.zephyr3d.org/doc/assets/models/DamagedHelmet.glb');
   gltfApp.on('drop', (ev) => {
     ev.preventDefault();
