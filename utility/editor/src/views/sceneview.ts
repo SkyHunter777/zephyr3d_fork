@@ -2299,7 +2299,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   }
   private handleWorkspaceDragEnter(_type: string, payload: { isDir: boolean; path: string }) {
     const mimeType = getEngine().VFS.guessMIMEType(payload.path);
-    if (mimeType === 'model/gltf-binary' || mimeType === 'model/gltf+json') {
+    if (mimeType === 'model/gltf-binary' || mimeType === 'model/gltf+json' || mimeType === 'model/fbx') {
       this.handleAddAsset(payload.path);
     } else if (mimeType === 'application/vnd.zephyr3d.prefab+json') {
       this.handleAddPrefab(payload.path);

@@ -1280,6 +1280,9 @@ export class SharedModel extends Disposable {
       const meshData = assetNode.mesh;
       const skeleton = saveSkeletons ? assetNode.skeleton : null;
       for (const subMesh of meshData.subMeshes) {
+        if (assetNode.instances.length === 0) {
+          assetNode.instances.push({ t: Vector3.zero(), s: Vector3.one(), r: Quaternion.identity() });
+        }
         for (const instance of assetNode.instances) {
           const meshNode = new Mesh(scene);
           meshNode.position = instance.t;

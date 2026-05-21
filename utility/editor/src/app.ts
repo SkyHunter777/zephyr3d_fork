@@ -11,6 +11,7 @@ import { isDesktopApp } from './core/services/desktop';
 import type { Nullable } from '@zephyr3d/base';
 import { GenericHtmlDirectoryReader } from '@zephyr3d/base';
 import type { DeviceBackend } from '@zephyr3d/device';
+import { FBXImporter, GLTFImporter } from '@zephyr3d/loaders';
 
 const searchParams = new URL(window.location.href).searchParams;
 const project = searchParams.get('project');
@@ -127,6 +128,9 @@ function isEditableShortcutTarget(target: EventTarget | null) {
 }
 
 editorApp.ready().then(async () => {
+  getEngine().resourceManager.setModelLoader('model/gltf+json', new GLTFImporter());
+  getEngine().resourceManager.setModelLoader('model/gltf-binary', new GLTFImporter());
+  getEngine().resourceManager.setModelLoader('model/fbx', new FBXImporter());
   if (editorMode === 'editor') {
     await initLeakDetector();
     const device = getDevice();

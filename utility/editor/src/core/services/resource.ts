@@ -1,6 +1,6 @@
 import { ASSERT, PathUtils, type VFS } from '@zephyr3d/base';
 import type { AbstractModelImporter } from '@zephyr3d/loaders';
-import { GLTFImporter } from '@zephyr3d/loaders';
+import { FBXImporter, GLTFImporter } from '@zephyr3d/loaders';
 import { type SceneNode, type ResourceManager, Scene, getEngine, SharedModel } from '@zephyr3d/scene';
 
 export type SaveOptions = {
@@ -16,6 +16,9 @@ export class ResourceService {
     if (mimeType === 'model/gltf+json' || mimeType === 'model/gltf-binary') {
       console.info(`Start importing model ${path} - ${mimeType}`);
       loader = new GLTFImporter();
+    } else if (mimeType === 'model/fbx') {
+      console.info(`Start importing model ${path} - ${mimeType}`);
+      loader = new FBXImporter();
     } else {
       throw new Error(`No valid loader found`);
     }
