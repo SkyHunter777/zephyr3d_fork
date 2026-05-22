@@ -52,7 +52,7 @@ type FbxImportContext = {
   videoMap: Map<number, FbxVideoData>;
   skinMap: Map<number, FbxSkinData>;
   skeletonMap: Map<number, AssetSkeleton>;
-  jointBindMatrices: Map<number, Matrix4x4>;
+  jointBindMatrices: Map<string, Matrix4x4>;
   skeletonJointIds: Set<number>;
   imageSet: Set<AssetImageInfo>;
   nextImageIndex: number;
@@ -177,21 +177,23 @@ function toRadiansTuple(value: [number, number, number]): [number, number, numbe
 }
 
 function getEulerOrder(order: number): EulerAngleOrder {
+  // FBX stores extrinsic Euler orders; Quaternion.fromEulerAngle expects the equivalent
+  // intrinsic order, matching the conversion used by three.js FBXLoader.
   switch (order) {
     case 0:
-      return 'XYZ';
+      return 'ZYX';
     case 1:
-      return 'XZY';
-    case 2:
       return 'YZX';
+    case 2:
+      return 'XZY';
     case 3:
       return 'YXZ';
     case 4:
       return 'ZXY';
     case 5:
-      return 'ZYX';
-    default:
       return 'XYZ';
+    default:
+      return 'ZYX';
   }
 }
 
@@ -880,8 +882,8 @@ function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPri
     }
     if (bucket.blendIndices.length > 0) {
       vertices.blendIndices = {
-        format: 'blendindices_u16x4' as VertexAttribFormat,
-        data: new Uint16Array(bucket.blendIndices)
+        format: 'blendindices_f32x4' as VertexAttribFormat,
+        data: new Float32Array(bucket.blendIndices)
       };
       vertices.blendWeights = {
         format: 'blendweights_f32x4' as VertexAttribFormat,
@@ -923,15 +925,18 @@ function getBounds(positions: Float32Array) {
 }
 
 function composeFbxLocalMatrix(transform: FbxTransformData, hasParent: boolean) {
-  const scale =
-    hasParent && transform.inheritType === 2 ? Vector3.one() : new Vector3(...transform.scale);
+  const scale = hasParent && transform.inheritType === 2 ? Vector3.one() : new Vector3(...transform.scale);
   const local = new Matrix4x4().identity();
-  local.translateLeft(new Vector3(-transform.scalingPivot[0], -transform.scalingPivot[1], -transform.scalingPivot[2]));
+  local.translateLeft(
+    new Vector3(-transform.scalingPivot[0], -transform.scalingPivot[1], -transform.scalingPivot[2])
+  );
   local.scaleLeft(scale);
   local.translateLeft(new Vector3(...transform.scalingPivot));
   local.translateLeft(new Vector3(...transform.scalingOffset));
-  local.translateLeft(new Vector3(-transform.rotationPivot[0], -transform.rotationPivot[1], -transform.rotationPivot[2]));
-  local.rotateLeft(quaternionFromDegreesXYZ(transform.postRotation));
+  local.translateLeft(
+    new Vector3(-transform.rotationPivot[0], -transform.rotationPivot[1], -transform.rotationPivot[2])
+  );
+  local.rotateLeft(Quaternion.inverse(quaternionFromDegreesXYZ(transform.postRotation)));
   local.rotateLeft(quaternionFromDegrees(transform.rotation, transform.rotationOrder));
   local.rotateLeft(quaternionFromDegreesXYZ(transform.preRotation));
   local.translateLeft(new Vector3(...transform.rotationPivot));
@@ -949,6 +954,69 @@ function matrixFromFloat64Array(array: Nullable<Float64Array | Float32Array>) {
     matrix[i] = array[i];
   }
   return matrix;
+}
+
+function resolveClusterInverseBind(cluster: FbxClusterData, jointNode: Nullable<AssetHierarchyNode>) {
+  // FBX cluster Transform is the geometry node bind matrix. We already bake the geometry
+  // transform into mesh vertices, so inverse bind should come from the link node only.
+  if (cluster.transformLink) {
+    return matrixFromFloat64Array(cluster.transformLink).inplaceInvertAffine();
+  }
+  if (jointNode?.worldMatrix) {
+    return new Matrix4x4(jointNode.worldMatrix).inplaceInvertAffine();
+  }
+  return Matrix4x4.identity();
+}
+
+function computeModelWorldMatrix(
+  modelId: number,
+  ctx: FbxImportContext,
+  bindWorldOverrides: Map<number, Matrix4x4>,
+  cache: Map<number, Matrix4x4>
+): Matrix4x4 {
+  const cached = cache.get(modelId);
+  if (cached) {
+    return cached;
+  }
+  const override = bindWorldOverrides.get(modelId);
+  if (override) {
+    cache.set(modelId, override);
+    return override;
+  }
+  const model = ctx.modelMap.get(modelId);
+  if (!model) {
+    return Matrix4x4.identity();
+  }
+  const local = composeFbxLocalMatrix(model.transform, model.parentId != null);
+  const world: Matrix4x4 =
+    model.parentId != null
+      ? Matrix4x4.multiply(computeModelWorldMatrix(model.parentId, ctx, bindWorldOverrides, cache), local)
+      : local;
+  cache.set(modelId, world);
+  return world;
+}
+
+function applyClusterBindPose(
+  cluster: FbxClusterData,
+  jointNode: AssetHierarchyNode,
+  ctx: FbxImportContext,
+  bindWorldOverrides: Map<number, Matrix4x4>,
+  worldCache: Map<number, Matrix4x4>
+) {
+  if (!cluster.transformLink || cluster.boneModelId == null) {
+    return;
+  }
+  const bindWorld = matrixFromFloat64Array(cluster.transformLink);
+  const source = ctx.modelMap.get(cluster.boneModelId);
+  const parentWorld =
+    source?.parentId != null
+      ? computeModelWorldMatrix(source.parentId, ctx, bindWorldOverrides, worldCache)
+      : null;
+  const local = parentWorld
+    ? Matrix4x4.multiply(new Matrix4x4(parentWorld).inplaceInvertAffine(), bindWorld)
+    : bindWorld;
+  local.decompose(jointNode.scaling, jointNode.rotation, jointNode.position);
+  worldCache.set(cluster.boneModelId, bindWorld);
 }
 
 function hasAncestorOfType(model: FbxModelData, ctx: FbxImportContext, type: string) {
@@ -999,6 +1067,13 @@ function buildSkeleton(geometry: FbxGeometryData, model: SharedModel, ctx: FbxIm
     return null;
   }
   const skeleton = new AssetSkeleton(`${geometry.name}_skeleton`);
+  const bindWorldOverrides = new Map<number, Matrix4x4>();
+  for (const cluster of skin.clusters) {
+    if (cluster.boneModelId != null && cluster.transformLink) {
+      bindWorldOverrides.set(cluster.boneModelId, matrixFromFloat64Array(cluster.transformLink));
+    }
+  }
+  const bindWorldCache = new Map<number, Matrix4x4>();
   for (const cluster of skin.clusters) {
     if (cluster.boneModelId == null) {
       continue;
@@ -1008,18 +1083,11 @@ function buildSkeleton(geometry: FbxGeometryData, model: SharedModel, ctx: FbxIm
     if (!jointNode) {
       continue;
     }
-    const inverseBind =
-      ctx.jointBindMatrices.get(cluster.boneModelId) ??
-      (cluster.transformLink && cluster.transform
-        ? Matrix4x4.multiply(
-            new Matrix4x4(matrixFromFloat64Array(cluster.transformLink)).inplaceInvertAffine(),
-            matrixFromFloat64Array(cluster.transform)
-          )
-        : cluster.transformLink
-          ? matrixFromFloat64Array(cluster.transformLink).inplaceInvertAffine()
-          : Matrix4x4.identity());
+    applyClusterBindPose(cluster, jointNode, ctx, bindWorldOverrides, bindWorldCache);
+    const cacheKey = `${geometry.id}:${cluster.boneModelId}`;
+    const inverseBind = ctx.jointBindMatrices.get(cacheKey) ?? resolveClusterInverseBind(cluster, jointNode);
     ctx.skeletonJointIds.add(cluster.boneModelId);
-    ctx.jointBindMatrices.set(cluster.boneModelId, inverseBind);
+    ctx.jointBindMatrices.set(cacheKey, inverseBind);
     skeleton.addJoint(jointNode, inverseBind);
   }
   if (skeleton.joints.length === 0) {
@@ -1045,9 +1113,13 @@ function buildSkeletonFromLimbRoot(root: FbxModelData, model: SharedModel, ctx: 
     if (source.type === 'LimbNode') {
       const jointNode = ctx.nodeMap.get(source.id) ?? createAssetNode(source.id, model, ctx);
       if (jointNode) {
+        const cacheKey = `${root.id}:${source.id}`;
         const inverseBind =
-          ctx.jointBindMatrices.get(source.id) ??
-          (jointNode.worldMatrix ? new Matrix4x4(jointNode.worldMatrix).inplaceInvertAffine() : Matrix4x4.identity());
+          ctx.jointBindMatrices.get(cacheKey) ??
+          (jointNode.worldMatrix
+            ? new Matrix4x4(jointNode.worldMatrix).inplaceInvertAffine()
+            : Matrix4x4.identity());
+        ctx.jointBindMatrices.set(cacheKey, inverseBind);
         skeleton.addJoint(jointNode, inverseBind);
       }
     }
@@ -1166,7 +1238,7 @@ function buildModelMaps(ctx: FbxImportContext) {
   }
 }
 
-function populateNodeTransforms(modelNode: AssetHierarchyNode, source: FbxModelData, ctx: FbxImportContext) {
+function populateNodeTransforms(modelNode: AssetHierarchyNode, source: FbxModelData) {
   const local = composeFbxLocalMatrix(source.transform, source.parentId != null);
   local.decompose(modelNode.scaling, modelNode.rotation, modelNode.position);
   if (source.parentId != null && source.transform.inheritType === 2) {
@@ -1190,7 +1262,7 @@ function createAssetNode(modelId: number, model: SharedModel, ctx: FbxImportCont
     parent ?? undefined
   );
   ctx.nodeMap.set(modelId, node);
-  populateNodeTransforms(node, source, ctx);
+  populateNodeTransforms(node, source);
   const geometryConnection = (ctx.connectionChildren.get(modelId) ?? []).find((connection) =>
     ctx.geometryMap.has(connection.from)
   );
@@ -1249,7 +1321,13 @@ export class FBXImporter extends AbstractModelImporter {
         continue;
       }
       const node = createAssetNode(modelId, model, ctx);
-      if (node && (modelData.type === 'Root' || modelData.type === 'Null' || modelData.type === 'Mesh')) {
+      if (
+        node &&
+        (modelData.type === 'Root' ||
+          modelData.type === 'Null' ||
+          modelData.type === 'Mesh' ||
+          modelData.type === 'LimbNode')
+      ) {
         scene.rootNodes.push(node);
       }
     }
