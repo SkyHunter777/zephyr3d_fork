@@ -229,11 +229,13 @@ export class Skeleton extends Disposable {
     this.computeBindPose();
     this.updateJointMatrices(0);
     let skeletonRoot = this.findRootJoint(this._joints);
-    if (!skeletonRoot || !this._joints.includes(skeletonRoot)) {
-      throw new Error('Skeleton root must be included in the joint list');
+    if (skeletonRoot) {
+      this._humanoidJointMapping = Skeleton.tryExtractHumanoidJoints(skeletonRoot);
+      this._humanoidRootRotation = Quaternion.identity();
+    } else {
+      this._humanoidJointMapping = null;
+      this._humanoidRootRotation = Quaternion.identity();
     }
-    this._humanoidJointMapping = Skeleton.tryExtractHumanoidJoints(skeletonRoot);
-    this._humanoidRootRotation = Quaternion.identity();
     if (this._humanoidJointMapping) {
       let p = this._humanoidJointMapping.body[HumanoidBodyRig.Hips];
       while (this._joints.includes(p.parent!)) {
