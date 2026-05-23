@@ -480,7 +480,7 @@ export class GLTFImporter extends AbstractModelImporter {
     let stiffness = 0;
     let dragForce = 0;
     let hitRadius = 0;
-    const gravity = Vector3.zero();
+    const gravity = new Vector3(0, -9.8, 0);
     for (const joint of joints) {
       stiffness += joint.stiffness;
       dragForce += joint.dragForce;

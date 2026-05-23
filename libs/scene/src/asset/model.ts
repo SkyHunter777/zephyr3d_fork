@@ -31,6 +31,8 @@ import type { FixedGeometryCacheFrame } from '../animation/fixed_geometry_cache_
 import type { PCAGeometryCacheTrackData } from '../animation';
 import {
   FixedGeometryCacheTrack,
+  JointDynamicsModifier,
+  JointDynamicsSystem,
   MorphTargetTrack,
   NodeRotationTrack,
   NodeScaleTrack,
@@ -831,6 +833,9 @@ export class SharedModel extends Disposable {
       console.info(`Importing ${this._imageList.length} textures`);
       for (let i = 0; i < this._imageList.length; i++) {
         const img = this._imageList[i];
+        if (!img) {
+          continue;
+        }
         let ext: string = '';
         const mimeType = img.uri ? srcVFS.guessMIMEType(img.uri) : img.data ? img.mimeType : '';
         if (mimeType === 'image/jpeg') {
@@ -882,9 +887,51 @@ export class SharedModel extends Disposable {
       console.info(`Importing ${this._primitiveList.length} meshes`);
       for (let i = 0; i < this._primitiveList.length; i++) {
         const info = this._primitiveList[i];
+        if (!info) {
+          continue;
+        }
         const path = dstVFS.join(destPath, `${destName}_mesh_${i}.zmsh`);
         await SharedModel.writePrimitive(dstVFS, info, path);
         info.path = path;
+      }
+    }
+  }
+  createJointDynamics(rootNode: SceneNode, nodeMap: Map<AssetHierarchyNode, SceneNode>) {
+    if (rootNode.animationSet.skeletons.length === 0) {
+      return;
+    }
+    for (const jd of this._jointDynamicsSpringBones) {
+      const chains = jd.chains
+        .map((chain) => {
+          const start = nodeMap.get(chain.start)!;
+          const end = nodeMap.get(chain.end)!;
+          return { start, end };
+        })
+        .filter((chain) => {
+          if (!chain.start || !chain.end) {
+            return false;
+          }
+          return true;
+        });
+      const skeletons = rootNode.animationSet.skeletons.filter((ref) => {
+        const joints = ref.get()!.joints;
+        return chains.every((chain) => joints.includes(chain.start));
+      });
+      for (const skeleton of skeletons) {
+        const system = new JointDynamicsSystem(
+          {
+            chainConfig: {
+              chains,
+              systemRoot: rootNode
+            },
+            controllerConfig: jd.controllerConfig
+          },
+          [],
+          [],
+          []
+        );
+        const modifier = new JointDynamicsModifier(system);
+        skeleton.get()!.modifiers.push(modifier);
       }
     }
   }
@@ -898,14 +945,13 @@ export class SharedModel extends Disposable {
     srcVFS: VFS
   ): Promise<SceneNode> {
     const group = new SceneNode(scene);
-    const animationSet = group.animationSet;
+    const nodeMap: Map<AssetHierarchyNode, SceneNode> = new Map();
     for (let i = 0; i < this.scenes.length; i++) {
       const assetScene = this.scenes[i];
       const skeletonMeshMap: Map<
         AssetSkeleton,
         { mesh: Mesh[]; bounding: AssetSubMeshData[]; skeleton?: Skeleton }
       > = new Map();
-      const nodeMap: Map<AssetHierarchyNode, SceneNode> = new Map();
       for (let k = 0; k < assetScene.rootNodes.length; k++) {
         await this.setAssetNodeToSceneNode(
           manager,
@@ -959,7 +1005,7 @@ export class SharedModel extends Disposable {
               }
             }
           }
-          animationSet.skeletons.push(new DRef(nodes!.skeleton));
+          group.animationSet.skeletons.push(new DRef(nodes!.skeleton));
         }
       }
       if (saveAnimations) {
@@ -968,16 +1014,16 @@ export class SharedModel extends Disposable {
             continue;
           }
           let name = animationData.name ?? `_embbeded_animation`;
-          if (animationSet.getAnimationClip(name)) {
+          if (group.animationSet.getAnimationClip(name)) {
             const baseName = name;
             for (let t = 1; ; t++) {
               name = `${baseName}_${t}`;
-              if (!animationSet.getAnimationClip(name)) {
+              if (!group.animationSet.getAnimationClip(name)) {
                 break;
               }
             }
           }
-          const animation = animationSet.createAnimation(name, true)!;
+          const animation = group.animationSet.createAnimation(name, true)!;
           for (const sk of animationData.skeletons) {
             const nodes = skeletonMeshMap.get(sk);
             if (nodes) {
@@ -1032,6 +1078,7 @@ export class SharedModel extends Disposable {
         }
       }
     }
+    this.createJointDynamics(group, nodeMap);
     return group;
   }
 
@@ -1334,6 +1381,7 @@ export class SharedModel extends Disposable {
         srcVFS
       );
     }
+    return node;
   }
   private async image2Texture(
     manager: ResourceManager,
@@ -1361,23 +1409,28 @@ export class SharedModel extends Disposable {
     manager: ResourceManager,
     info: AssetTextureInfo,
     srcVFS: VFS
-  ): Promise<MaterialTextureInfo> {
-    const texture = (await this.image2Texture(manager, info, srcVFS))!;
-    const sampler = getDevice().createSampler({
-      addressU: info.sampler!.wrapS,
-      addressV: info.sampler!.wrapT,
-      magFilter: info.sampler!.magFilter,
-      minFilter: info.sampler!.minFilter,
-      mipFilter: info.sampler!.mipFilter
-    });
-    const transform = info.transform!;
-    const texCoord = info.texCoord;
-    return {
-      texture,
-      sampler,
-      texCoord,
-      transform
-    };
+  ): Promise<Nullable<MaterialTextureInfo>> {
+    try {
+      const texture = (await this.image2Texture(manager, info, srcVFS))!;
+      const sampler = getDevice().createSampler({
+        addressU: info.sampler!.wrapS,
+        addressV: info.sampler!.wrapT,
+        magFilter: info.sampler!.magFilter,
+        minFilter: info.sampler!.minFilter,
+        mipFilter: info.sampler!.mipFilter
+      });
+      const transform = info.transform!;
+      const texCoord = info.texCoord;
+      return {
+        texture,
+        sampler,
+        texCoord,
+        transform
+      };
+    } catch (err) {
+      console.error(`Load asset texture failed: ${err}`);
+      return null;
+    }
   }
 
   private async createPrimitive(
@@ -1409,11 +1462,11 @@ export class SharedModel extends Disposable {
     if (assetMaterial.path) {
       return manager.fetchMaterial<MeshMaterial>(assetMaterial.path, { overrideVFS: srcVFS });
     }
-    const infoMap: Map<AssetTextureInfo, MaterialTextureInfo> = new Map();
+    const infoMap: Map<AssetTextureInfo, Nullable<MaterialTextureInfo>> = new Map();
     const that = this;
-    async function getTextureInfo(info: AssetTextureInfo): Promise<MaterialTextureInfo> {
+    async function getTextureInfo(info: AssetTextureInfo): Promise<Nullable<MaterialTextureInfo>> {
       let t = infoMap.get(info);
-      if (!t) {
+      if (t === undefined) {
         t = await that.createTexture(manager, info, srcVFS);
         infoMap.set(info, t);
       }
@@ -1425,10 +1478,12 @@ export class SharedModel extends Disposable {
       unlitMaterial.albedoColor = unlitAssetMaterial.diffuse ?? Vector4.one();
       if (unlitAssetMaterial.diffuseMap) {
         const info = await getTextureInfo(unlitAssetMaterial.diffuseMap);
-        unlitMaterial.albedoTexture = info.texture;
-        unlitMaterial.albedoTextureSampler = info.sampler;
-        unlitMaterial.albedoTexCoordIndex = info.texCoord;
-        unlitMaterial.albedoTexCoordMatrix = info.transform;
+        if (info) {
+          unlitMaterial.albedoTexture = info.texture;
+          unlitMaterial.albedoTextureSampler = info.sampler;
+          unlitMaterial.albedoTexCoordIndex = info.texCoord;
+          unlitMaterial.albedoTexCoordMatrix = info.transform;
+        }
       }
       unlitMaterial.vertexColor = unlitAssetMaterial.common.vertexColor!;
       if (assetMaterial.common.alphaMode === 'blend') {
@@ -1453,42 +1508,52 @@ export class SharedModel extends Disposable {
       pbrMaterial.glossinessFactor = assetPBRMaterial.glossness!;
       if (assetPBRMaterial.diffuseMap) {
         const info = await getTextureInfo(assetPBRMaterial.diffuseMap);
-        pbrMaterial.albedoTexture = info.texture;
-        pbrMaterial.albedoTextureSampler = info.sampler;
-        pbrMaterial.albedoTexCoordIndex = info.texCoord;
-        pbrMaterial.albedoTexCoordMatrix = info.transform;
+        if (info) {
+          pbrMaterial.albedoTexture = info.texture;
+          pbrMaterial.albedoTextureSampler = info.sampler;
+          pbrMaterial.albedoTexCoordIndex = info.texCoord;
+          pbrMaterial.albedoTexCoordMatrix = info.transform;
+        }
       }
       if (assetPBRMaterial.common.normalMap) {
         const info = await getTextureInfo(assetPBRMaterial.common.normalMap);
-        pbrMaterial.normalTexture = info.texture;
-        pbrMaterial.normalTextureSampler = info.sampler;
-        pbrMaterial.normalTexCoordIndex = info.texCoord;
-        pbrMaterial.normalTexCoordMatrix = info.transform;
+        if (info) {
+          pbrMaterial.normalTexture = info.texture;
+          pbrMaterial.normalTextureSampler = info.sampler;
+          pbrMaterial.normalTexCoordIndex = info.texCoord;
+          pbrMaterial.normalTexCoordMatrix = info.transform;
+        }
       }
       pbrMaterial.normalScale = assetPBRMaterial.common.bumpScale!;
       if (assetPBRMaterial.common.emissiveMap) {
         const info = await getTextureInfo(assetPBRMaterial.common.emissiveMap);
-        pbrMaterial.emissiveTexture = info.texture;
-        pbrMaterial.emissiveTextureSampler = info.sampler;
-        pbrMaterial.emissiveTexCoordIndex = info.texCoord;
-        pbrMaterial.emissiveTexCoordMatrix = info.transform;
+        if (info) {
+          pbrMaterial.emissiveTexture = info.texture;
+          pbrMaterial.emissiveTextureSampler = info.sampler;
+          pbrMaterial.emissiveTexCoordIndex = info.texCoord;
+          pbrMaterial.emissiveTexCoordMatrix = info.transform;
+        }
       }
       pbrMaterial.emissiveColor = assetPBRMaterial.common.emissiveColor!;
       pbrMaterial.emissiveStrength = assetPBRMaterial.common.emissiveStrength!;
       if (assetPBRMaterial.common.occlusionMap) {
         const info = await getTextureInfo(assetPBRMaterial.common.occlusionMap);
-        pbrMaterial.occlusionTexture = info.texture;
-        pbrMaterial.occlusionTextureSampler = info.sampler;
-        pbrMaterial.occlusionTexCoordIndex = info.texCoord;
-        pbrMaterial.occlusionTexCoordMatrix = info.transform;
+        if (info) {
+          pbrMaterial.occlusionTexture = info.texture;
+          pbrMaterial.occlusionTextureSampler = info.sampler;
+          pbrMaterial.occlusionTexCoordIndex = info.texCoord;
+          pbrMaterial.occlusionTexCoordMatrix = info.transform;
+        }
       }
       pbrMaterial.occlusionStrength = assetPBRMaterial.common.occlusionStrength!;
       if (assetPBRMaterial.specularGlossnessMap) {
         const info = await getTextureInfo(assetPBRMaterial.specularGlossnessMap);
-        pbrMaterial.specularTexture = info.texture;
-        pbrMaterial.specularTextureSampler = info.sampler;
-        pbrMaterial.specularTexCoordIndex = info.texCoord;
-        pbrMaterial.specularTexCoordMatrix = info.transform;
+        if (info) {
+          pbrMaterial.specularTexture = info.texture;
+          pbrMaterial.specularTextureSampler = info.sampler;
+          pbrMaterial.specularTexCoordIndex = info.texCoord;
+          pbrMaterial.specularTexCoordMatrix = info.transform;
+        }
       }
       pbrMaterial.vertexTangent = assetPBRMaterial.common.useTangent!;
       pbrMaterial.vertexColor = assetPBRMaterial.common.vertexColor!;
@@ -1511,57 +1576,71 @@ export class SharedModel extends Disposable {
       pbrMaterial.roughness = assetPBRMaterial.roughness!;
       if (assetPBRMaterial.diffuseMap) {
         const info = await getTextureInfo(assetPBRMaterial.diffuseMap);
-        pbrMaterial.albedoTexture = info.texture;
-        pbrMaterial.albedoTextureSampler = info.sampler;
-        pbrMaterial.albedoTexCoordIndex = info.texCoord;
-        pbrMaterial.albedoTexCoordMatrix = info.transform;
+        if (info) {
+          pbrMaterial.albedoTexture = info.texture;
+          pbrMaterial.albedoTextureSampler = info.sampler;
+          pbrMaterial.albedoTexCoordIndex = info.texCoord;
+          pbrMaterial.albedoTexCoordMatrix = info.transform;
+        }
       }
       if (assetPBRMaterial.common.normalMap) {
         const info = await getTextureInfo(assetPBRMaterial.common.normalMap);
-        pbrMaterial.normalTexture = info.texture;
-        pbrMaterial.normalTextureSampler = info.sampler;
-        pbrMaterial.normalTexCoordIndex = info.texCoord;
-        pbrMaterial.normalTexCoordMatrix = info.transform;
+        if (info) {
+          pbrMaterial.normalTexture = info.texture;
+          pbrMaterial.normalTextureSampler = info.sampler;
+          pbrMaterial.normalTexCoordIndex = info.texCoord;
+          pbrMaterial.normalTexCoordMatrix = info.transform;
+        }
       }
       pbrMaterial.normalScale = assetPBRMaterial.common.bumpScale!;
       if (assetPBRMaterial.common.emissiveMap) {
         const info = await getTextureInfo(assetPBRMaterial.common.emissiveMap);
-        pbrMaterial.emissiveTexture = info.texture;
-        pbrMaterial.emissiveTextureSampler = info.sampler;
-        pbrMaterial.emissiveTexCoordIndex = info.texCoord;
-        pbrMaterial.emissiveTexCoordMatrix = info.transform;
+        if (info) {
+          pbrMaterial.emissiveTexture = info.texture;
+          pbrMaterial.emissiveTextureSampler = info.sampler;
+          pbrMaterial.emissiveTexCoordIndex = info.texCoord;
+          pbrMaterial.emissiveTexCoordMatrix = info.transform;
+        }
       }
       pbrMaterial.emissiveColor = assetPBRMaterial.common.emissiveColor!;
       pbrMaterial.emissiveStrength = assetPBRMaterial.common.emissiveStrength!;
       if (assetPBRMaterial.common.occlusionMap) {
         const info = await getTextureInfo(assetPBRMaterial.common.occlusionMap);
-        pbrMaterial.occlusionTexture = info.texture;
-        pbrMaterial.occlusionTextureSampler = info.sampler;
-        pbrMaterial.occlusionTexCoordIndex = info.texCoord;
-        pbrMaterial.occlusionTexCoordMatrix = info.transform;
+        if (info) {
+          pbrMaterial.occlusionTexture = info.texture;
+          pbrMaterial.occlusionTextureSampler = info.sampler;
+          pbrMaterial.occlusionTexCoordIndex = info.texCoord;
+          pbrMaterial.occlusionTexCoordMatrix = info.transform;
+        }
         pbrMaterial.occlusionStrength = assetPBRMaterial.common.occlusionStrength!;
       }
       if (assetPBRMaterial.metallicMap) {
         const info = await getTextureInfo(assetPBRMaterial.metallicMap);
-        pbrMaterial.metallicRoughnessTexture = info.texture;
-        pbrMaterial.metallicRoughnessTextureSampler = info.sampler;
-        pbrMaterial.metallicRoughnessTexCoordIndex = info.texCoord;
-        pbrMaterial.metallicRoughnessTexCoordMatrix = info.transform;
+        if (info) {
+          pbrMaterial.metallicRoughnessTexture = info.texture;
+          pbrMaterial.metallicRoughnessTextureSampler = info.sampler;
+          pbrMaterial.metallicRoughnessTexCoordIndex = info.texCoord;
+          pbrMaterial.metallicRoughnessTexCoordMatrix = info.transform;
+        }
       }
       pbrMaterial.specularFactor = assetPBRMaterial.specularFactor!;
       if (assetPBRMaterial.specularMap) {
         const info = await getTextureInfo(assetPBRMaterial.specularMap);
-        pbrMaterial.specularTexture = info.texture;
-        pbrMaterial.specularTextureSampler = info.sampler;
-        pbrMaterial.specularTexCoordIndex = info.texCoord;
-        pbrMaterial.specularTexCoordMatrix = info.transform;
+        if (info) {
+          pbrMaterial.specularTexture = info.texture;
+          pbrMaterial.specularTextureSampler = info.sampler;
+          pbrMaterial.specularTexCoordIndex = info.texCoord;
+          pbrMaterial.specularTexCoordMatrix = info.transform;
+        }
       }
       if (assetPBRMaterial.specularColorMap) {
         const info = await getTextureInfo(assetPBRMaterial.specularColorMap);
-        pbrMaterial.specularColorTexture = info.texture;
-        pbrMaterial.specularColorTextureSampler = info.sampler;
-        pbrMaterial.specularColorTexCoordIndex = info.texCoord;
-        pbrMaterial.specularColorTexCoordMatrix = info.transform;
+        if (info) {
+          pbrMaterial.specularColorTexture = info.texture;
+          pbrMaterial.specularColorTextureSampler = info.sampler;
+          pbrMaterial.specularColorTexCoordIndex = info.texCoord;
+          pbrMaterial.specularColorTexCoordMatrix = info.transform;
+        }
       }
       if (assetPBRMaterial.sheen) {
         const sheen = assetPBRMaterial.sheen;
@@ -1570,17 +1649,21 @@ export class SharedModel extends Disposable {
         pbrMaterial.sheenRoughnessFactor = sheen.sheenRoughnessFactor!;
         if (sheen.sheenColorMap) {
           const info = await getTextureInfo(sheen.sheenColorMap);
-          pbrMaterial.sheenColorTexture = info.texture;
-          pbrMaterial.sheenColorTextureSampler = info.sampler;
-          pbrMaterial.sheenColorTexCoordIndex = info.texCoord;
-          pbrMaterial.sheenColorTexCoordMatrix = info.transform;
+          if (info) {
+            pbrMaterial.sheenColorTexture = info.texture;
+            pbrMaterial.sheenColorTextureSampler = info.sampler;
+            pbrMaterial.sheenColorTexCoordIndex = info.texCoord;
+            pbrMaterial.sheenColorTexCoordMatrix = info.transform;
+          }
         }
         if (sheen.sheenRoughnessMap) {
           const info = await getTextureInfo(sheen.sheenRoughnessMap);
-          pbrMaterial.sheenRoughnessTexture = info.texture;
-          pbrMaterial.sheenRoughnessTextureSampler = info.sampler;
-          pbrMaterial.sheenRoughnessTexCoordIndex = info.texCoord;
-          pbrMaterial.sheenRoughnessTexCoordMatrix = info.transform;
+          if (info) {
+            pbrMaterial.sheenRoughnessTexture = info.texture;
+            pbrMaterial.sheenRoughnessTextureSampler = info.sampler;
+            pbrMaterial.sheenRoughnessTexCoordIndex = info.texCoord;
+            pbrMaterial.sheenRoughnessTexCoordMatrix = info.transform;
+          }
         }
       }
       if (assetPBRMaterial.iridescence) {
@@ -1590,19 +1673,23 @@ export class SharedModel extends Disposable {
         pbrMaterial.iridescenceIor = iridescence.iridescenceIor!;
         if (iridescence.iridescenceMap) {
           const info = await getTextureInfo(iridescence.iridescenceMap);
-          pbrMaterial.iridescenceTexture = info.texture;
-          pbrMaterial.iridescenceTextureSampler = info.sampler;
-          pbrMaterial.iridescenceTexCoordIndex = info.texCoord;
-          pbrMaterial.iridescenceTexCoordMatrix = info.transform;
+          if (info) {
+            pbrMaterial.iridescenceTexture = info.texture;
+            pbrMaterial.iridescenceTextureSampler = info.sampler;
+            pbrMaterial.iridescenceTexCoordIndex = info.texCoord;
+            pbrMaterial.iridescenceTexCoordMatrix = info.transform;
+          }
         }
         pbrMaterial.iridescenceThicknessMin = iridescence.iridescenceThicknessMinimum!;
         pbrMaterial.iridescenceThicknessMax = iridescence.iridescenceThicknessMaximum!;
         if (iridescence.iridescenceThicknessMap) {
           const info = await getTextureInfo(iridescence.iridescenceThicknessMap);
-          pbrMaterial.iridescenceThicknessTexture = info.texture;
-          pbrMaterial.iridescenceThicknessTextureSampler = info.sampler;
-          pbrMaterial.iridescenceThicknessTexCoordIndex = info.texCoord;
-          pbrMaterial.iridescenceThicknessTexCoordMatrix = info.transform;
+          if (info) {
+            pbrMaterial.iridescenceThicknessTexture = info.texture;
+            pbrMaterial.iridescenceThicknessTextureSampler = info.sampler;
+            pbrMaterial.iridescenceThicknessTexCoordIndex = info.texCoord;
+            pbrMaterial.iridescenceThicknessTexCoordMatrix = info.transform;
+          }
         }
       }
       if (assetPBRMaterial.transmission) {
@@ -1611,18 +1698,22 @@ export class SharedModel extends Disposable {
         pbrMaterial.transmissionFactor = transmission.transmissionFactor!;
         if (transmission.transmissionMap) {
           const info = await getTextureInfo(transmission.transmissionMap);
-          pbrMaterial.transmissionTexture = info.texture;
-          pbrMaterial.transmissionTextureSampler = info.sampler;
-          pbrMaterial.transmissionTexCoordIndex = info.texCoord;
-          pbrMaterial.transmissionTexCoordMatrix = info.transform;
+          if (info) {
+            pbrMaterial.transmissionTexture = info.texture;
+            pbrMaterial.transmissionTextureSampler = info.sampler;
+            pbrMaterial.transmissionTexCoordIndex = info.texCoord;
+            pbrMaterial.transmissionTexCoordMatrix = info.transform;
+          }
         }
         pbrMaterial.thicknessFactor = transmission.thicknessFactor!;
         if (transmission.thicknessMap) {
           const info = await getTextureInfo(transmission.thicknessMap);
-          pbrMaterial.thicknessTexture = info.texture;
-          pbrMaterial.thicknessTextureSampler = info.sampler;
-          pbrMaterial.thicknessTexCoordIndex = info.texCoord;
-          pbrMaterial.thicknessTexCoordMatrix = info.transform;
+          if (info) {
+            pbrMaterial.thicknessTexture = info.texture;
+            pbrMaterial.thicknessTextureSampler = info.sampler;
+            pbrMaterial.thicknessTexCoordIndex = info.texCoord;
+            pbrMaterial.thicknessTexCoordMatrix = info.transform;
+          }
         }
         pbrMaterial.attenuationDistance = transmission.attenuationDistance!;
         pbrMaterial.attenuationColor = transmission.attenuationColor!;
@@ -1634,24 +1725,30 @@ export class SharedModel extends Disposable {
         pbrMaterial.clearcoatRoughnessFactor = cc.clearCoatRoughnessFactor!;
         if (cc.clearCoatIntensityMap) {
           const info = await getTextureInfo(cc.clearCoatIntensityMap);
-          pbrMaterial.clearcoatIntensityTexture = info.texture;
-          pbrMaterial.clearcoatIntensityTextureSampler = info.sampler;
-          pbrMaterial.clearcoatIntensityTexCoordIndex = info.texCoord;
-          pbrMaterial.clearcoatIntensityTexCoordMatrix = info.transform;
+          if (info) {
+            pbrMaterial.clearcoatIntensityTexture = info.texture;
+            pbrMaterial.clearcoatIntensityTextureSampler = info.sampler;
+            pbrMaterial.clearcoatIntensityTexCoordIndex = info.texCoord;
+            pbrMaterial.clearcoatIntensityTexCoordMatrix = info.transform;
+          }
         }
         if (cc.clearCoatRoughnessMap) {
           const info = await getTextureInfo(cc.clearCoatRoughnessMap);
-          pbrMaterial.clearcoatRoughnessTexture = info.texture;
-          pbrMaterial.clearcoatRoughnessTextureSampler = info.sampler;
-          pbrMaterial.clearcoatRoughnessTexCoordIndex = info.texCoord;
-          pbrMaterial.clearcoatRoughnessTexCoordMatrix = info.transform;
+          if (info) {
+            pbrMaterial.clearcoatRoughnessTexture = info.texture;
+            pbrMaterial.clearcoatRoughnessTextureSampler = info.sampler;
+            pbrMaterial.clearcoatRoughnessTexCoordIndex = info.texCoord;
+            pbrMaterial.clearcoatRoughnessTexCoordMatrix = info.transform;
+          }
         }
         if (cc.clearCoatNormalMap) {
           const info = await getTextureInfo(cc.clearCoatNormalMap);
-          pbrMaterial.clearcoatNormalTexture = info.texture;
-          pbrMaterial.clearcoatNormalTextureSampler = info.sampler;
-          pbrMaterial.clearcoatNormalTexCoordIndex = info.texCoord;
-          pbrMaterial.clearcoatNormalTexCoordMatrix = info.transform;
+          if (info) {
+            pbrMaterial.clearcoatNormalTexture = info.texture;
+            pbrMaterial.clearcoatNormalTextureSampler = info.sampler;
+            pbrMaterial.clearcoatNormalTexCoordIndex = info.texCoord;
+            pbrMaterial.clearcoatNormalTexCoordMatrix = info.transform;
+          }
         }
       }
       pbrMaterial.vertexTangent = assetPBRMaterial.common.useTangent!;

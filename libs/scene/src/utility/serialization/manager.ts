@@ -859,6 +859,7 @@ export class ResourceManager {
     const id = this.VFS.normalizePath(path);
     const model = await this._assetManager.fetchModel(scene, id, options);
     if (model) {
+      model.prefabId = id;
       this._allocated.set(model, id);
     }
     return model;
