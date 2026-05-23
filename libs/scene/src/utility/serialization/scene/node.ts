@@ -6,7 +6,13 @@ import type { DiffPatch, DiffValue } from '@zephyr3d/base';
 import { applyPatch, ASSERT, degree2radian, diff, DRef, radian2degree } from '@zephyr3d/base';
 import { GraphNode } from '../../../scene';
 import type { ResourceManager } from '../manager';
-import { AnimationClip, NodeRotationTrack, NodeScaleTrack, NodeTranslationTrack } from '../../../animation';
+import {
+  AnimationClip,
+  JointDynamicsModifier,
+  NodeRotationTrack,
+  NodeScaleTrack,
+  NodeTranslationTrack
+} from '../../../animation';
 import { JSONArray, JSONData } from '../json';
 import { ScriptAttachment, normalizeScriptAttachmentConfig } from '../../../scene/script_attachment';
 import { parseZABCBlob, attachZABCAnimationsToSceneNode } from '../../../asset/loaders/zabc/zabc_loader';
@@ -517,6 +523,44 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
             animationSet.skeletons.forEach((v) => v.dispose());
             animationSet.skeletons.splice(0, animationSet.skeletons.length);
             animationSet.skeletons.push(...(value.object as any[]).map((v) => new DRef(v)));
+          }
+        },
+        {
+          name: 'JointDynamics',
+          description: 'Joint dynamics systems which affect this object or children',
+          type: 'object_array',
+          phase: 2,
+          readonly: true,
+          options: {
+            objectTypes: [JointDynamicsModifier]
+          },
+          get(this: SceneNode, value) {
+            const animationSet = this.animationSet;
+            const jdm: JointDynamicsModifier[] = [];
+            for (const sk of animationSet.skeletons) {
+              for (const mod of sk.get()!.modifiers) {
+                if (mod instanceof JointDynamicsModifier) {
+                  jdm.push(mod);
+                }
+              }
+            }
+            value.object = jdm;
+          },
+          delete(this: SceneNode, index) {
+            const animationSet = this.animationSet;
+            let n = 0;
+            for (const sk of animationSet.skeletons) {
+              for (const mod of sk.get()!.modifiers) {
+                if (mod instanceof JointDynamicsModifier) {
+                  if (n === index) {
+                    const index = sk.get()!.modifiers.indexOf(mod);
+                    sk.get()!.modifiers.splice(index, 1);
+                    return;
+                  }
+                  n++;
+                }
+              }
+            }
           }
         },
         {

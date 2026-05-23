@@ -16,8 +16,8 @@ import {
 } from './types';
 import { buildConstraints, buildSurfaceFaces, type ConstraintBuildOptions } from './constraints';
 import { simulate, applyResult, applyAngleLimits, type SimulationParams } from './solver';
-import type { InterpolatorScalar } from '@zephyr3d/base';
-import { Vector3, Quaternion, Matrix4x4, clamp01 } from '@zephyr3d/base';
+import type { DeepPartial } from '@zephyr3d/base';
+import { InterpolatorScalar, Vector3, Quaternion, Matrix4x4, clamp01 } from '@zephyr3d/base';
 
 /**
  * Depth-based physics parameter curves.
@@ -117,6 +117,13 @@ export interface ControllerConfig {
 }
 
 /**
+ * Partial runtime update for JointDynamics controller configuration.
+ *
+ * @public
+ */
+export type ControllerConfigUpdate = DeepPartial<ControllerConfig, 2>;
+
+/**
  * Stable runtime handle for a JointDynamics collider.
  * @public
  */
@@ -173,6 +180,10 @@ export class JointDynamicsSystemController {
   private _previousRootPosition = Vector3.zero();
   private _previousRootRotation = Quaternion.identity();
   private _rootTransform: TransformAccess | null = null;
+  private _rootPoints: BoneNode[] = [];
+  private _allPoints: BoneNode[] = [];
+  private _parentMap = new Map<number, number>();
+  private _maxPointDepth = 0;
   private _pointTransforms: TransformAccess[] = [];
   private _colliderTransforms: TransformAccess[] = [];
   private _grabberTransforms: TransformAccess[] = [];
@@ -192,7 +203,7 @@ export class JointDynamicsSystemController {
   private _fadeDuration = 0;
 
   constructor(config: ControllerConfig) {
-    this._config = config;
+    this._config = this._sanitizeControllerConfig(this._cloneControllerConfig(config));
   }
 
   /**
@@ -217,37 +228,33 @@ export class JointDynamicsSystemController {
     flatPlanes: Array<{ up: Vector3; position: Vector3 }>
   ): void {
     this._rootTransform = rootTransform;
+    this._rootPoints = [...rootPoints];
     this._pointTransforms = pointTransforms;
     this._colliderTransforms = colliders.map((c) => c.transform);
     this._grabberTransforms = grabbers.map((g) => g.transform);
 
     // Build constraints
-    this._constraints = buildConstraints(rootPoints, this._config.constraintOptions);
-    this._surfaceConstraints = buildSurfaceFaces(rootPoints, this._config.constraintOptions.isLoop);
+    this._rebuildConstraints();
 
     // Flatten bone hierarchy to point list, build parent map
     const allPoints: BoneNode[] = [];
-    const parentMap = new Map<number, number>(); // child index -> parent index
-    function walk(node: BoneNode) {
+    this._parentMap = new Map<number, number>(); // child index -> parent index
+    const walk = (node: BoneNode) => {
       allPoints.push(node);
       for (const c of node.children) {
-        parentMap.set(c.index, node.index);
+        this._parentMap.set(c.index, node.index);
         walk(c);
       }
-    }
+    };
     for (const r of rootPoints) {
       walk(r);
     }
 
-    const maxDepth = Math.max(...allPoints.map((p) => p.depth));
+    this._allPoints = allPoints;
+    this._maxPointDepth = allPoints.length > 0 ? Math.max(...allPoints.map((p) => p.depth)) : 0;
 
     // Compute boneAxis from transforms: local-space direction to first child
     // This is critical for correct bone rotation in skinned meshes
-    const indexToNode = new Map<number, BoneNode>();
-    for (const p of allPoints) {
-      indexToNode.set(p.index, p);
-    }
-
     for (const p of allPoints) {
       if (!p.boneAxis && p.children.length > 0) {
         const childPos = pointTransforms[p.children[0].index].getWorldPosition();
@@ -269,7 +276,7 @@ export class JointDynamicsSystemController {
     }
 
     // Build PointR/RW arrays
-    this._pointsR = allPoints.map((p) => this._createPointR(p, maxDepth, parentMap, pointTransforms));
+    this._pointsR = allPoints.map((p) => this._createPointR(p));
     this._pointsRW = allPoints.map(() => this._createPointRW());
     this._positionsToTransform = new Array(allPoints.length).fill(Vector3.zero());
 
@@ -458,6 +465,167 @@ export class JointDynamicsSystemController {
   }
 
   /**
+   * Returns a detached snapshot of the current runtime configuration.
+   */
+  getConfig(): ControllerConfig {
+    return this._cloneControllerConfig(this._config);
+  }
+
+  /**
+   * Replaces the runtime configuration.
+   *
+   * If the controller is already initialized, cached per-point parameters and generated
+   * constraints are refreshed immediately so editor-driven changes take effect in the next step.
+   *
+   * @param config - Complete controller configuration to apply.
+   */
+  setConfig(config: ControllerConfig): void {
+    this._config = this._sanitizeControllerConfig(this._cloneControllerConfig(config));
+    this._refreshCachedSimulationConfig();
+  }
+
+  /**
+   * Applies a partial runtime configuration update.
+   *
+   * This is intended for editor workflows that tweak one or more simulation parameters live.
+   * The controller updates only the affected caches: global step parameters are applied directly,
+   * per-point curve/gravity changes rebuild cached point coefficients, and constraint option
+   * changes rebuild the generated constraints.
+   *
+   * @param config - Partial configuration update.
+   */
+  updateConfig(config: ControllerConfigUpdate): void {
+    let refreshPoints = false;
+    let refreshConstraints = false;
+
+    if (config.gravity) {
+      this._config.gravity = config.gravity.clone();
+      refreshPoints = true;
+    }
+    if (config.windForce) {
+      this._config.windForce = config.windForce.clone();
+    }
+    if (typeof config.relaxation === 'number') {
+      this._config.relaxation = Math.max(0, Math.trunc(config.relaxation));
+    }
+    if (typeof config.subSteps === 'number') {
+      this._config.subSteps = Math.max(1, Math.trunc(config.subSteps));
+    }
+    if (typeof config.rootSlideLimit === 'number') {
+      this._config.rootSlideLimit = config.rootSlideLimit;
+    }
+    if (typeof config.rootRotateLimit === 'number') {
+      this._config.rootRotateLimit = config.rootRotateLimit;
+    }
+    if (typeof config.constraintShrinkLimit === 'number') {
+      this._config.constraintShrinkLimit = Math.max(0, config.constraintShrinkLimit);
+    }
+    if (typeof config.blendRatio === 'number') {
+      this._config.blendRatio = clamp01(config.blendRatio);
+    }
+    if (typeof config.stabilizationFrameRate === 'number') {
+      this._config.stabilizationFrameRate = config.stabilizationFrameRate;
+    }
+    if (typeof config.isFakeWave === 'boolean') {
+      this._config.isFakeWave = config.isFakeWave;
+    }
+    if (typeof config.fakeWaveSpeed === 'number') {
+      this._config.fakeWaveSpeed = config.fakeWaveSpeed;
+    }
+    if (typeof config.fakeWavePower === 'number') {
+      this._config.fakeWavePower = config.fakeWavePower;
+    }
+    if (typeof config.enableSurfaceCollision === 'boolean') {
+      this._config.enableSurfaceCollision = config.enableSurfaceCollision;
+      if (!config.constraintOptions || config.constraintOptions.enableSurfaceCollision === undefined) {
+        this._config.constraintOptions.enableSurfaceCollision = config.enableSurfaceCollision;
+        refreshConstraints = true;
+      }
+    }
+    if (typeof config.enableBroadPhase === 'boolean') {
+      this._config.enableBroadPhase = config.enableBroadPhase;
+    }
+    if (typeof config.preserveTwist === 'boolean') {
+      this._config.preserveTwist = config.preserveTwist;
+    }
+
+    if (config.angleLimitConfig) {
+      if (typeof config.angleLimitConfig.angleLimit === 'number') {
+        this._config.angleLimitConfig.angleLimit = config.angleLimitConfig.angleLimit;
+      }
+      if (typeof config.angleLimitConfig.limitFromRoot === 'boolean') {
+        this._config.angleLimitConfig.limitFromRoot = config.angleLimitConfig.limitFromRoot;
+      }
+    }
+
+    if (config.curves) {
+      const curveKeys: Array<keyof PhysicsCurves> = [
+        'massScale',
+        'gravityScale',
+        'windForceScale',
+        'resistance',
+        'hardness',
+        'friction',
+        'pointRadius',
+        'sliderJointLength',
+        'allShrinkScale',
+        'allStretchScale',
+        'structuralShrinkVertical',
+        'structuralStretchVertical',
+        'structuralShrinkHorizontal',
+        'structuralStretchHorizontal',
+        'shearShrink',
+        'shearStretch',
+        'bendingShrinkVertical',
+        'bendingStretchVertical',
+        'bendingShrinkHorizontal',
+        'bendingStretchHorizontal',
+        'fakeWavePower',
+        'fakeWaveFreq'
+      ];
+      for (const key of curveKeys) {
+        const curve = config.curves[key];
+        if (curve !== undefined) {
+          this._config.curves[key] = this._cloneInterpolatorScalar(curve);
+          refreshPoints = true;
+        }
+      }
+    }
+
+    if (config.constraintOptions) {
+      const optionKeys: Array<keyof ConstraintBuildOptions> = [
+        'structuralVertical',
+        'structuralHorizontal',
+        'shear',
+        'bendingVertical',
+        'bendingHorizontal',
+        'isLoop',
+        'collideStructuralVertical',
+        'collideStructuralHorizontal',
+        'collideShear',
+        'enableSurfaceCollision'
+      ];
+      for (const key of optionKeys) {
+        const value = config.constraintOptions[key];
+        if (value !== undefined) {
+          this._config.constraintOptions[key] = value;
+          if (key === 'enableSurfaceCollision' && config.enableSurfaceCollision === undefined) {
+            this._config.enableSurfaceCollision = value;
+          }
+          refreshConstraints = true;
+        }
+      }
+    }
+
+    if (refreshConstraints) {
+      this._rebuildConstraints();
+    }
+    if (refreshPoints) {
+      this._refreshPointParameters();
+    }
+  }
+
+  /**
    * Compensates for teleportation by resetting the previous root transform to the current one.
    * Call this after a character warp or teleport to avoid a large root-motion impulse on the
    * next simulation step.
@@ -558,7 +726,7 @@ export class JointDynamicsSystemController {
    * @param wind - Wind vector in world space.
    */
   setWindForce(wind: Vector3): void {
-    this._config.windForce = wind;
+    this._config.windForce = wind.clone();
   }
 
   /**
@@ -864,6 +1032,11 @@ export class JointDynamicsSystemController {
     return this._config.blendRatio;
   }
 
+  private _refreshCachedSimulationConfig(): void {
+    this._rebuildConstraints();
+    this._refreshPointParameters();
+  }
+
   private _getColliderIndex(handle: JointDynamicsColliderHandle): number {
     if (handle.type !== 'collider') {
       return -1;
@@ -924,20 +1097,31 @@ export class JointDynamicsSystemController {
     }
   }
 
-  private _createPointR(
-    node: BoneNode,
-    maxDepth: number,
-    parentMap: Map<number, number>,
-    transforms: TransformAccess[]
-  ): PointR {
-    const rate = maxDepth > 0 ? node.depth / maxDepth : 0;
-    const c = this._config.curves;
+  private _rebuildConstraints(): void {
+    if (this._rootPoints.length === 0) {
+      this._constraints = [];
+      this._surfaceConstraints = [];
+      return;
+    }
+    this._constraints = buildConstraints(this._rootPoints, this._config.constraintOptions);
+    this._surfaceConstraints = buildSurfaceFaces(this._rootPoints, this._config.constraintOptions.isLoop);
+  }
 
-    const parentIdx = parentMap.get(node.index) ?? -1;
+  private _refreshPointParameters(): void {
+    if (!this._initialized) {
+      return;
+    }
+    for (let i = 0; i < this._allPoints.length; i++) {
+      this._applyConfigToPoint(this._pointsR[i], this._allPoints[i]);
+    }
+  }
+
+  private _createPointR(node: BoneNode): PointR {
+    const parentIdx = this._parentMap.get(node.index) ?? -1;
     const childIdx = node.children.length > 0 ? node.children[0].index : -1;
 
     // Capture initial local transform for rotation blending
-    const t = transforms[node.index];
+    const t = this._pointTransforms[node.index];
     const initLocalPos = t.getLocalPosition();
     const initLocalRot = t.getLocalRotation();
     const initLocalScale = t.getLocalScale();
@@ -948,40 +1132,40 @@ export class JointDynamicsSystemController {
     // ParentLength: distance to parent
     let parentLength = 0;
     if (parentIdx !== -1) {
-      const pPos = transforms[parentIdx].getWorldPosition();
-      const cPos = transforms[node.index].getWorldPosition();
+      const pPos = this._pointTransforms[parentIdx].getWorldPosition();
+      const cPos = this._pointTransforms[node.index].getWorldPosition();
       parentLength = Vector3.distance(pPos, cPos);
     }
 
-    return {
+    const point: PointR = {
       parent: parentIdx,
       child: childIdx,
       applyInvertCollision: 0,
       movableLimitIndex: -1,
       movableLimitRadius: 0,
       weight: node.isFixed ? 0 : 1,
-      mass: c.massScale.evaluate(rate),
-      resistance: clamp01(c.resistance.evaluate(rate)),
-      hardness: clamp01(c.hardness.evaluate(rate)),
-      frictionScale: c.friction.evaluate(rate),
-      sliderJointLength: c.sliderJointLength.evaluate(rate),
+      mass: 0,
+      resistance: 0,
+      hardness: 0,
+      frictionScale: 0,
+      sliderJointLength: 0,
       parentLength,
-      structuralShrinkVertical: c.structuralShrinkVertical.evaluate(rate) * 0.5,
-      structuralStretchVertical: c.structuralStretchVertical.evaluate(rate) * 0.5,
-      structuralShrinkHorizontal: c.structuralShrinkHorizontal.evaluate(rate) * 0.5,
-      structuralStretchHorizontal: c.structuralStretchHorizontal.evaluate(rate) * 0.5,
-      shearShrink: c.shearShrink.evaluate(rate) * 0.5,
-      shearStretch: c.shearStretch.evaluate(rate) * 0.5,
-      bendingShrinkVertical: c.bendingShrinkVertical.evaluate(rate) * 0.5,
-      bendingStretchVertical: c.bendingStretchVertical.evaluate(rate) * 0.5,
-      bendingShrinkHorizontal: c.bendingShrinkHorizontal.evaluate(rate) * 0.5,
-      bendingStretchHorizontal: c.bendingStretchHorizontal.evaluate(rate) * 0.5,
-      windForceScale: c.windForceScale.evaluate(rate) * rate,
-      fakeWavePower: c.fakeWavePower.evaluate(rate),
-      fakeWaveFreq: c.fakeWaveFreq.evaluate(rate),
+      structuralShrinkVertical: 0,
+      structuralStretchVertical: 0,
+      structuralShrinkHorizontal: 0,
+      structuralStretchHorizontal: 0,
+      shearShrink: 0,
+      shearStretch: 0,
+      bendingShrinkVertical: 0,
+      bendingStretchVertical: 0,
+      bendingShrinkHorizontal: 0,
+      bendingStretchHorizontal: 0,
+      windForceScale: 0,
+      fakeWavePower: 0,
+      fakeWaveFreq: 0,
       forceFadeRatio: 0,
-      pointRadius: Math.max(0, c.pointRadius.evaluate(rate)),
-      gravity: Vector3.scale(this._config.gravity, c.gravityScale.evaluate(rate)),
+      pointRadius: 0,
+      gravity: Vector3.zero(),
       boneAxis,
       initialLocalScale: initLocalScale,
       initialLocalRotation: initLocalRot,
@@ -992,6 +1176,36 @@ export class JointDynamicsSystemController {
       })(),
       initialLocalPosition: initLocalPos
     };
+    this._applyConfigToPoint(point, node);
+    return point;
+  }
+
+  private _applyConfigToPoint(point: PointR, node: BoneNode): void {
+    const rate = this._maxPointDepth > 0 ? node.depth / this._maxPointDepth : 0;
+    const c = this._config.curves;
+    const allShrinkScale = c.allShrinkScale.evaluate(rate);
+    const allStretchScale = c.allStretchScale.evaluate(rate);
+
+    point.mass = c.massScale.evaluate(rate);
+    point.resistance = clamp01(c.resistance.evaluate(rate));
+    point.hardness = clamp01(c.hardness.evaluate(rate));
+    point.frictionScale = c.friction.evaluate(rate);
+    point.sliderJointLength = c.sliderJointLength.evaluate(rate);
+    point.structuralShrinkVertical = c.structuralShrinkVertical.evaluate(rate) * allShrinkScale * 0.5;
+    point.structuralStretchVertical = c.structuralStretchVertical.evaluate(rate) * allStretchScale * 0.5;
+    point.structuralShrinkHorizontal = c.structuralShrinkHorizontal.evaluate(rate) * allShrinkScale * 0.5;
+    point.structuralStretchHorizontal = c.structuralStretchHorizontal.evaluate(rate) * allStretchScale * 0.5;
+    point.shearShrink = c.shearShrink.evaluate(rate) * allShrinkScale * 0.5;
+    point.shearStretch = c.shearStretch.evaluate(rate) * allStretchScale * 0.5;
+    point.bendingShrinkVertical = c.bendingShrinkVertical.evaluate(rate) * allShrinkScale * 0.5;
+    point.bendingStretchVertical = c.bendingStretchVertical.evaluate(rate) * allStretchScale * 0.5;
+    point.bendingShrinkHorizontal = c.bendingShrinkHorizontal.evaluate(rate) * allShrinkScale * 0.5;
+    point.bendingStretchHorizontal = c.bendingStretchHorizontal.evaluate(rate) * allStretchScale * 0.5;
+    point.windForceScale = c.windForceScale.evaluate(rate) * rate;
+    point.fakeWavePower = c.fakeWavePower.evaluate(rate);
+    point.fakeWaveFreq = c.fakeWaveFreq.evaluate(rate);
+    point.pointRadius = Math.max(0, c.pointRadius.evaluate(rate));
+    point.gravity = Vector3.scale(this._config.gravity, c.gravityScale.evaluate(rate));
   }
 
   private _createPointRW(): PointRW {
@@ -1029,5 +1243,82 @@ export class JointDynamicsSystemController {
       radius: 0,
       enabled: 1
     };
+  }
+
+  private _cloneControllerConfig(config: ControllerConfig): ControllerConfig {
+    const curves: PhysicsCurves = {
+      massScale: this._cloneInterpolatorScalar(config.curves.massScale),
+      gravityScale: this._cloneInterpolatorScalar(config.curves.gravityScale),
+      windForceScale: this._cloneInterpolatorScalar(config.curves.windForceScale),
+      resistance: this._cloneInterpolatorScalar(config.curves.resistance),
+      hardness: this._cloneInterpolatorScalar(config.curves.hardness),
+      friction: this._cloneInterpolatorScalar(config.curves.friction),
+      pointRadius: this._cloneInterpolatorScalar(config.curves.pointRadius),
+      sliderJointLength: this._cloneInterpolatorScalar(config.curves.sliderJointLength),
+      allShrinkScale: this._cloneInterpolatorScalar(config.curves.allShrinkScale),
+      allStretchScale: this._cloneInterpolatorScalar(config.curves.allStretchScale),
+      structuralShrinkVertical: this._cloneInterpolatorScalar(config.curves.structuralShrinkVertical),
+      structuralStretchVertical: this._cloneInterpolatorScalar(config.curves.structuralStretchVertical),
+      structuralShrinkHorizontal: this._cloneInterpolatorScalar(config.curves.structuralShrinkHorizontal),
+      structuralStretchHorizontal: this._cloneInterpolatorScalar(config.curves.structuralStretchHorizontal),
+      shearShrink: this._cloneInterpolatorScalar(config.curves.shearShrink),
+      shearStretch: this._cloneInterpolatorScalar(config.curves.shearStretch),
+      bendingShrinkVertical: this._cloneInterpolatorScalar(config.curves.bendingShrinkVertical),
+      bendingStretchVertical: this._cloneInterpolatorScalar(config.curves.bendingStretchVertical),
+      bendingShrinkHorizontal: this._cloneInterpolatorScalar(config.curves.bendingShrinkHorizontal),
+      bendingStretchHorizontal: this._cloneInterpolatorScalar(config.curves.bendingStretchHorizontal),
+      fakeWavePower: this._cloneInterpolatorScalar(config.curves.fakeWavePower),
+      fakeWaveFreq: this._cloneInterpolatorScalar(config.curves.fakeWaveFreq)
+    };
+    return {
+      gravity: config.gravity.clone(),
+      windForce: config.windForce.clone(),
+      relaxation: config.relaxation,
+      subSteps: config.subSteps,
+      rootSlideLimit: config.rootSlideLimit,
+      rootRotateLimit: config.rootRotateLimit,
+      constraintShrinkLimit: config.constraintShrinkLimit,
+      blendRatio: config.blendRatio,
+      stabilizationFrameRate: config.stabilizationFrameRate,
+      isFakeWave: config.isFakeWave,
+      fakeWaveSpeed: config.fakeWaveSpeed,
+      fakeWavePower: config.fakeWavePower,
+      enableSurfaceCollision: config.enableSurfaceCollision,
+      enableBroadPhase: config.enableBroadPhase,
+      preserveTwist: config.preserveTwist,
+      angleLimitConfig: {
+        angleLimit: config.angleLimitConfig.angleLimit,
+        limitFromRoot: config.angleLimitConfig.limitFromRoot
+      },
+      curves,
+      constraintOptions: {
+        structuralVertical: config.constraintOptions.structuralVertical,
+        structuralHorizontal: config.constraintOptions.structuralHorizontal,
+        shear: config.constraintOptions.shear,
+        bendingVertical: config.constraintOptions.bendingVertical,
+        bendingHorizontal: config.constraintOptions.bendingHorizontal,
+        isLoop: config.constraintOptions.isLoop,
+        collideStructuralVertical: config.constraintOptions.collideStructuralVertical,
+        collideStructuralHorizontal: config.constraintOptions.collideStructuralHorizontal,
+        collideShear: config.constraintOptions.collideShear,
+        enableSurfaceCollision: config.constraintOptions.enableSurfaceCollision
+      }
+    };
+  }
+
+  private _cloneInterpolatorScalar(curve: InterpolatorScalar): InterpolatorScalar {
+    return new InterpolatorScalar(
+      curve.mode,
+      new Float32Array(curve.inputs),
+      new Float32Array(curve.outputs)
+    );
+  }
+
+  private _sanitizeControllerConfig(config: ControllerConfig): ControllerConfig {
+    config.relaxation = Math.max(0, Math.trunc(config.relaxation));
+    config.subSteps = Math.max(1, Math.trunc(config.subSteps));
+    config.constraintShrinkLimit = Math.max(0, config.constraintShrinkLimit);
+    config.blendRatio = clamp01(config.blendRatio);
+    return config;
   }
 }
