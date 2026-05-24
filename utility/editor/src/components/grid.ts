@@ -30,6 +30,52 @@ interface Property<T extends {}> {
   value: Nullable<PropertyAccessor<T>>;
 }
 
+interface RawProperty {
+  name: string;
+  type: PropertyType;
+  get: (value: PropertyValue) => void;
+  set?: (value: PropertyValue) => void;
+  options?: {
+    enum?: {
+      labels: string[];
+      values: any[];
+    };
+    multiline?: boolean;
+    speed?: number;
+    minValue?: number;
+    maxValue?: number;
+  };
+}
+
+type PropertyRowData =
+  | {
+      type: 'group';
+      group: PropertyGroup;
+      level: number;
+      toplevel: boolean;
+    }
+  | {
+      type: 'inlineObjectArrayGroup';
+      group: PropertyGroup;
+      level: number;
+    }
+  | {
+      type: 'property';
+      property: Property<any>;
+      level: number;
+    }
+  | {
+      type: 'rawProperty';
+      property: RawProperty;
+      level: number;
+    };
+
+type PropertyRow = PropertyRowData & {
+  id: number;
+  y: number;
+  height: number;
+};
+
 class PropertyGroup {
   grid: PropertyEditor;
   name: string;
@@ -41,24 +87,11 @@ class PropertyGroup {
   path: string;
   property: Nullable<Property<any>>;
   currentType: number;
+  opened: boolean;
   objectTypes: Nullable<Nullable<SerializableClass>[]>;
   prop: Nullable<PropertyAccessor<any>>;
   properties: (PropertyGroup | { name: string; property: Property<any> })[];
-  rawProperties: {
-    name: string;
-    type: PropertyType;
-    get: (value: PropertyValue) => void;
-    set?: (value: PropertyValue) => void;
-    options?: {
-      enum?: {
-        labels: string[];
-        values: any[];
-      };
-      speed?: number;
-      minValue?: number;
-      maxValue?: number;
-    };
-  }[];
+  rawProperties: RawProperty[];
   object: any;
   subgroups: PropertyGroup[];
   constructor(name: string, grid: PropertyEditor) {
@@ -73,6 +106,7 @@ class PropertyGroup {
     this.property = null;
     this.prop = null;
     this.currentType = -1;
+    this.opened = true;
     this.objectTypes = null;
     this.properties = [];
     this.rawProperties = [];
@@ -280,6 +314,13 @@ export class PropertyEditor extends Observable<{
   private _activeStringEditors: Set<string>;
   private _pendingStringEditorFocus: Nullable<string>;
   private _showLeadingColumn: boolean;
+  private _virtualClipMinY: number;
+  private _virtualClipMaxY: number;
+  private _rowHeight: number;
+  private _rows: PropertyRow[];
+  private _rowVersion: number;
+  private _builtRowVersion: number;
+  private _totalRowsHeight: number;
   private readonly _extraPropertiesProviders: Map<
     string,
     (object: any) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>
@@ -295,6 +336,13 @@ export class PropertyEditor extends Observable<{
     this._activeStringEditors = new Set();
     this._pendingStringEditorFocus = null;
     this._showLeadingColumn = true;
+    this._virtualClipMinY = 0;
+    this._virtualClipMaxY = 0;
+    this._rowHeight = 0;
+    this._rows = [];
+    this._rowVersion = 0;
+    this._builtRowVersion = -1;
+    this._totalRowsHeight = 0;
     this._extraPropertiesProviders = new Map();
     this._extraPropertiesVersion = 0;
   }
@@ -303,6 +351,7 @@ export class PropertyEditor extends Observable<{
   }
   set object(value: any) {
     this._rootGroup.setObject(value);
+    this.invalidateRows();
     if (this._extraPropertiesProviders.size > 0) {
       const version = ++this._extraPropertiesVersion;
       void this.appendExtraProperties(value, version);
@@ -334,6 +383,7 @@ export class PropertyEditor extends Observable<{
   }
   clear() {
     this._rootGroup = new PropertyGroup('Root', this);
+    this.invalidateRows();
   }
   set showLeadingColumn(value: boolean) {
     this._showLeadingColumn = !!value;
@@ -343,6 +393,7 @@ export class PropertyEditor extends Observable<{
   }
   refresh() {
     this._dirty = true;
+    this.invalidateRows();
   }
   async rebuild() {
     const object = this.object;
@@ -368,6 +419,7 @@ export class PropertyEditor extends Observable<{
         this._rootGroup.addProperty(object, prop);
       }
     }
+    this.invalidateRows();
   }
   render() {
     if (this._dirty) {
@@ -409,27 +461,164 @@ export class PropertyEditor extends Observable<{
       }
       ImGui.TableSetupColumn('Name', ImGui.TableColumnFlags.WidthFixed, labelWidth);
       ImGui.TableSetupColumn('Value', ImGui.TableColumnFlags.WidthFixed, valueWidth);
-      this.renderGroup(this._rootGroup, 0, true);
+      this.ensureRows();
+      this.beginVirtualizedContent();
+      this.renderRows();
 
       ImGui.EndTable();
     }
   }
-  private renderSubGroups(group: PropertyGroup, level: number) {
-    for (let i = 0; i < group.subgroups.length; i++) {
-      const subgroup = group.subgroups[i];
-      ImGui.PushID(i);
-      this.renderGroup(subgroup, level);
-      ImGui.PopID();
-    }
+  private beginVirtualizedContent() {
+    const drawList = ImGui.GetWindowDrawList();
+    const clipMin = drawList.GetClipRectMin();
+    const clipMax = drawList.GetClipRectMax();
+    const overscan = ImGui.GetFrameHeight() * 2;
+    const contentStartY = ImGui.GetCursorScreenPos().y;
+    this._virtualClipMinY = clipMin.y - contentStartY - overscan;
+    this._virtualClipMaxY = clipMax.y - contentStartY + overscan;
   }
-  private renderGroup(group: PropertyGroup, level = 0, toplevel = false) {
+  private invalidateRows() {
+    this._rowVersion++;
+  }
+  private ensureRows() {
+    const rowHeight = this.getTableRowHeight();
+    if (this._rowHeight !== rowHeight) {
+      this._rowHeight = rowHeight;
+      this.invalidateRows();
+    }
+    if (this._builtRowVersion === this._rowVersion) {
+      return;
+    }
+    this._rows = [];
+    this._totalRowsHeight = 0;
+    this.appendGroupRows(this._rootGroup, 0, true);
+    this._builtRowVersion = this._rowVersion;
+  }
+  private appendRow(row: PropertyRowData, height = this._rowHeight) {
+    this._rows.push({
+      ...row,
+      id: this._rows.length,
+      y: this._totalRowsHeight,
+      height
+    } as PropertyRow);
+    this._totalRowsHeight += height;
+  }
+  private appendGroupRows(group: PropertyGroup, level = 0, toplevel = false) {
     if (group.prop?.isValid && group.object && !group.prop.isValid.call(group.object)) {
       return;
     }
-    if (this.renderInlineObjectArrayGroup(group, level)) {
+    if (this.isInlineObjectArrayGroup(group)) {
+      this.appendRow({ type: 'inlineObjectArrayGroup', group, level });
       return;
     }
-    ImGui.TableNextRow();
+    this.appendRow({ type: 'group', group, level, toplevel });
+    if (!toplevel && !group.opened) {
+      return;
+    }
+    for (const property of group.properties) {
+      if (property instanceof PropertyGroup) {
+        this.appendGroupRows(property, level + 1);
+      } else {
+        const prop = property.property;
+        if (prop.value?.isValid && !prop.value.isValid.call(prop.object)) {
+          continue;
+        }
+        this.appendRow({ type: 'property', property: prop, level: level + 2 }, this.getPropertyHeight(prop));
+      }
+    }
+    for (const rawProperty of group.rawProperties) {
+      this.appendRow(
+        { type: 'rawProperty', property: rawProperty, level: level + 2 },
+        this.getRawPropertyHeight(rawProperty)
+      );
+    }
+    for (const subgroup of group.subgroups) {
+      this.appendGroupRows(subgroup, level + 1);
+    }
+  }
+  private getPropertyHeight(property: Property<any>) {
+    return this.getTableRowHeight(property.value?.options?.multiline ? 100 : undefined);
+  }
+  private getRawPropertyHeight(property: RawProperty) {
+    return this.getTableRowHeight(property.options?.multiline ? 100 : undefined);
+  }
+  private getTableRowHeight(controlHeight?: number) {
+    const style = ImGui.GetStyle();
+    return Math.max(controlHeight ?? 0, ImGui.GetFrameHeight()) + style.CellPadding.y * 2;
+  }
+  private renderRows() {
+    if (this._rows.length === 0) {
+      return;
+    }
+    const startIndex = this.findFirstRowOverlapping(this._virtualClipMinY);
+    const endIndex = this.findFirstRowAfter(this._virtualClipMaxY);
+    const visibleStart = Math.min(startIndex, this._rows.length);
+    const visibleEnd = Math.max(visibleStart, Math.min(endIndex, this._rows.length));
+    const topHeight = visibleStart < this._rows.length ? this._rows[visibleStart].y : this._totalRowsHeight;
+    this.renderVirtualSpacer(topHeight);
+    for (let i = visibleStart; i < visibleEnd; i++) {
+      this.renderRow(this._rows[i]);
+    }
+    const bottomStart = visibleEnd < this._rows.length ? this._rows[visibleEnd].y : this._totalRowsHeight;
+    this.renderVirtualSpacer(this._totalRowsHeight - bottomStart);
+  }
+  private findFirstRowOverlapping(y: number) {
+    let lo = 0;
+    let hi = this._rows.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const row = this._rows[mid];
+      if (row.y + row.height <= y) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+  private findFirstRowAfter(y: number) {
+    let lo = 0;
+    let hi = this._rows.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this._rows[mid].y < y) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+  private renderVirtualSpacer(height: number) {
+    if (height <= 0) {
+      return;
+    }
+    ImGui.TableNextRow(0, height);
+    ImGui.TableNextColumn();
+    ImGui.Dummy(new ImGui.ImVec2(0, 0));
+  }
+  private renderRow(row: PropertyRow) {
+    switch (row.type) {
+      case 'group':
+        ImGui.PushID(row.id);
+        this.renderGroup(row.group, row.level, row.toplevel);
+        ImGui.PopID();
+        break;
+      case 'inlineObjectArrayGroup':
+        ImGui.PushID(row.id);
+        this.renderInlineObjectArrayGroup(row.group, row.level);
+        ImGui.PopID();
+        break;
+      case 'property':
+        this.renderProperty(row.property, row.level);
+        break;
+      case 'rawProperty':
+        this.renderRawProperty(row.property, row.level);
+        break;
+    }
+  }
+  private renderGroup(group: PropertyGroup, level = 0, toplevel = false) {
+    ImGui.TableNextRow(0, this._rowHeight);
     if (this._showLeadingColumn) {
       ImGui.TableNextColumn();
     }
@@ -439,8 +628,12 @@ export class PropertyEditor extends Observable<{
       ImGui.SetCursorPosX(baseX + level * 10);
     }
     ImGui.AlignTextToFramePadding();
-    const flags = ImGui.TreeNodeFlags.DefaultOpen;
+    const flags = group.opened ? ImGui.TreeNodeFlags.DefaultOpen : 0;
     const opened = toplevel ? true : ImGui.TreeNodeEx(group.name, flags);
+    if (group.opened !== opened) {
+      group.opened = opened;
+      this.invalidateRows();
+    }
     if (
       group.object &&
       group.prop &&
@@ -671,21 +864,25 @@ export class PropertyEditor extends Observable<{
         ImGui.EndChild();
       }
     }
-    if (opened) {
-      if (!toplevel) {
-        ImGui.TreePop();
-      }
-      for (const property of group.properties) {
-        this.renderProperty(property instanceof PropertyGroup ? property : property.property, level + 2);
-      }
-      for (const rawProperties of group.rawProperties) {
-        this.renderRawProperty(rawProperties, level + 2);
-      }
-      this.renderSubGroups(group, level + 1);
+    if (opened && !toplevel) {
+      ImGui.TreePop();
     }
     if (level > 0) {
       ImGui.SetCursorPosX(baseX);
     }
+  }
+  private isInlineObjectArrayGroup(group: PropertyGroup) {
+    return (
+      !!group.object &&
+      !!group.prop &&
+      group.prop.type === 'object_array' &&
+      !!group.prop.options?.inlineObjectArray &&
+      group.properties.length === 1 &&
+      group.subgroups.length === 0 &&
+      group.rawProperties.length === 0 &&
+      !(group.properties[0] instanceof PropertyGroup) &&
+      group.properties[0].property.value?.type === 'string'
+    );
   }
   private renderInlineObjectArrayGroup(group: PropertyGroup, level: number) {
     if (
@@ -698,16 +895,18 @@ export class PropertyEditor extends Observable<{
       group.rawProperties.length > 0 ||
       group.properties[0] instanceof PropertyGroup
     ) {
+      this.renderVirtualSpacer(this._rowHeight);
       return false;
     }
     const inlineProperty = group.properties[0].property;
     const value = inlineProperty.value;
     const object = inlineProperty.object;
     if (!value || value.type !== 'string') {
+      this.renderVirtualSpacer(this._rowHeight);
       return false;
     }
 
-    ImGui.TableNextRow();
+    ImGui.TableNextRow(0, this._rowHeight);
     if (this._showLeadingColumn) {
       ImGui.TableNextColumn();
     }
@@ -845,27 +1044,9 @@ export class PropertyEditor extends Observable<{
     }
     return true;
   }
-  private renderRawProperty(
-    value: {
-      name: string;
-      type: PropertyType;
-      get: (value: PropertyValue) => void;
-      set?: (value: PropertyValue) => void;
-      options?: {
-        enum?: {
-          labels: string[];
-          values: any[];
-        };
-        multiline?: boolean;
-        speed?: number;
-        minValue?: number;
-        maxValue?: number;
-      };
-    },
-    level: number
-  ) {
+  private renderRawProperty(value: RawProperty, level: number) {
     ImGui.PushID(value.name);
-    ImGui.TableNextRow();
+    ImGui.TableNextRow(0, this.getRawPropertyHeight(value));
     if (this._showLeadingColumn) {
       ImGui.TableNextColumn();
     }
@@ -1077,17 +1258,14 @@ export class PropertyEditor extends Observable<{
     prop.get.call(object, tmpProperty);
     this.revealAsset(tmpProperty.str[0]);
   }
-  private renderProperty(property: PropertyGroup | Property<any>, level: number) {
-    if (property instanceof PropertyGroup) {
-      this.renderGroup(property, level - 1);
-      return;
-    }
+  private renderProperty(property: Property<any>, level: number) {
     const { name, object, value } = property;
     if (value && value.isValid && !value.isValid.call(object)) {
+      this.renderVirtualSpacer(this.getPropertyHeight(property));
       return;
     }
     ImGui.PushID(property.path);
-    ImGui.TableNextRow();
+    ImGui.TableNextRow(0, this.getPropertyHeight(property));
     if (this._showLeadingColumn) {
       ImGui.TableNextColumn();
       ImGui.SetNextItemWidth(-1);
