@@ -1,4 +1,4 @@
-import { DRef, MemoryFS, Vector3 } from '@zephyr3d/base';
+import { DRef, InterpolatorScalar, MemoryFS, Vector3 } from '@zephyr3d/base';
 import {
   ColliderForce,
   JointDynamicsModifier,
@@ -114,6 +114,23 @@ describe('JointDynamics serialization', () => {
     skeleton.modifiers.push(modifier);
 
     const manager = new ResourceManager(new MemoryFS());
+    const modifierClass = manager.getClassByConstructor(JointDynamicsModifier)!;
+    const modifierProps = modifierClass.getProps();
+    const subStepsProp = modifierProps.find((prop) => prop.name === 'SubSteps')!;
+    const preserveTwistProp = modifierProps.find((prop) => prop.name === 'PreserveTwist')!;
+    const gravityProp = modifierProps.find((prop) => prop.name === 'Gravity')!;
+    const massScaleProp = modifierProps.find((prop) => prop.name === 'MassScale')!;
+
+    subStepsProp.set!.call(modifier, { num: [7], bool: [false], str: [''], object: [null] });
+    preserveTwistProp.set!.call(modifier, { num: [0], bool: [false], str: [''], object: [null] });
+    gravityProp.set!.call(modifier, { num: [0, -4, 0], bool: [false], str: [''], object: [null] });
+    massScaleProp.set!.call(modifier, {
+      num: [0],
+      bool: [false],
+      str: [''],
+      object: [InterpolatorScalar.constant(2)]
+    });
+
     const serialized = await manager.serializeObject(model);
     const container = new SceneNode(scene);
     container.remove();
@@ -130,9 +147,11 @@ describe('JointDynamics serialization', () => {
     expect(restoredSystemSnapshot.chainConfig.chains).toHaveLength(1);
     expect(restoredSystemSnapshot.chainConfig.chains[0].start.name).toBe('root');
     expect(restoredSystemSnapshot.chainConfig.chains[0].end.name).toBe('tip');
-    expect(restoredSystem.controller.getConfig().subSteps).toBe(5);
+    expect(restoredSystem.controller.getConfig().subSteps).toBe(7);
     expect(restoredSystem.controller.getConfig().blendRatio).toBeCloseTo(0.25);
-    expect(restoredSystem.controller.getConfig().preserveTwist).toBe(true);
+    expect(restoredSystem.controller.getConfig().preserveTwist).toBe(false);
+    expect(restoredSystem.controller.getConfig().gravity.y).toBeCloseTo(-4);
+    expect(restoredSystem.controller.getConfig().curves.massScale.evaluate(0.5)).toBeCloseTo(2);
     expect(restoredSystem.controller.colliderCount).toBe(1);
     expect(restoredSystem.controller.grabberCount).toBe(1);
     expect(restoredSystem.controller.flatPlaneCount).toBe(1);

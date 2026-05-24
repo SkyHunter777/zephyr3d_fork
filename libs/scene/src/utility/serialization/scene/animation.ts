@@ -17,10 +17,10 @@ import {
   NodeTranslationTrack,
   PropertyTrack
 } from '../../../animation';
-import type { ControllerConfig } from '../../../animation/joint_dynamics/controller';
+import type { ControllerConfig, ControllerConfigUpdate } from '../../../animation/joint_dynamics/controller';
 import type { ColliderR, GrabberR, JointDynamicSystemConfig } from '../../../animation/joint_dynamics';
 import type { ResourceManager } from '../manager';
-import { defineProps, type SerializableClass } from '../types';
+import { defineProps, type PropertyValue, type SerializableClass } from '../types';
 import { SceneNode } from '../../../scene';
 import { BoundingBox } from '../../bounding_volume';
 
@@ -183,6 +183,223 @@ export function getJointDynamicsModifierSkeleton(modifier: JointDynamicsModifier
   return jointDynamicsModifierSkeletons.get(modifier) ?? null;
 }
 
+type JointDynamicsNumberConfigKey = {
+  [K in keyof ControllerConfig]: ControllerConfig[K] extends number ? K : never;
+}[keyof ControllerConfig];
+
+type JointDynamicsBooleanConfigKey = {
+  [K in keyof ControllerConfig]: ControllerConfig[K] extends boolean ? K : never;
+}[keyof ControllerConfig];
+
+type JointDynamicsCurveKey = keyof ControllerConfig['curves'];
+type JointDynamicsConstraintOptionKey = keyof ControllerConfig['constraintOptions'];
+
+const jointDynamicsPropOptions = { group: 'Joint Dynamics' };
+
+function isJointDynamicsEditorPropPersistent() {
+  return false;
+}
+
+function updateJointDynamicsConfig(modifier: JointDynamicsModifier, config: ControllerConfigUpdate): void {
+  modifier.jointDynamicsSystem.controller.updateConfig(config);
+}
+
+function createJointDynamicsNumberProp(
+  name: string,
+  key: JointDynamicsNumberConfigKey,
+  label: string,
+  description: string,
+  type: 'float' | 'int',
+  minValue?: number
+) {
+  return {
+    name,
+    description,
+    type,
+    options: {
+      ...jointDynamicsPropOptions,
+      label,
+      ...(minValue !== undefined ? { minValue } : {})
+    },
+    isPersistent: isJointDynamicsEditorPropPersistent,
+    get(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'num'>>) {
+      value.num[0] = this.jointDynamicsSystem.controller.getConfig()[key] as number;
+    },
+    set(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'num'>>) {
+      updateJointDynamicsConfig(this, { [key]: value.num[0] } as ControllerConfigUpdate);
+    }
+  };
+}
+
+function createJointDynamicsBooleanProp(
+  name: string,
+  key: JointDynamicsBooleanConfigKey,
+  label: string,
+  description: string
+) {
+  return {
+    name,
+    description,
+    type: 'bool',
+    options: {
+      ...jointDynamicsPropOptions,
+      label
+    },
+    isPersistent: isJointDynamicsEditorPropPersistent,
+    get(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'bool'>>) {
+      value.bool[0] = this.jointDynamicsSystem.controller.getConfig()[key] as boolean;
+    },
+    set(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'bool'>>) {
+      updateJointDynamicsConfig(this, { [key]: value.bool[0] } as ControllerConfigUpdate);
+    }
+  };
+}
+
+function createJointDynamicsVectorProp(
+  name: string,
+  key: 'gravity' | 'windForce',
+  label: string,
+  description: string
+) {
+  return {
+    name,
+    description,
+    type: 'vec3',
+    options: {
+      ...jointDynamicsPropOptions,
+      label
+    },
+    isPersistent: isJointDynamicsEditorPropPersistent,
+    get(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'num'>>) {
+      const v = this.jointDynamicsSystem.controller.getConfig()[key];
+      value.num[0] = v.x;
+      value.num[1] = v.y;
+      value.num[2] = v.z;
+    },
+    set(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'num'>>) {
+      updateJointDynamicsConfig(this, {
+        [key]: new Vector3(value.num[0], value.num[1], value.num[2])
+      } as ControllerConfigUpdate);
+    }
+  };
+}
+
+function createJointDynamicsAngleLimitNumberProp(
+  name: string,
+  key: 'angleLimit',
+  label: string,
+  description: string
+) {
+  return {
+    name,
+    description,
+    type: 'float',
+    options: {
+      ...jointDynamicsPropOptions,
+      label
+    },
+    isPersistent: isJointDynamicsEditorPropPersistent,
+    get(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'num'>>) {
+      value.num[0] = this.jointDynamicsSystem.controller.getConfig().angleLimitConfig[key];
+    },
+    set(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'num'>>) {
+      updateJointDynamicsConfig(this, {
+        angleLimitConfig: { [key]: value.num[0] }
+      });
+    }
+  };
+}
+
+function createJointDynamicsAngleLimitBooleanProp(
+  name: string,
+  key: 'limitFromRoot',
+  label: string,
+  description: string
+) {
+  return {
+    name,
+    description,
+    type: 'bool',
+    options: {
+      ...jointDynamicsPropOptions,
+      label
+    },
+    isPersistent: isJointDynamicsEditorPropPersistent,
+    get(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'bool'>>) {
+      value.bool[0] = this.jointDynamicsSystem.controller.getConfig().angleLimitConfig[key];
+    },
+    set(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'bool'>>) {
+      updateJointDynamicsConfig(this, {
+        angleLimitConfig: { [key]: value.bool[0] }
+      });
+    }
+  };
+}
+
+function createJointDynamicsConstraintOptionProp(
+  name: string,
+  key: JointDynamicsConstraintOptionKey,
+  label: string,
+  description: string
+) {
+  return {
+    name,
+    description,
+    type: 'bool',
+    options: {
+      ...jointDynamicsPropOptions,
+      label
+    },
+    isPersistent: isJointDynamicsEditorPropPersistent,
+    get(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'bool'>>) {
+      value.bool[0] = this.jointDynamicsSystem.controller.getConfig().constraintOptions[key];
+    },
+    set(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'bool'>>) {
+      updateJointDynamicsConfig(this, {
+        constraintOptions: { [key]: value.bool[0] } as Partial<ControllerConfig['constraintOptions']>
+      });
+    }
+  };
+}
+
+function createJointDynamicsCurveProp(
+  name: string,
+  key: JointDynamicsCurveKey,
+  label: string,
+  description: string
+) {
+  return {
+    name,
+    description,
+    type: 'object',
+    options: {
+      ...jointDynamicsPropOptions,
+      label,
+      objectTypes: [Interpolator]
+    },
+    isPersistent: isJointDynamicsEditorPropPersistent,
+    get(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'object'>>) {
+      value.object[0] = this.jointDynamicsSystem.controller.getConfig().curves[key];
+    },
+    set(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'object'>>) {
+      const curve = value.object[0];
+      if (curve instanceof InterpolatorScalar) {
+        updateJointDynamicsConfig(this, { curves: { [key]: curve } as Partial<ControllerConfig['curves']> });
+      } else if (curve instanceof Interpolator && curve.target === 'number') {
+        updateJointDynamicsConfig(this, {
+          curves: {
+            [key]: new InterpolatorScalar(
+              curve.mode,
+              new Float32Array(curve.inputs),
+              new Float32Array(curve.outputs)
+            )
+          } as Partial<ControllerConfig['curves']>
+        });
+      }
+    }
+  };
+}
+
 /** @internal */
 export function getJointDynamicsModifierClass(): SerializableClass {
   return {
@@ -298,7 +515,332 @@ export function getJointDynamicsModifierClass(): SerializableClass {
       return init;
     },
     getProps() {
-      return [];
+      return defineProps([
+        {
+          name: 'Enabled',
+          description: 'Whether this joint dynamics modifier is active',
+          type: 'bool',
+          options: {
+            ...jointDynamicsPropOptions,
+            label: 'Enabled'
+          },
+          isPersistent: isJointDynamicsEditorPropPersistent,
+          get(this: JointDynamicsModifier, value) {
+            value.bool[0] = this.enabled;
+          },
+          set(this: JointDynamicsModifier, value) {
+            this.enabled = value.bool[0];
+          }
+        },
+        {
+          name: 'Weight',
+          description: 'Physics blend weight. 0 uses animation only, 1 uses full joint dynamics',
+          type: 'float',
+          options: {
+            ...jointDynamicsPropOptions,
+            label: 'Weight',
+            minValue: 0,
+            maxValue: 1
+          },
+          isPersistent: isJointDynamicsEditorPropPersistent,
+          get(this: JointDynamicsModifier, value) {
+            value.num[0] = this.weight;
+          },
+          set(this: JointDynamicsModifier, value) {
+            this.weight = value.num[0];
+          }
+        },
+        createJointDynamicsVectorProp('Gravity', 'gravity', 'Gravity', 'Global gravity vector'),
+        createJointDynamicsVectorProp('WindForce', 'windForce', 'Wind Force', 'Global wind force vector'),
+        createJointDynamicsNumberProp(
+          'Relaxation',
+          'relaxation',
+          'Relaxation',
+          'Constraint relaxation iterations per substep',
+          'int',
+          0
+        ),
+        createJointDynamicsNumberProp(
+          'SubSteps',
+          'subSteps',
+          'Sub Steps',
+          'Simulation substeps per frame',
+          'int',
+          1
+        ),
+        createJointDynamicsNumberProp(
+          'RootSlideLimit',
+          'rootSlideLimit',
+          'Root Slide Limit',
+          'Maximum root slide distance per substep. -1 means unlimited',
+          'float'
+        ),
+        createJointDynamicsNumberProp(
+          'RootRotateLimit',
+          'rootRotateLimit',
+          'Root Rotate Limit',
+          'Maximum root rotation angle per substep. -1 means unlimited',
+          'float'
+        ),
+        createJointDynamicsNumberProp(
+          'ConstraintShrinkLimit',
+          'constraintShrinkLimit',
+          'Shrink Limit',
+          'Upper limit for horizontal and shear constraint shrink power',
+          'float',
+          0
+        ),
+        createJointDynamicsNumberProp(
+          'StabilizationFrameRate',
+          'stabilizationFrameRate',
+          'Stabilization FPS',
+          'Target frame rate used by stabilization logic',
+          'float',
+          0
+        ),
+        createJointDynamicsBooleanProp(
+          'FakeWave',
+          'isFakeWave',
+          'Fake Wave',
+          'Enable sinusoidal fake wave on leaf bones'
+        ),
+        createJointDynamicsNumberProp(
+          'FakeWaveSpeed',
+          'fakeWaveSpeed',
+          'Fake Wave Speed',
+          'Global fake wave speed',
+          'float'
+        ),
+        createJointDynamicsNumberProp(
+          'FakeWavePower',
+          'fakeWavePower',
+          'Fake Wave Power',
+          'Global fake wave amplitude multiplier',
+          'float'
+        ),
+        createJointDynamicsBooleanProp(
+          'EnableSurfaceCollision',
+          'enableSurfaceCollision',
+          'Surface Collision',
+          'Enable triangle-based surface collision'
+        ),
+        createJointDynamicsBooleanProp(
+          'EnableBroadPhase',
+          'enableBroadPhase',
+          'Broad Phase',
+          'Enable broad-phase pruning before precise collider tests'
+        ),
+        createJointDynamicsBooleanProp(
+          'PreserveTwist',
+          'preserveTwist',
+          'Preserve Twist',
+          'Preserve each joint initial local twist after physics simulation'
+        ),
+        createJointDynamicsAngleLimitNumberProp(
+          'AngleLimit',
+          'angleLimit',
+          'Angle Limit',
+          'Post-simulation parent-child angle limit. -1 disables angle limiting'
+        ),
+        createJointDynamicsAngleLimitBooleanProp(
+          'AngleLimitFromRoot',
+          'limitFromRoot',
+          'Limit From Root',
+          'Apply angle limiting from the chain root'
+        ),
+        createJointDynamicsConstraintOptionProp(
+          'StructuralVertical',
+          'structuralVertical',
+          'Structural Vertical',
+          'Generate parent-child vertical constraints'
+        ),
+        createJointDynamicsConstraintOptionProp(
+          'StructuralHorizontal',
+          'structuralHorizontal',
+          'Structural Horizontal',
+          'Generate same-depth horizontal constraints across chains'
+        ),
+        createJointDynamicsConstraintOptionProp(
+          'Shear',
+          'shear',
+          'Shear',
+          'Generate diagonal cross-bracing constraints'
+        ),
+        createJointDynamicsConstraintOptionProp(
+          'BendingVertical',
+          'bendingVertical',
+          'Bending Vertical',
+          'Generate skip-one vertical bending constraints'
+        ),
+        createJointDynamicsConstraintOptionProp(
+          'BendingHorizontal',
+          'bendingHorizontal',
+          'Bending Horizontal',
+          'Generate skip-one horizontal bending constraints'
+        ),
+        createJointDynamicsConstraintOptionProp(
+          'Loop',
+          'isLoop',
+          'Loop',
+          'Connect the last root point back to the first root point'
+        ),
+        createJointDynamicsConstraintOptionProp(
+          'CollideStructuralVertical',
+          'collideStructuralVertical',
+          'Collide Structural V',
+          'Enable per-constraint collision on structural vertical pairs'
+        ),
+        createJointDynamicsConstraintOptionProp(
+          'CollideStructuralHorizontal',
+          'collideStructuralHorizontal',
+          'Collide Structural H',
+          'Enable per-constraint collision on structural horizontal pairs'
+        ),
+        createJointDynamicsConstraintOptionProp(
+          'CollideShear',
+          'collideShear',
+          'Collide Shear',
+          'Enable per-constraint collision on shear pairs'
+        ),
+        createJointDynamicsConstraintOptionProp(
+          'ConstraintSurfaceCollision',
+          'enableSurfaceCollision',
+          'Constraint Surface Collision',
+          'Enable surface collision in constraint generation'
+        ),
+        createJointDynamicsCurveProp(
+          'MassScale',
+          'massScale',
+          'Mass Scale',
+          'Depth curve that scales point mass'
+        ),
+        createJointDynamicsCurveProp(
+          'GravityScale',
+          'gravityScale',
+          'Gravity Scale',
+          'Depth curve that scales gravity strength'
+        ),
+        createJointDynamicsCurveProp(
+          'WindForceScale',
+          'windForceScale',
+          'Wind Force Scale',
+          'Depth curve that scales wind force'
+        ),
+        createJointDynamicsCurveProp(
+          'Resistance',
+          'resistance',
+          'Resistance',
+          'Depth curve for velocity damping'
+        ),
+        createJointDynamicsCurveProp(
+          'Hardness',
+          'hardness',
+          'Hardness',
+          'Depth curve for restore-to-animation stiffness'
+        ),
+        createJointDynamicsCurveProp(
+          'Friction',
+          'friction',
+          'Friction',
+          'Depth curve for collision friction'
+        ),
+        createJointDynamicsCurveProp(
+          'PointRadius',
+          'pointRadius',
+          'Point Radius',
+          'Depth curve for collision radius'
+        ),
+        createJointDynamicsCurveProp(
+          'SliderJointLength',
+          'sliderJointLength',
+          'Slider Joint Length',
+          'Depth curve for extra horizontal and shear constraint slack'
+        ),
+        createJointDynamicsCurveProp(
+          'AllShrinkScale',
+          'allShrinkScale',
+          'All Shrink Scale',
+          'Depth curve for global shrink stiffness multiplier'
+        ),
+        createJointDynamicsCurveProp(
+          'AllStretchScale',
+          'allStretchScale',
+          'All Stretch Scale',
+          'Depth curve for global stretch stiffness multiplier'
+        ),
+        createJointDynamicsCurveProp(
+          'StructuralShrinkVertical',
+          'structuralShrinkVertical',
+          'Structural Shrink V',
+          'Depth curve for structural vertical shrink stiffness'
+        ),
+        createJointDynamicsCurveProp(
+          'StructuralStretchVertical',
+          'structuralStretchVertical',
+          'Structural Stretch V',
+          'Depth curve for structural vertical stretch stiffness'
+        ),
+        createJointDynamicsCurveProp(
+          'StructuralShrinkHorizontal',
+          'structuralShrinkHorizontal',
+          'Structural Shrink H',
+          'Depth curve for structural horizontal shrink stiffness'
+        ),
+        createJointDynamicsCurveProp(
+          'StructuralStretchHorizontal',
+          'structuralStretchHorizontal',
+          'Structural Stretch H',
+          'Depth curve for structural horizontal stretch stiffness'
+        ),
+        createJointDynamicsCurveProp(
+          'ShearShrink',
+          'shearShrink',
+          'Shear Shrink',
+          'Depth curve for shear shrink stiffness'
+        ),
+        createJointDynamicsCurveProp(
+          'ShearStretch',
+          'shearStretch',
+          'Shear Stretch',
+          'Depth curve for shear stretch stiffness'
+        ),
+        createJointDynamicsCurveProp(
+          'BendingShrinkVertical',
+          'bendingShrinkVertical',
+          'Bending Shrink V',
+          'Depth curve for bending vertical shrink stiffness'
+        ),
+        createJointDynamicsCurveProp(
+          'BendingStretchVertical',
+          'bendingStretchVertical',
+          'Bending Stretch V',
+          'Depth curve for bending vertical stretch stiffness'
+        ),
+        createJointDynamicsCurveProp(
+          'BendingShrinkHorizontal',
+          'bendingShrinkHorizontal',
+          'Bending Shrink H',
+          'Depth curve for bending horizontal shrink stiffness'
+        ),
+        createJointDynamicsCurveProp(
+          'BendingStretchHorizontal',
+          'bendingStretchHorizontal',
+          'Bending Stretch H',
+          'Depth curve for bending horizontal stretch stiffness'
+        ),
+        createJointDynamicsCurveProp(
+          'FakeWavePowerCurve',
+          'fakeWavePower',
+          'Fake Wave Power Curve',
+          'Depth curve for fake wave amplitude'
+        ),
+        createJointDynamicsCurveProp(
+          'FakeWaveFreq',
+          'fakeWaveFreq',
+          'Fake Wave Freq',
+          'Depth curve for fake wave frequency offset'
+        )
+      ]);
     }
   };
 }
