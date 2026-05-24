@@ -205,7 +205,7 @@ export class Renderer extends Disposable {
     let minIndex = Number.POSITIVE_INFINITY;
     let maxIndex = -1;
     for (let i = 0; i < indexCount; i++) {
-      const index = indexData[indexOffset + i];
+      const index = vertexOffset + indexData[indexOffset + i];
       if (index < minIndex) {
         minIndex = index;
       }
@@ -213,7 +213,7 @@ export class Renderer extends Disposable {
         maxIndex = index;
       }
     }
-    const vertexStart = Number.isFinite(minIndex) ? Math.min(vertexOffset, minIndex) : vertexOffset;
+    const vertexStart = Number.isFinite(minIndex) ? minIndex : vertexOffset;
     const vertexEnd = maxIndex >= vertexStart ? maxIndex + 1 : vertexStart;
     const vertexCount = Math.max(0, vertexEnd - vertexStart);
     const sourceVertexByteOffset = vertexStart * Renderer.VERTEX_STRIDE;
@@ -235,7 +235,7 @@ export class Renderer extends Disposable {
       );
     }
     for (let i = 0; i < indexCount; i++) {
-      this._indexCache[this._indexPosition + i] = indexData[indexOffset + i] - vertexStart;
+      this._indexCache[this._indexPosition + i] = vertexOffset + indexData[indexOffset + i] - vertexStart;
     }
     if (alignedIndexCount > indexCount) {
       this._indexCache[this._indexPosition + indexCount] = 0;
