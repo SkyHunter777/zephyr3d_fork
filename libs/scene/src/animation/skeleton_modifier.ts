@@ -1,4 +1,4 @@
-import type { Skeleton } from './skeleton';
+import type { SkeletonRig } from './skeleton';
 
 /**
  * Abstract base class for skeleton post-processors.
@@ -45,10 +45,10 @@ export abstract class SkeletonModifier {
    * Implementations should modify joint transforms and blend with the current state
    * using the processor's weight.
    *
-   * @param skeleton - The skeleton to process
+   * @param skeleton - The shared rig to process
    * @param deltaTime - Time elapsed since last frame (in seconds)
    */
-  abstract apply(skeleton: Skeleton, deltaTime: number): void;
+  abstract apply(skeleton: SkeletonRig, deltaTime: number): void;
 
   /**
    * Reset the processor to its initial state.

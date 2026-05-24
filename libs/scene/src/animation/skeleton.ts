@@ -112,6 +112,9 @@ export type HumanoidJointMapping<T extends { name: string; parent: Nullable<T>; 
   rightHand?: Record<HumanoidHandRig, T>;
 };
 
+/** @public */
+export type SkeletonBindPose = { rotation: Quaternion; scale: Vector3; position: Vector3 };
+
 type HumanoidJointPattern = {
   all?: string[];
   any?: string[];
@@ -131,6 +134,174 @@ type HumanoidJointMatchCandidate<T extends { name: string; children: T[] }> = {
   node: T;
   score: number;
 };
+
+/**
+ * Shared joint rig for skeletal animation.
+ *
+ * A rig owns the animated joint nodes, bind pose, humanoid mapping and procedural
+ * modifiers. Multiple skin bindings may reference the same rig with different
+ * inverse bind matrices.
+ *
+ * @public
+ */
+export class SkeletonRig extends Disposable {
+  private static readonly _registry: Map<string, DWeakRef<SkeletonRig>> = new Map();
+  protected _id: string;
+  protected _joints: SceneNode[];
+  protected _bindPoseByJoint: Map<SceneNode, SkeletonBindPose>;
+  protected _bindPose: SkeletonBindPose[];
+  protected _playing: boolean;
+  protected _modifiers: SkeletonModifier[];
+  protected _humanoidJointMapping: Nullable<HumanoidJointMapping<SceneNode>>;
+  protected _humanoidRootRotation: Quaternion;
+
+  constructor(joints: SceneNode[], bindPose: SkeletonBindPose[]) {
+    super();
+    this._id = randomUUID();
+    this._joints = joints;
+    this._bindPose = bindPose;
+    this._bindPoseByJoint = new Map();
+    for (let i = 0; i < joints.length; i++) {
+      this._bindPoseByJoint.set(joints[i], bindPose[i]);
+    }
+    this._playing = false;
+    this._modifiers = [];
+    this.computeBindPose();
+    const skeletonRoot = this.findRootJoint(this._joints);
+    if (skeletonRoot) {
+      this._humanoidJointMapping = Skeleton.tryExtractHumanoidJoints(skeletonRoot);
+      this._humanoidRootRotation = Quaternion.identity();
+    } else {
+      this._humanoidJointMapping = null;
+      this._humanoidRootRotation = Quaternion.identity();
+    }
+    if (this._humanoidJointMapping) {
+      let p = this._humanoidJointMapping.body[HumanoidBodyRig.Hips];
+      while (this._joints.includes(p.parent!)) {
+        Quaternion.multiply(p.parent!.rotation, this._humanoidRootRotation, this._humanoidRootRotation);
+        p = p.parent!;
+      }
+    }
+    SkeletonRig._registry.set(this._id, new DWeakRef(this));
+  }
+
+  static getRigKey(joints: SceneNode[]) {
+    return joints
+      .map((joint) => joint.persistentId)
+      .sort()
+      .join('|');
+  }
+
+  static findRigById(id: string) {
+    const m = this._registry.get(id);
+    if (m && !m.get()) {
+      this._registry.delete(id);
+      return null;
+    }
+    return m ? m.get() : null;
+  }
+
+  get persistentId() {
+    return this._id;
+  }
+
+  set persistentId(val) {
+    if (val !== this._id) {
+      const m = SkeletonRig._registry.get(this._id);
+      if (!m || m.get() !== this) {
+        throw new Error('Registry skeleton rig mismatch');
+      }
+      SkeletonRig._registry.delete(this._id);
+      this._id = val;
+      SkeletonRig._registry.set(this._id, m);
+    }
+  }
+
+  get joints() {
+    return this._joints;
+  }
+
+  get bindPose() {
+    return this._bindPose;
+  }
+
+  getBindPoseForJoint(joint: SceneNode) {
+    return this._bindPoseByJoint.get(joint) ?? null;
+  }
+
+  get humanoidJointMapping(): Nullable<HumanoidJointMapping<SceneNode>> {
+    return this._humanoidJointMapping;
+  }
+
+  get humanoidRootRotation(): Quaternion {
+    return this._humanoidRootRotation;
+  }
+
+  get modifiers(): SkeletonModifier[] {
+    return this._modifiers;
+  }
+
+  get playing() {
+    return this._playing;
+  }
+
+  set playing(b: boolean) {
+    this._playing = b;
+  }
+
+  getJointIndex(joint: SceneNode) {
+    return this._joints.indexOf(joint);
+  }
+
+  getJointIndexByName(jointName: string) {
+    return this._joints.findIndex((joint) => joint.name === jointName);
+  }
+
+  computeBindPose() {
+    for (let i = 0; i < this._joints.length; i++) {
+      const joint = this._joints[i];
+      const bindpose = this._bindPose[i];
+      joint.position.set(bindpose.position);
+      joint.rotation.set(bindpose.rotation);
+      joint.scale.set(bindpose.scale);
+    }
+  }
+
+  apply(deltaTime: number): void {
+    for (const modifier of this._modifiers) {
+      modifier.apply(this, deltaTime);
+    }
+  }
+
+  reset() {
+    this._playing = false;
+  }
+
+  protected onDispose() {
+    super.onDispose();
+    const m = SkeletonRig._registry.get(this._id);
+    if (m?.get() === this) {
+      SkeletonRig._registry.delete(this._id);
+      m.dispose();
+    }
+  }
+
+  private findRootJoint(joints: SceneNode[]) {
+    let root: Nullable<SceneNode> = null;
+    for (const joint of joints) {
+      if (!root) {
+        root = joint;
+      }
+      while (!root!.isParentOf(joint)) {
+        root = root!.parent;
+      }
+      if (!root) {
+        break;
+      }
+    }
+    return root;
+  }
+}
 
 function jointPattern(all: string[], none?: string[], any?: string[]): HumanoidJointPattern {
   return {
@@ -155,10 +326,11 @@ function sideJointPatterns(
 }
 
 /**
- * Skeleton for skinned animation.
+ * Skin binding for skinned animation.
  *
  * Responsibilities:
- * - Maintains joint transforms: inverse bind, bind pose, and current skinning matrices.
+ * - References a shared SkeletonRig.
+ * - Maintains inverse bind and current skinning matrices for one skin.
  * - Provides a texture containing joint matrices for GPU skinning.
  * - Applies skinning state to associated meshes each frame.
  * - Computes animated axis-aligned bounding boxes using representative skinned vertices.
@@ -170,23 +342,23 @@ function sideJointPatterns(
  *   and `_jointOffsets[1]` (previous).
  *
  * Usage:
- * - Construct with joints, bind data, meshes and submesh bounding info.
+ * - Construct with a rig, bind data, meshes and submesh bounding info.
  * - Call `apply()` each frame to update joint texture, bind to meshes, and update bounds.
  * - Call `reset()` to clear skinning on meshes.
  *
  * @public
  */
-export class Skeleton extends Disposable {
+export class SkinBinding extends Disposable {
   /** @internal Global weak registry keyed by persistentId for serialization/lookup. */
-  private static readonly _registry: Map<string, DWeakRef<Skeleton>> = new Map();
+  private static readonly _registry: Map<string, DWeakRef<SkinBinding>> = new Map();
   /** @internal */
   protected _id: string;
+  /** @internal */
+  protected _rig: SkeletonRig;
   /** @internal */
   protected _joints: SceneNode[];
   /** @internal */
   protected _inverseBindMatrices: Matrix4x4[];
-  /** @internal */
-  protected _bindPose: { rotation: Quaternion; scale: Vector3; position: Vector3 }[];
   /** @internal */
   protected _jointMatrices!: Matrix4x4[];
   /** @internal */
@@ -198,52 +370,36 @@ export class Skeleton extends Disposable {
   /** @internal */
   protected _playing: boolean;
   /** @internal */
-  protected _modifiers: SkeletonModifier[];
-  /** @internal */
   protected _lastUpdateTime: number;
-  /** @internal */
-  protected _humanoidJointMapping: Nullable<HumanoidJointMapping<SceneNode>>;
-  /** @internal */
-  protected _humanoidRootRotation: Quaternion;
   /**
-   * Create a skeleton instance.
+   * Create a skin binding instance.
    *
+   * @param rig - Shared skeleton rig that owns animated joint transforms.
    * @param joints - Joint scene nodes (one per joint), ordered to match skin data.
    * @param inverseBindMatrices - Inverse bind matrices for each joint.
    * @param bindPoseMatrices - Bind pose matrices for each joint (model-space).
    */
   constructor(
-    joints: SceneNode[],
+    rig: SkeletonRig,
     inverseBindMatrices: Matrix4x4[],
-    bindPose: { rotation: Quaternion; scale: Vector3; position: Vector3 }[]
+    joints?: SceneNode[],
+    bindPose?: SkeletonBindPose[]
   ) {
     super();
     this._id = randomUUID();
-    this._joints = joints;
+    this._rig = rig;
+    this._joints = joints ?? rig.joints;
     this._inverseBindMatrices = inverseBindMatrices;
-    this._bindPose = bindPose;
     this._jointTexture = new DRef();
     this._playing = false;
-    this._modifiers = [];
     this._lastUpdateTime = 0;
-    this.computeBindPose();
+    if (bindPose && bindPose !== rig.bindPose) {
+      // Legacy callers used Skeleton as both rig and binding. Keep the old bind
+      // pose visible by replacing the rig pose only when explicitly supplied.
+      this._rig = new SkeletonRig(rig.joints, bindPose);
+    }
     this.updateJointMatrices(0);
-    let skeletonRoot = this.findRootJoint(this._joints);
-    if (skeletonRoot) {
-      this._humanoidJointMapping = Skeleton.tryExtractHumanoidJoints(skeletonRoot);
-      this._humanoidRootRotation = Quaternion.identity();
-    } else {
-      this._humanoidJointMapping = null;
-      this._humanoidRootRotation = Quaternion.identity();
-    }
-    if (this._humanoidJointMapping) {
-      let p = this._humanoidJointMapping.body[HumanoidBodyRig.Hips];
-      while (this._joints.includes(p.parent!)) {
-        Quaternion.multiply(p.parent!.rotation, this._humanoidRootRotation, this._humanoidRootRotation);
-        p = p.parent!;
-      }
-    }
-    Skeleton._registry.set(this._id, new DWeakRef(this));
+    SkinBinding._registry.set(this._id, new DWeakRef(this));
   }
   /**
    * Lookup a skeleton from the global registry by persistent id.
@@ -252,7 +408,7 @@ export class Skeleton extends Disposable {
    * @returns The skeleton if alive, otherwise `null`.
    * @internal
    */
-  static findSkeletonById(id: string) {
+  static findSkinBindingById(id: string) {
     const m = this._registry.get(id);
     if (m && !m.get()) {
       this._registry.delete(id);
@@ -260,17 +416,23 @@ export class Skeleton extends Disposable {
     }
     return m ? m.get() : null;
   }
+  static findSkeletonById(id: string) {
+    return this.findSkinBindingById(id);
+  }
+  get rig() {
+    return this._rig;
+  }
   /** Gets joint nodes */
   get joints() {
     return this._joints;
   }
   /** Gets the humanoid joint mapping */
   get humanoidJointMapping(): Nullable<HumanoidJointMapping<SceneNode>> {
-    return this._humanoidJointMapping;
+    return this._rig.humanoidJointMapping;
   }
   /** Root rotation of humanoid hips bone */
   get humanoidRootRotation(): Quaternion {
-    return this._humanoidRootRotation;
+    return this._rig.humanoidRootRotation;
   }
   /** @internal */
   get inverseBindMatrices() {
@@ -278,7 +440,7 @@ export class Skeleton extends Disposable {
   }
   /** @internal */
   get bindPose() {
-    return this._bindPose;
+    return this._joints.map((joint) => this._rig.getBindPoseForJoint(joint)!);
   }
   get playing() {
     return this._playing;
@@ -291,13 +453,13 @@ export class Skeleton extends Disposable {
   }
   set persistentId(val) {
     if (val !== this._id) {
-      const m = Skeleton._registry.get(this._id);
+      const m = SkinBinding._registry.get(this._id);
       if (!m || m.get() !== this) {
-        throw new Error('Registry skeleton mismatch');
+        throw new Error('Registry skin binding mismatch');
       }
-      Skeleton._registry.delete(this._id);
+      SkinBinding._registry.delete(this._id);
       this._id = val;
-      Skeleton._registry.set(this._id, m);
+      SkinBinding._registry.set(this._id, m);
     }
   }
   /**
@@ -341,7 +503,6 @@ export class Skeleton extends Disposable {
    * @internal
    */
   updateJointMatrices(deltaTime: number) {
-    this.applyModifiers(deltaTime);
     if (!this._jointTexture.get()) {
       this._createJointTexture();
     }
@@ -350,11 +511,11 @@ export class Skeleton extends Disposable {
       this._jointOffsets[1] = 1;
     } else {
       this._jointOffsets[1] = this._jointOffsets[0];
-      this._jointOffsets[0] = this._joints.length - this._jointOffsets[0] + 2;
+      this._jointOffsets[0] = this.joints.length - this._jointOffsets[0] + 2;
     }
-    for (let i = 0; i < this._joints.length; i++) {
+    for (let i = 0; i < this.joints.length; i++) {
       Matrix4x4.multiply(
-        this._joints[i].worldMatrix,
+        this.joints[i].worldMatrix,
         this._inverseBindMatrices[i],
         this._jointMatrices[i + this._jointOffsets[0] - 1]
       );
@@ -366,14 +527,7 @@ export class Skeleton extends Disposable {
    * @internal
    */
   computeBindPose() {
-    for (let i = 0; i < this._joints.length; i++) {
-      const joint = this._joints[i];
-      const bindpose = this._bindPose[i];
-      joint.position.set(bindpose.position);
-      joint.rotation.set(bindpose.rotation);
-      //joint.rotation.identity();
-      joint.scale.set(bindpose.scale);
-    }
+    this._rig.computeBindPose();
   }
   /**
    * Compute current joint matrices from the nodes and upload them to the joint texture.
@@ -383,6 +537,7 @@ export class Skeleton extends Disposable {
   apply(deltaTime: number) {
     this.updateJointMatrices(deltaTime);
     const tex = this.jointTexture;
+    this._syncJointMatrixArray();
     tex.update(this._jointMatrixArray, 0, 0, tex.width, tex.height);
   }
   /**
@@ -395,9 +550,7 @@ export class Skeleton extends Disposable {
    * @internal
    */
   protected applyModifiers(deltaTime: number): void {
-    for (const modifier of this._modifiers) {
-      modifier.apply(this, deltaTime);
-    }
+    this._rig.apply(deltaTime);
   }
   /**
    * Get all modifiers attached to this skeleton.
@@ -405,7 +558,7 @@ export class Skeleton extends Disposable {
    * @public
    */
   get modifiers(): SkeletonModifier[] {
-    return this._modifiers;
+    return this._rig.modifiers;
   }
   /**
    * Reset all meshes to an unskinned state and clear animated bounds.
@@ -457,9 +610,9 @@ export class Skeleton extends Disposable {
   protected onDispose() {
     super.onDispose();
     this._jointTexture.dispose();
-    const m = Skeleton._registry.get(this._id);
+    const m = SkinBinding._registry.get(this._id);
     if (m?.get() === this) {
-      Skeleton._registry.delete(this._id);
+      SkinBinding._registry.delete(this._id);
       m.dispose();
     }
   }
@@ -476,7 +629,7 @@ export class Skeleton extends Disposable {
    * @internal
    */
   private _createJointTexture() {
-    const textureWidth = nextPowerOf2(Math.max(4, Math.ceil(Math.sqrt((this._joints.length * 2 + 1) * 4))));
+    const textureWidth = nextPowerOf2(Math.max(4, Math.ceil(Math.sqrt((this.joints.length * 2 + 1) * 4))));
     const device = getDevice();
     this._jointTexture.set(
       device.createTexture2D('rgba32f', textureWidth, textureWidth, {
@@ -488,13 +641,15 @@ export class Skeleton extends Disposable {
       })
     );
     this._jointMatrixArray = new Float32Array(textureWidth * textureWidth * 4);
-    const buffer = this._jointMatrixArray.buffer;
-    this._jointOffsets = new Float32Array(buffer);
+    this._jointOffsets = this._jointMatrixArray.subarray(0, 2) as Float32Array<ArrayBuffer>;
     this._jointOffsets[0] = 0;
     this._jointOffsets[1] = 0;
-    this._jointMatrices = Array.from({ length: this._joints.length * 2 }).map(
-      (val, index) => new Matrix4x4(buffer, (index + 1) * 16 * Float32Array.BYTES_PER_ELEMENT)
-    );
+    this._jointMatrices = Array.from({ length: this.joints.length * 2 }).map(() => new Matrix4x4());
+  }
+  private _syncJointMatrixArray() {
+    for (let i = 0; i < this._jointMatrices.length; i++) {
+      this._jointMatrixArray.set(this._jointMatrices[i], (i + 1) * 16);
+    }
   }
   /**
    * Build representative skinned bounding data for a submesh.
@@ -655,21 +810,6 @@ export class Skeleton extends Disposable {
         invWorldMatrix[14];
     }
     return result;
-  }
-  private findRootJoint(joints: SceneNode[]) {
-    let root: Nullable<SceneNode> = null;
-    for (const joint of joints) {
-      if (!root) {
-        root = joint;
-      }
-      while (!root!.isParentOf(joint)) {
-        root = root!.parent;
-      }
-      if (!root) {
-        break;
-      }
-    }
-    return root;
   }
   private static normalizeHumanoidJointName(name: string) {
     return name
@@ -1496,5 +1636,28 @@ export class Skeleton extends Disposable {
     root: T
   ): HumanoidJointMapping<T> | null {
     return this.tryExtractHumanoidJointsByBodyProfile(root, this.createBipedHumanoidBodyProfile());
+  }
+}
+
+/**
+ * Legacy compatibility name for a skin binding.
+ *
+ * New code should use {@link SkeletonRig} for the shared animated rig and
+ * {@link SkinBinding} for per-skin inverse bind matrices.
+ *
+ * @public
+ */
+export class Skeleton extends SkinBinding {
+  constructor(joints: SceneNode[], inverseBindMatrices: Matrix4x4[], bindPose: SkeletonBindPose[]) {
+    super(new SkeletonRig(joints, bindPose), inverseBindMatrices, joints);
+  }
+
+  static tryExtractHumanoidJoints = SkinBinding.tryExtractHumanoidJoints;
+  static tryExtractHumanoidJointsMixamo = SkinBinding.tryExtractHumanoidJointsMixamo;
+  static tryExtractHumanoidJointsVRM = SkinBinding.tryExtractHumanoidJointsVRM;
+  static tryExtractHumanoidJointsUnityHumanoid = SkinBinding.tryExtractHumanoidJointsUnityHumanoid;
+  static tryExtractHumanoidJointsBiped = SkinBinding.tryExtractHumanoidJointsBiped;
+  static findSkeletonById(id: string) {
+    return SkinBinding.findSkinBindingById(id);
   }
 }

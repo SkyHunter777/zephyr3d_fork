@@ -137,8 +137,8 @@ describe('JointDynamics serialization', () => {
     const restored = (await manager.deserializeObject<SceneNode>(container, serialized))!;
     restored.parent = scene.rootNode;
 
-    const restoredSkeleton = restored.animationSet.skeletons[0].get()!;
-    const restoredModifier = restoredSkeleton.modifiers[0] as JointDynamicsModifier;
+    const restoredRig = restored.animationSet.rigs[0].get()!;
+    const restoredModifier = restoredRig.modifiers[0] as JointDynamicsModifier;
     const restoredSystem = restoredModifier.jointDynamicsSystem;
     const restoredSystemSnapshot = restoredSystem as any;
 

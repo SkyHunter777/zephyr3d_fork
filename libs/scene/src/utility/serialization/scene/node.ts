@@ -3,7 +3,7 @@ import type { SceneNodeVisible } from '../../../scene/scene_node';
 import { Scene } from '../../../scene/scene';
 import { defineProps, type SerializableClass } from '../types';
 import type { DiffPatch, DiffValue } from '@zephyr3d/base';
-import { applyPatch, ASSERT, degree2radian, diff, DRef, radian2degree } from '@zephyr3d/base';
+import { applyPatch, ASSERT, degree2radian, diff, DRef, guessMimeType, radian2degree } from '@zephyr3d/base';
 import { GraphNode } from '../../../scene';
 import type { ResourceManager } from '../manager';
 import {
@@ -141,10 +141,10 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
       return { obj: node };
     },
     async getInitParams(obj: SceneNode, flags) {
-      const prefabId = obj.prefabId;
+      let prefabId = obj.prefabId;
       const assetId = manager.getAssetId(obj);
       let patch: DiffPatch | undefined = undefined;
-      if (prefabId) {
+      if (prefabId && guessMimeType(prefabId) === 'application/vnd.zephyr3d.prefab+json') {
         try {
           obj.prefabId = '';
           const prefabData = (await manager.loadPrefabContent(prefabId))!.data as DiffValue;
@@ -155,6 +155,8 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           obj.prefabId = prefabId;
         }
         flags.saveProps = false;
+      } else {
+        prefabId = '';
       }
       if (!prefabId && assetId) {
         const baseNode = (await manager.fetchModel(assetId, obj.scene!)) ?? null;
@@ -508,10 +510,36 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           }
         },
         {
-          name: 'Skeletons',
-          description: 'Skeleton references used by the node animations',
+          name: 'Rigs',
+          description: 'Shared skeleton rigs used by the node animations',
           type: 'object_array',
           phase: 1,
+          isHidden() {
+            return true;
+          },
+          get(this: SceneNode, value) {
+            const animationSet = this.animationSet;
+            const rigs = new Set(animationSet.rigs.map((v) => v.get()));
+            for (const binding of animationSet.skeletons) {
+              const rig = binding.get()?.rig;
+              if (rig) {
+                rigs.add(rig);
+              }
+            }
+            value.object = [...rigs];
+          },
+          set(this: SceneNode, value) {
+            const animationSet = this.animationSet;
+            animationSet.rigs.forEach((v) => v.dispose());
+            animationSet.rigs.splice(0, animationSet.rigs.length);
+            animationSet.rigs.push(...(value.object as any[]).map((v) => new DRef(v)));
+          }
+        },
+        {
+          name: 'Skeletons',
+          description: 'Skin bindings used by the node animations',
+          type: 'object_array',
+          phase: 2,
           isHidden() {
             return true;
           },
@@ -524,13 +552,19 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
             animationSet.skeletons.forEach((v) => v.dispose());
             animationSet.skeletons.splice(0, animationSet.skeletons.length);
             animationSet.skeletons.push(...(value.object as any[]).map((v) => new DRef(v)));
+            for (const binding of animationSet.skeletons) {
+              const rig = binding.get()?.rig;
+              if (rig && !animationSet.rigs.some((ref) => ref.get() === rig)) {
+                animationSet.rigs.push(new DRef(rig));
+              }
+            }
           }
         },
         {
           name: 'JointDynamics',
           description: 'Joint dynamics systems which affect this object or children',
           type: 'object_array',
-          phase: 2,
+          phase: 3,
           readonly: true,
           options: {
             objectTypes: [JointDynamicsModifier]
@@ -538,10 +572,17 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           getDefaultValue(this: SceneNode) {
             const animationSet = this.animationSet;
             const jdm: JointDynamicsModifier[] = [];
-            for (const sk of animationSet.skeletons) {
-              for (const mod of sk.get()!.modifiers) {
+            const rigs = new Set(animationSet.rigs.map((v) => v.get()));
+            for (const binding of animationSet.skeletons) {
+              const rig = binding.get()?.rig;
+              if (rig) {
+                rigs.add(rig);
+              }
+            }
+            for (const sk of rigs) {
+              for (const mod of sk!.modifiers) {
                 if (mod instanceof JointDynamicsModifier) {
-                  setJointDynamicsModifierSkeleton(mod, sk.get()!);
+                  setJointDynamicsModifierSkeleton(mod, sk!);
                   jdm.push(mod);
                 }
               }
@@ -551,10 +592,17 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           get(this: SceneNode, value) {
             const animationSet = this.animationSet;
             const jdm: JointDynamicsModifier[] = [];
-            for (const sk of animationSet.skeletons) {
-              for (const mod of sk.get()!.modifiers) {
+            const rigs = new Set(animationSet.rigs.map((v) => v.get()));
+            for (const binding of animationSet.skeletons) {
+              const rig = binding.get()?.rig;
+              if (rig) {
+                rigs.add(rig);
+              }
+            }
+            for (const sk of rigs) {
+              for (const mod of sk!.modifiers) {
                 if (mod instanceof JointDynamicsModifier) {
-                  setJointDynamicsModifierSkeleton(mod, sk.get()!);
+                  setJointDynamicsModifierSkeleton(mod, sk!);
                   jdm.push(mod);
                 }
               }
@@ -563,7 +611,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           },
           set(this: SceneNode, value) {
             const animationSet = this.animationSet;
-            for (const sk of animationSet.skeletons) {
+            for (const sk of animationSet.rigs) {
               const modifiers = sk.get()!.modifiers;
               for (let i = modifiers.length - 1; i >= 0; i--) {
                 if (modifiers[i] instanceof JointDynamicsModifier) {
@@ -576,12 +624,12 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
                 continue;
               }
               const skeleton = getJointDynamicsModifierSkeleton(mod);
-              if (skeleton && animationSet.skeletons.some((sk) => sk.get() === skeleton)) {
+              if (skeleton && animationSet.rigs.some((sk) => sk.get() === skeleton)) {
                 skeleton.modifiers.push(mod);
                 setJointDynamicsModifierSkeleton(mod, skeleton);
                 continue;
               }
-              for (const sk of animationSet.skeletons) {
+              for (const sk of animationSet.rigs) {
                 if (
                   mod.jointDynamicsSystem.chainConfig.chains.every((chain) =>
                     sk.get()!.joints.includes(chain.start)
@@ -597,7 +645,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           delete(this: SceneNode, index) {
             const animationSet = this.animationSet;
             let n = 0;
-            for (const sk of animationSet.skeletons) {
+            for (const sk of animationSet.rigs) {
               for (const mod of sk.get()!.modifiers) {
                 if (mod instanceof JointDynamicsModifier) {
                   if (n === index) {

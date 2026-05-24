@@ -59,7 +59,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
   /** @internal */
   protected _animatedBoundingBox: Nullable<BoundingBox>;
   /** @internal */
-  protected _skeletonName: string;
+  protected _skinBindingName: string;
   /** @internal */
   protected _boneMatrices: DRef<Texture2D>;
   /** @internal */
@@ -107,7 +107,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     this.primitive = primitive ?? null;
     this.material = material ?? Mesh._getDefaultMaterial();
     this._suspendSkinning = false;
-    this._skeletonName = '';
+    this._skinBindingName = '';
     this._renderBundle = {};
     this._useRenderBundle = true;
     this._materialChangeTag = null;
@@ -136,11 +136,17 @@ export class Mesh extends MeshBase implements BatchDrawable {
     this._pickTarget = { node, label };
   }
   get skeletonName() {
-    return this._skeletonName;
+    return this._skinBindingName;
   }
   set skeletonName(name) {
-    if (name !== this._skeletonName) {
-      this._skeletonName = name;
+    this.skinBindingName = name;
+  }
+  get skinBindingName() {
+    return this._skinBindingName;
+  }
+  set skinBindingName(name) {
+    if (name !== this._skinBindingName) {
+      this._skinBindingName = name;
       this.updateSkeletonState();
     }
   }
@@ -478,16 +484,16 @@ export class Mesh extends MeshBase implements BatchDrawable {
       this.setAnimatedBoundingBox(null);
       return;
     }
-    const skeleton = this._skeletonName && this.findSkeletonById(this._skeletonName);
-    if (skeleton) {
-      this.setBoneMatrices(skeleton.jointTexture);
-      skeleton.computeBoundingBox(this._skinnedBoundingInfo!, this.invWorldMatrix);
+    const binding = this._skinBindingName && this.findSkinBindingById(this._skinBindingName);
+    if (binding) {
+      this.setBoneMatrices(binding.jointTexture);
+      binding.computeBoundingBox(this._skinnedBoundingInfo!, this.invWorldMatrix);
       this.setAnimatedBoundingBox(this._skinnedBoundingInfo!.boundingBox);
     } else {
       this.setBoneMatrices(null);
       this.setAnimatedBoundingBox(null);
     }
-    if (this._skeletonName) {
+    if (this._skinBindingName) {
       this.scene!.queueUpdateNode(this);
     }
   }

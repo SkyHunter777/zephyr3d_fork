@@ -8,7 +8,7 @@ import { NodeRotationTrack } from './rotationtrack';
 import { NodeEulerRotationTrack } from './eulerrotationtrack';
 import { NodeTranslationTrack } from './translationtrack';
 import { NodeScaleTrack } from './scaletrack';
-import { HumanoidBodyRig, Skeleton } from './skeleton';
+import { HumanoidBodyRig, SkeletonRig, SkinBinding } from './skeleton';
 
 /**
  * Options for playing an animation.
@@ -87,8 +87,8 @@ function cloneInterpolator(src: Interpolator): Interpolator {
 }
 
 function createJointRetargetRemap(
-  srcSkeleton: Skeleton,
-  dstSkeleton: Skeleton,
+  srcSkeleton: SkeletonRig,
+  dstSkeleton: SkeletonRig,
   srcJoint: SceneNode,
   dstJoint: SceneNode,
   translationRotation?: Quaternion
@@ -287,8 +287,8 @@ function sampleRotationTrack(
 
 function bakeHumanoidRotationTracks(
   sourceClip: AnimationClip,
-  srcSkeleton: Skeleton,
-  dstSkeleton: Skeleton,
+  srcSkeleton: SkeletonRig,
+  dstSkeleton: SkeletonRig,
   srcRootRotation: Quaternion,
   dstRootRotation: Quaternion,
   dstClip: AnimationClip,
@@ -479,11 +479,15 @@ export class AnimationSet extends Disposable implements IDisposable {
   /** @internal */
   private _animations: Partial<Record<string, AnimationClip>>;
   /** @internal */
-  private _skeletons: DRef<Skeleton>[];
+  private _skeletons: DRef<SkinBinding>[];
+  /** @internal */
+  private _rigs: DRef<SkeletonRig>[];
   /** @internal */
   private readonly _activeTracks: Map<object, Map<unknown, AnimationTrack[]>>;
   /** @internal */
-  private readonly _activeSkeletons: Map<Skeleton, number>;
+  private readonly _activeSkinBindings: Map<SkinBinding, number>;
+  /** @internal */
+  private readonly _activeRigs: Map<SkeletonRig, number>;
   /** @internal */
   private readonly _activeAnimations: Map<
     AnimationClip,
@@ -510,9 +514,11 @@ export class AnimationSet extends Disposable implements IDisposable {
     this._model = model;
     this._animations = {};
     this._activeTracks = new Map();
-    this._activeSkeletons = new Map();
+    this._activeSkinBindings = new Map();
+    this._activeRigs = new Map();
     this._activeAnimations = new Map();
     this._skeletons = [];
+    this._rigs = [];
   }
   /**
    * The model (SceneNode) controlled by this animation set.
@@ -531,6 +537,36 @@ export class AnimationSet extends Disposable implements IDisposable {
    */
   get skeletons() {
     return this._skeletons;
+  }
+  /**
+   * The shared rigs used by animations in this set.
+   */
+  get rigs() {
+    return this._rigs;
+  }
+  /**
+   * Per-skin bindings used by skinned meshes in this set.
+   */
+  get skinBindings() {
+    return this._skeletons;
+  }
+  private resolveRigByAnimationBindingId(id: string): SkeletonRig | null {
+    return this._model.findSkeletonRigById(id) ?? this._model.findSkinBindingById(id)?.rig ?? null;
+  }
+  private resolveClipRig(clip: AnimationClip): SkeletonRig | null {
+    let rig: SkeletonRig | null = null;
+    for (const id of clip.skeletons) {
+      const nextRig = this.resolveRigByAnimationBindingId(id);
+      if (!nextRig) {
+        continue;
+      }
+      if (!rig) {
+        rig = nextRig;
+      } else if (rig !== nextRig) {
+        return null;
+      }
+    }
+    return rig;
   }
   /**
    * Retrieve an animation clip by name.
@@ -590,7 +626,7 @@ export class AnimationSet extends Disposable implements IDisposable {
    * - Enforce repeat limits and apply fade-out termination if configured.
    * - For each animated target, blend active tracks (weighted by clip weight × fade-in × fade-out)
    *   and apply the resulting state to the target.
-   * - Apply all active skeletons to update skinning transforms.
+   * - Apply shared rig modifiers once, then update skin binding palettes.
    *
    * @param deltaInSeconds - Time step in seconds since last update.
    */
@@ -652,7 +688,10 @@ export class AnimationSet extends Disposable implements IDisposable {
         }
       });
     });
-    // Update skeletons
+    // Update rigs once before computing per-skin palettes.
+    this._rigs.forEach((v) => {
+      v.get()?.apply(deltaInSeconds);
+    });
     this._skeletons.forEach((v) => {
       v.get()?.apply(deltaInSeconds);
     });
@@ -755,15 +794,21 @@ export class AnimationSet extends Disposable implements IDisposable {
         }
       });
       ani.skeletons?.forEach((v, k) => {
-        const skeleton = this.model.findSkeletonById(k);
-        if (skeleton) {
-          const refcount = this._activeSkeletons.get(skeleton);
-          if (refcount) {
-            this._activeSkeletons.set(skeleton, refcount + 1);
-          } else {
-            this._activeSkeletons.set(skeleton, 1);
-          }
-          skeleton.playing = true;
+        const rig = this.model.findSkeletonRigById(k);
+        if (rig) {
+          const refcount = this._activeRigs.get(rig);
+          this._activeRigs.set(rig, refcount ? refcount + 1 : 1);
+          rig.playing = true;
+          return;
+        }
+        const binding = this.model.findSkinBindingById(k);
+        if (binding) {
+          const refcount = this._activeSkinBindings.get(binding);
+          this._activeSkinBindings.set(binding, refcount ? refcount + 1 : 1);
+          binding.playing = true;
+          const rigRefcount = this._activeRigs.get(binding.rig);
+          this._activeRigs.set(binding.rig, rigRefcount ? rigRefcount + 1 : 1);
+          binding.rig.playing = true;
         }
       });
     }
@@ -804,14 +849,32 @@ export class AnimationSet extends Disposable implements IDisposable {
           });
         });
         ani.skeletons?.forEach((v, k) => {
-          const skeleton = this.model.findSkeletonById(k);
-          if (skeleton) {
-            const refcount = this._activeSkeletons.get(skeleton)!;
+          const rig = this.model.findSkeletonRigById(k);
+          if (rig) {
+            const refcount = this._activeRigs.get(rig)!;
             if (refcount === 1) {
-              skeleton.reset();
-              this._activeSkeletons.delete(skeleton);
+              rig.reset();
+              this._activeRigs.delete(rig);
             } else {
-              this._activeSkeletons.set(skeleton, refcount - 1);
+              this._activeRigs.set(rig, refcount - 1);
+            }
+            return;
+          }
+          const binding = this.model.findSkinBindingById(k);
+          if (binding) {
+            const refcount = this._activeSkinBindings.get(binding)!;
+            if (refcount === 1) {
+              binding.reset();
+              this._activeSkinBindings.delete(binding);
+            } else {
+              this._activeSkinBindings.set(binding, refcount - 1);
+            }
+            const rigRefcount = this._activeRigs.get(binding.rig)!;
+            if (rigRefcount === 1) {
+              binding.rig.reset();
+              this._activeRigs.delete(binding.rig);
+            } else {
+              this._activeRigs.set(binding.rig, rigRefcount - 1);
             }
           }
         });
@@ -847,16 +910,12 @@ export class AnimationSet extends Disposable implements IDisposable {
       return null;
     }
 
-    if (sourceClip.skeletons.size !== 1) {
-      console.error(
-        `copyHumanoidAnimationFrom: source animation clip must be affected by exactly one skeleton`
-      );
-      return null;
-    }
-    const srcSkeletonId = [...sourceClip.skeletons][0];
-    const srcSkeleton = Skeleton.findSkeletonById(srcSkeletonId);
+    const srcSkeletonId = [...sourceClip.skeletons][0] ?? '';
+    const srcSkeleton = sourceSet.resolveClipRig(sourceClip);
     if (!srcSkeleton) {
-      console.error(`copyHumanoidAnimationFrom: source skeleton '${srcSkeletonId}' not found`);
+      console.error(
+        `copyHumanoidAnimationFrom: source animation clip must resolve to exactly one humanoid rig`
+      );
       return null;
     }
 
@@ -874,7 +933,7 @@ export class AnimationSet extends Disposable implements IDisposable {
     let srcJointsFiltered: SceneNode[] = [];
     let dstJointsFiltered: SceneNode[] = [];
 
-    const dstSkeleton = this._skeletons
+    const dstSkeleton = this._rigs
       .map((ref) => ref.get())
       .find((sk) => {
         if (!sk) {
@@ -952,7 +1011,7 @@ export class AnimationSet extends Disposable implements IDisposable {
     function computeHipsParentChainRotation(
       hipsNode: SceneNode,
       modelRoot: SceneNode,
-      skeleton: Skeleton
+      skeleton: SkeletonRig
     ): Quaternion {
       const result = Quaternion.identity();
       const jointSet = new Set(skeleton.joints);
@@ -1085,14 +1144,10 @@ export class AnimationSet extends Disposable implements IDisposable {
       return null;
     }
 
-    if (sourceClip.skeletons.size !== 1) {
-      console.error(`copyAnimationFrom: source animation clip must be affected by exactly one skeleton`);
-      return null;
-    }
-    const srcSkeletonId = [...sourceClip.skeletons][0];
-    const srcSkeleton = Skeleton.findSkeletonById(srcSkeletonId);
+    const srcSkeletonId = [...sourceClip.skeletons][0] ?? '';
+    const srcSkeleton = sourceSet.resolveClipRig(sourceClip);
     if (!srcSkeleton) {
-      console.error(`copyAnimationFrom: source skeleton '${srcSkeletonId}' not found`);
+      console.error(`copyAnimationFrom: source animation clip must resolve to exactly one rig`);
       return null;
     }
     const nodeMap = new Map<object, SceneNode>();
@@ -1111,7 +1166,7 @@ export class AnimationSet extends Disposable implements IDisposable {
       return null;
     }
     let dstJointsFiltered: SceneNode[] = [];
-    const dstSkeleton = this._skeletons
+    const dstSkeleton = this._rigs
       .map((ref) => ref.get())
       .find((sk) => {
         if (!sk) {
@@ -1253,7 +1308,8 @@ export class AnimationSet extends Disposable implements IDisposable {
     }
     this._animations = {};
     this._activeAnimations.clear();
-    this._activeSkeletons.clear();
+    this._activeSkinBindings.clear();
+    this._activeRigs.clear();
     this._activeTracks.clear();
   }
 }

@@ -10,7 +10,7 @@ import type { IDisposable, Immutable, Nullable, Quaternion } from '@zephyr3d/bas
 import { Disposable, DRef, makeObservable, randomUUID } from '@zephyr3d/base';
 import { Matrix4x4, ObservableQuaternion, ObservableVector3, Vector3, Vector4 } from '@zephyr3d/base';
 import type { ParticleSystem } from './particlesys';
-import type { Skeleton } from '../animation';
+import type { SkeletonRig, SkinBinding } from '../animation';
 import { AnimationSet } from '../animation/animationset';
 import type { SharedModel } from '../asset';
 import type { Water } from './water';
@@ -762,14 +762,36 @@ export class SceneNode
    * @returns The first matchign node, or `null` if not found.
    */
   findSkeletonById(id: string) {
+    return this.findSkinBindingById(id);
+  }
+  /**
+   * Finds a skin binding by its persistent ID.
+   * @param id - Persistent identifier to match against `SkinBinding.persistentId`.
+   * @returns The first matching binding, or `null` if not found.
+   */
+  findSkinBindingById(id: string) {
     const prefabNode = this.getPrefabNode() ?? this;
-    let sk: Nullable<DRef<Skeleton>> = null;
+    let sk: Nullable<DRef<SkinBinding>> = null;
     prefabNode.iterate((node) => {
       sk = node.animationSet.skeletons.find((s) => s.get()!.persistentId === id) ?? null;
       return !!sk;
     });
     // avoid ts2339 compilation error (maybe a typescript bug?)
-    return (sk as Nullable<DRef<Skeleton>>)?.get() ?? null;
+    return (sk as Nullable<DRef<SkinBinding>>)?.get() ?? null;
+  }
+  /**
+   * Finds a shared skeleton rig by its persistent ID.
+   * @param id - Persistent identifier to match against `SkeletonRig.persistentId`.
+   * @returns The first matching rig, or `null` if not found.
+   */
+  findSkeletonRigById(id: string) {
+    const prefabNode = this.getPrefabNode() ?? this;
+    let rig: Nullable<DRef<SkeletonRig>> = null;
+    prefabNode.iterate((node) => {
+      rig = node.animationSet.rigs.find((s) => s.get()!.persistentId === id) ?? null;
+      return !!rig;
+    });
+    return (rig as Nullable<DRef<SkeletonRig>>)?.get() ?? null;
   }
   /**
    * Finds a scene node by name.

@@ -53,7 +53,9 @@ import {
   getNodeScaleTrackClass,
   getNodeTranslationTrackClass,
   getPropTrackClass,
-  getSkeletonClass
+  getSkeletonClass,
+  getSkeletonRigClass,
+  getSkinBindingClass
 } from './scene/animation';
 import type { Scene } from '../../scene';
 import { SceneNode } from '../../scene';
@@ -274,6 +276,8 @@ export class ResourceManager {
         getScriptAttachmentClass(),
         getAABBClass(),
         getInterpolatorClass(),
+        getSkeletonRigClass(),
+        getSkinBindingClass(),
         getSkeletonClass(),
         getJointDynamicsModifierClass(),
         getAnimationClass(this),

@@ -1,5 +1,5 @@
 import { SkeletonModifier } from './skeleton_modifier';
-import type { Skeleton } from './skeleton';
+import type { SkeletonRig } from './skeleton';
 import type { JointDynamicsSystem } from './joint_dynamics/joint_dynamics_system';
 
 /**
@@ -33,7 +33,7 @@ export class JointDynamicsModifier extends SkeletonModifier {
   /**
    * Apply spring physics to skeleton joints.
    */
-  apply(_skeleton: Skeleton, deltaTime: number): void {
+  apply(_skeleton: SkeletonRig, deltaTime: number): void {
     if (!this._enabled || this.weight <= 0) {
       return;
     }

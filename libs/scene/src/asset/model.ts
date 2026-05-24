@@ -26,7 +26,7 @@ import type { ControllerConfig } from '../animation/joint_dynamics/controller';
 import type { ResourceManager } from '../utility/serialization/manager';
 import type { Scene } from '../scene/scene';
 import { SceneNode } from '../scene/scene_node';
-import { Skeleton } from '../animation/skeleton';
+import { SkeletonRig, SkinBinding } from '../animation/skeleton';
 import type { FixedGeometryCacheFrame } from '../animation/fixed_geometry_cache_track';
 import type { PCAGeometryCacheTrackData } from '../animation';
 import {
@@ -897,7 +897,7 @@ export class SharedModel extends Disposable {
     }
   }
   createJointDynamics(rootNode: SceneNode, nodeMap: Map<AssetHierarchyNode, SceneNode>) {
-    if (rootNode.animationSet.skeletons.length === 0) {
+    if (rootNode.animationSet.rigs.length === 0) {
       return;
     }
     for (const jd of this._jointDynamicsSpringBones) {
@@ -913,11 +913,11 @@ export class SharedModel extends Disposable {
           }
           return true;
         });
-      const skeletons = rootNode.animationSet.skeletons.filter((ref) => {
+      const rigs = rootNode.animationSet.rigs.filter((ref) => {
         const joints = ref.get()!.joints;
         return chains.every((chain) => joints.includes(chain.start));
       });
-      for (const skeleton of skeletons) {
+      for (const rig of rigs) {
         const system = new JointDynamicsSystem(
           {
             chainConfig: {
@@ -931,7 +931,7 @@ export class SharedModel extends Disposable {
           []
         );
         const modifier = new JointDynamicsModifier(system);
-        skeleton.get()!.modifiers.push(modifier);
+        rig.get()!.modifiers.push(modifier);
       }
     }
   }
@@ -950,7 +950,7 @@ export class SharedModel extends Disposable {
       const assetScene = this.scenes[i];
       const skeletonMeshMap: Map<
         AssetSkeleton,
-        { mesh: Mesh[]; bounding: AssetSubMeshData[]; skeleton?: Skeleton }
+        { mesh: Mesh[]; bounding: AssetSubMeshData[]; binding?: SkinBinding }
       > = new Map();
       for (let k = 0; k < assetScene.rootNodes.length; k++) {
         await this.setAssetNodeToSceneNode(
@@ -976,23 +976,28 @@ export class SharedModel extends Disposable {
             });
           }
         }
+        const rigMap = new Map<string, SkeletonRig>();
         for (const v of skeletonMeshMap) {
           const sk = v[0];
-          const skeleton = new Skeleton(
-            sk.joints.map((val) => {
+          const joints = sk.joints.map((val) => {
               const node = nodeMap.get(val)!;
               node.jointTypeT = 'static';
               node.jointTypeS = 'static';
               node.jointTypeR = 'static';
               return node;
-            }),
-            sk.inverseBindMatrices,
-            sk.bindPose
-          );
+            });
+          const rigKey = SkeletonRig.getRigKey(joints);
+          let rig = rigMap.get(rigKey);
+          if (!rig) {
+            rig = new SkeletonRig(joints, sk.bindPose);
+            rigMap.set(rigKey, rig);
+            group.animationSet.rigs.push(new DRef(rig));
+          }
+          const binding = new SkinBinding(rig, sk.inverseBindMatrices, joints);
           const nodes = skeletonMeshMap.get(sk);
           if (nodes) {
-            if (!nodes.skeleton) {
-              nodes.skeleton = skeleton;
+            if (!nodes.binding) {
+              nodes.binding = binding;
               for (let i = 0; i < nodes.mesh.length; i++) {
                 const mesh = nodes.mesh[i];
                 const v = {
@@ -1000,12 +1005,12 @@ export class SharedModel extends Disposable {
                   blendIndices: nodes.bounding[i].rawBlendIndices!,
                   weights: nodes.bounding[i].rawJointWeights!
                 };
-                mesh.setSkinnedBoundingInfo(nodes.skeleton.getBoundingInfo(v));
-                mesh.skeletonName = nodes.skeleton.persistentId;
+                mesh.setSkinnedBoundingInfo(nodes.binding.getBoundingInfo(v));
+                mesh.skeletonName = nodes.binding.persistentId;
               }
             }
           }
-          group.animationSet.skeletons.push(new DRef(nodes!.skeleton));
+          group.animationSet.skeletons.push(new DRef(nodes!.binding));
         }
       }
       if (saveAnimations) {
@@ -1027,7 +1032,7 @@ export class SharedModel extends Disposable {
           for (const sk of animationData.skeletons) {
             const nodes = skeletonMeshMap.get(sk);
             if (nodes) {
-              animation.addSkeleton(nodes.skeleton!.persistentId);
+              animation.addSkeleton(nodes.binding!.rig.persistentId);
             }
           }
           for (const track of animationData.tracks) {

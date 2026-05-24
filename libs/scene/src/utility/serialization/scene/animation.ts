@@ -1,8 +1,8 @@
 import type { InterpolationMode, InterpolationTarget } from '@zephyr3d/base';
-import { AABB, InterpolatorScalar, Quaternion } from '@zephyr3d/base';
+import { AABB, DRef, InterpolatorScalar, Quaternion } from '@zephyr3d/base';
 import { base64ToUint8Array, Matrix4x4, uint8ArrayToBase64 } from '@zephyr3d/base';
 import { Interpolator, Vector3 } from '@zephyr3d/base';
-import { AnimationTrack, Skeleton } from '../../../animation';
+import { AnimationTrack, Skeleton, SkeletonRig, SkinBinding } from '../../../animation';
 import {
   AnimationClip,
   FixedGeometryCacheTrack,
@@ -65,7 +65,7 @@ type SerializedJointDynamicsModifier = {
   enabled?: boolean;
 };
 
-const jointDynamicsModifierSkeletons = new WeakMap<JointDynamicsModifier, Skeleton>();
+const jointDynamicsModifierSkeletons = new WeakMap<JointDynamicsModifier, SkeletonRig>();
 
 function vectorToArray(value: Vector3): number[] {
   return [value.x, value.y, value.z];
@@ -175,11 +175,11 @@ function findSerializedNode(root: SceneNode, id: string | undefined): SceneNode 
   return prefabNode.findNodeById(id) ?? root.scene?.findNodeById(id) ?? null;
 }
 
-export function setJointDynamicsModifierSkeleton(modifier: JointDynamicsModifier, skeleton: Skeleton): void {
+export function setJointDynamicsModifierSkeleton(modifier: JointDynamicsModifier, skeleton: SkeletonRig): void {
   jointDynamicsModifierSkeletons.set(modifier, skeleton);
 }
 
-export function getJointDynamicsModifierSkeleton(modifier: JointDynamicsModifier): Skeleton | null {
+export function getJointDynamicsModifierSkeleton(modifier: JointDynamicsModifier): SkeletonRig | null {
   return jointDynamicsModifierSkeletons.get(modifier) ?? null;
 }
 
@@ -406,7 +406,7 @@ export function getJointDynamicsModifierClass(): SerializableClass {
     ctor: JointDynamicsModifier,
     name: 'JointDynamicsModifier',
     createFunc(ctx: SceneNode, init: SerializedJointDynamicsModifier) {
-      const skeleton = ctx.findSkeletonById(init.skeleton);
+      const skeleton = ctx.findSkeletonRigById(init.skeleton) ?? ctx.findSkeletonById(init.skeleton)?.rig ?? null;
       const systemRoot = findSerializedNode(ctx, init.systemRoot);
       if (!skeleton || !systemRoot) {
         return { obj: null, loadProps: false };
@@ -1667,7 +1667,17 @@ export function getSkeletonClass(): SerializableClass {
           });
         }
       }
-      const skeleton = new Skeleton(joints, inverseBindMatrices, bindPose);
+      let rig =
+        (ctx.animationSet.rigs
+          .map((ref) => ref.get())
+          .find(
+            (item) => !!item && SkeletonRig.getRigKey(item.joints) === SkeletonRig.getRigKey(joints)
+          ) as SkeletonRig | undefined) ?? null;
+      if (!rig) {
+        rig = new SkeletonRig(joints, bindPose);
+        ctx.animationSet.rigs.push(new DRef(rig));
+      }
+      const skeleton = new SkinBinding(rig, inverseBindMatrices, joints);
       skeleton.persistentId = init.id;
       return {
         obj: skeleton,
@@ -1685,6 +1695,138 @@ export function getSkeletonClass(): SerializableClass {
         joints: obj.joints.map((joint) => joint.persistentId),
         inverseBindMatrices: uint8ArrayToBase64(new Uint8Array(new Float32Array(inverseBindMatrices).buffer)),
         bindPose: uint8ArrayToBase64(new Uint8Array(new Float32Array(bindPose).buffer)),
+        id: obj.persistentId
+      };
+    },
+    getProps() {
+      return [];
+    }
+  };
+}
+
+/** @internal */
+export function getSkeletonRigClass(): SerializableClass {
+  return {
+    ctor: SkeletonRig,
+    name: 'SkeletonRig',
+    createFunc(
+      ctx: SceneNode,
+      init: {
+        joints: string[];
+        bindPoseMatrices: string;
+        bindPose: string;
+        id: string;
+      }
+    ) {
+      const prefabNode = ctx.getPrefabNode() ?? ctx;
+      const joints = init.joints
+        .map((id) => prefabNode.findNodeById(id)!)
+        .map((node) => {
+          node!.jointTypeT = 'static';
+          node!.jointTypeS = 'static';
+          node!.jointTypeR = 'static';
+          return node;
+        });
+      const bindPoseArray = new Float32Array(
+        base64ToUint8Array(init.bindPose ?? init.bindPoseMatrices).buffer
+      );
+      const bindPose: { rotation: Quaternion; scale: Vector3; position: Vector3 }[] = [];
+      for (let i = 0; i < joints.length; i++) {
+        if (!init.bindPose) {
+          const matrix = new Matrix4x4(bindPoseArray.slice(i * 16, i * 16 + 16));
+          const trs = {
+            position: new Vector3(),
+            rotation: new Quaternion(),
+            scale: new Vector3()
+          };
+          matrix.decompose(trs.scale, trs.rotation, trs.position);
+          bindPose.push(trs);
+        } else {
+          bindPose.push({
+            position: new Vector3(
+              bindPoseArray[i * 10 + 0],
+              bindPoseArray[i * 10 + 1],
+              bindPoseArray[i * 10 + 2]
+            ),
+            rotation: new Quaternion(
+              bindPoseArray[i * 10 + 3],
+              bindPoseArray[i * 10 + 4],
+              bindPoseArray[i * 10 + 5],
+              bindPoseArray[i * 10 + 6]
+            ),
+            scale: new Vector3(
+              bindPoseArray[i * 10 + 7],
+              bindPoseArray[i * 10 + 8],
+              bindPoseArray[i * 10 + 9]
+            )
+          });
+        }
+      }
+      const rig = new SkeletonRig(joints, bindPose);
+      rig.persistentId = init.id;
+      return {
+        obj: rig,
+        loadProps: false
+      };
+    },
+    getInitParams(obj: SkeletonRig) {
+      const bindPose: number[] = obj.bindPose
+        .map((v) => [...v.position, ...v.rotation, ...v.scale])
+        .reduce((a, b) => [...a, ...b], []);
+      return {
+        joints: obj.joints.map((joint) => joint.persistentId),
+        bindPose: uint8ArrayToBase64(new Uint8Array(new Float32Array(bindPose).buffer)),
+        id: obj.persistentId
+      };
+    },
+    getProps() {
+      return [];
+    }
+  };
+}
+
+/** @internal */
+export function getSkinBindingClass(): SerializableClass {
+  return {
+    ctor: SkinBinding,
+    name: 'SkinBinding',
+    createFunc(
+      ctx: SceneNode,
+      init: {
+        rig: string;
+        joints?: string[];
+        inverseBindMatrices: string;
+        id: string;
+      }
+    ) {
+      const rig = ctx.findSkeletonRigById(init.rig);
+      if (!rig) {
+        throw new Error(`Deserialize SkinBinding failed: skeleton rig '${init.rig}' not found`);
+      }
+      const prefabNode = ctx.getPrefabNode() ?? ctx;
+      const joints = (init.joints ?? rig.joints.map((joint) => joint.persistentId))
+        .map((id) => prefabNode.findNodeById(id)!)
+        .filter((node): node is SceneNode => !!node);
+      const inverseBindMatricesArray = new Float32Array(base64ToUint8Array(init.inverseBindMatrices).buffer);
+      const inverseBindMatrices: Matrix4x4[] = [];
+      for (let i = 0; i < joints.length; i++) {
+        inverseBindMatrices.push(new Matrix4x4(inverseBindMatricesArray.slice(i * 16, i * 16 + 16)));
+      }
+      const binding = new SkinBinding(rig, inverseBindMatrices, joints);
+      binding.persistentId = init.id;
+      return {
+        obj: binding,
+        loadProps: false
+      };
+    },
+    getInitParams(obj: SkinBinding) {
+      const inverseBindMatrices: number[] = obj.inverseBindMatrices
+        .map((v) => [...v])
+        .reduce((a, b) => [...a, ...b], []);
+      return {
+        rig: obj.rig.persistentId,
+        joints: obj.joints.map((joint) => joint.persistentId),
+        inverseBindMatrices: uint8ArrayToBase64(new Uint8Array(new Float32Array(inverseBindMatrices).buffer)),
         id: obj.persistentId
       };
     },
@@ -1752,14 +1894,33 @@ export function getAnimationClass(manager: ResourceManager): SerializableClass {
           }
         },
         {
-          name: 'Skeletons',
-          description: 'Skeleton references used by this animation clip',
+          name: 'Rigs',
+          description: 'Rig references used by this animation clip',
           type: 'object',
           isHidden() {
             return true;
           },
           get(this: AnimationClip, value) {
             value.object[0] = [...this.skeletons];
+          },
+          set(this: AnimationClip, value) {
+            if (!this.skeletons) {
+              this.skeletons = new Set();
+            }
+            for (const val of (value.object[0] as string[]) ?? []) {
+              this.skeletons.add(val);
+            }
+          }
+        },
+        {
+          name: 'Skeletons',
+          description: 'Legacy skeleton references used by this animation clip',
+          type: 'object',
+          isHidden() {
+            return true;
+          },
+          get(this: AnimationClip, value) {
+            value.object[0] = [];
           },
           set(this: AnimationClip, value) {
             if (!this.skeletons) {

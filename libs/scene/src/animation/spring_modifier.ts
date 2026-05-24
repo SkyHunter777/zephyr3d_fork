@@ -1,5 +1,5 @@
 import { SkeletonModifier } from './skeleton_modifier';
-import type { Skeleton } from './skeleton';
+import type { SkeletonRig } from './skeleton';
 import type { SpringSystem } from './spring/spring_system';
 
 /**
@@ -38,7 +38,7 @@ export class SpringModifier extends SkeletonModifier {
   /**
    * Apply spring physics to skeleton joints.
    */
-  apply(_skeleton: Skeleton, deltaTime: number): void {
+  apply(_skeleton: SkeletonRig, deltaTime: number): void {
     if (!this._enabled || this._weight <= 0) {
       return;
     }

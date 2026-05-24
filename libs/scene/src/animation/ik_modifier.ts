@@ -1,5 +1,5 @@
 import { SkeletonModifier } from './skeleton_modifier';
-import type { Skeleton } from './skeleton';
+import type { SkeletonRig } from './skeleton';
 import type { IKSolver } from './ik/ik_solver';
 import type { Vector3 } from '@zephyr3d/base';
 
@@ -56,7 +56,7 @@ export class IKModifier<Solver extends IKSolver = IKSolver> extends SkeletonModi
   /**
    * Apply IK solving to skeleton joints.
    */
-  apply(_skeleton: Skeleton, _deltaTime: number): void {
+  apply(_skeleton: SkeletonRig, _deltaTime: number): void {
     if (!this._enabled || this._weight <= 0) {
       return;
     }

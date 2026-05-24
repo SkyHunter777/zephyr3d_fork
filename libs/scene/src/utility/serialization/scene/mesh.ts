@@ -74,17 +74,33 @@ export function getMeshClass(): SerializableClass {
           }
         },
         {
-          name: 'Skeleton',
-          description: 'Persistent ID of the skeleton bound to this mesh',
+          name: 'SkinBinding',
+          description: 'Persistent ID of the skin binding bound to this mesh',
           type: 'string',
           isHidden() {
             return false;
           },
           get(this: Mesh, value) {
-            value.str[0] = this.skeletonName;
+            value.str[0] = this.skinBindingName;
           },
           set(this: Mesh, value) {
-            this.skeletonName = value.str[0];
+            this.skinBindingName = value.str[0];
+          }
+        },
+        {
+          name: 'Skeleton',
+          description: 'Legacy persistent ID of the skin binding bound to this mesh',
+          type: 'string',
+          isHidden() {
+            return true;
+          },
+          get(this: Mesh, value) {
+            value.str[0] = '';
+          },
+          set(this: Mesh, value) {
+            if (value.str[0]) {
+              this.skeletonName = value.str[0];
+            }
           }
         },
         {
