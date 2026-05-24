@@ -151,6 +151,36 @@ export interface JointDynamicsGrabberHandle {
 }
 
 /**
+ * Serializable snapshot of a runtime collider.
+ * @public
+ */
+export interface JointDynamicsColliderSnapshot {
+  r: ColliderR;
+  transform: unknown;
+  enabled: boolean;
+}
+
+/**
+ * Serializable snapshot of a runtime flat plane.
+ * @public
+ */
+export interface JointDynamicsFlatPlaneSnapshot {
+  up: Vector3;
+  position: Vector3;
+  enabled: boolean;
+}
+
+/**
+ * Serializable snapshot of a runtime grabber.
+ * @public
+ */
+export interface JointDynamicsGrabberSnapshot {
+  r: GrabberR;
+  transform: unknown;
+  enabled: boolean;
+}
+
+/**
  * High-level controller for joint dynamics simulation.
  *
  * This class manages the physics simulation for a hierarchy of bones, including constraints,
@@ -469,6 +499,39 @@ export class JointDynamicsSystemController {
    */
   getConfig(): ControllerConfig {
     return this._cloneControllerConfig(this._config);
+  }
+
+  /**
+   * Returns detached collider snapshots for persistence.
+   */
+  getColliderSnapshots(): JointDynamicsColliderSnapshot[] {
+    return this._collidersR.map((r, index) => ({
+      r: { ...r },
+      transform: this._colliderTransforms[index]?.node ?? null,
+      enabled: this._collidersRW[index]?.enabled !== 0
+    }));
+  }
+
+  /**
+   * Returns detached flat-plane snapshots for persistence.
+   */
+  getFlatPlaneSnapshots(): JointDynamicsFlatPlaneSnapshot[] {
+    return this._flatPlaneAll.map((plane, index) => ({
+      up: plane.normal.clone(),
+      position: Vector3.scale(plane.normal, -plane.distance),
+      enabled: this._flatPlaneEnabled[index] ?? true
+    }));
+  }
+
+  /**
+   * Returns detached grabber snapshots for persistence.
+   */
+  getGrabberSnapshots(): JointDynamicsGrabberSnapshot[] {
+    return this._grabbersR.map((r, index) => ({
+      r: { ...r },
+      transform: this._grabberTransforms[index]?.node ?? null,
+      enabled: this._grabbersRW[index]?.enabled !== 0
+    }));
   }
 
   /**

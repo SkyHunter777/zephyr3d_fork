@@ -4,8 +4,11 @@ import { Quaternion } from '@zephyr3d/base';
 import { SceneNode } from '../../scene/scene_node';
 import type {
   ControllerConfig,
+  JointDynamicsColliderSnapshot,
   JointDynamicsColliderHandle,
+  JointDynamicsFlatPlaneSnapshot,
   JointDynamicsFlatPlaneHandle,
+  JointDynamicsGrabberSnapshot,
   JointDynamicsGrabberHandle
 } from './controller';
 import { JointDynamicsSystemController } from './controller';
@@ -13,7 +16,7 @@ import { ColliderForce, type BoneNode, type ColliderR, type GrabberR, type Trans
 
 const _quat = new Quaternion();
 
-const _defaultTA = createTransformAccess(new SceneNode(null));
+const _defaultTA = createTransformAccess(new SceneNode(null), false);
 
 /**
  * Create a transform adapter that lets the joint dynamics solver read from and write to a SceneNode.
@@ -23,8 +26,9 @@ const _defaultTA = createTransformAccess(new SceneNode(null));
  *
  * @public
  */
-export function createTransformAccess(obj: SceneNode): TransformAccess {
+export function createTransformAccess(obj: SceneNode, exposeNode = true): TransformAccess {
   return {
+    ...(exposeNode ? { node: obj } : {}),
     getWorldPosition(): Vector3 {
       return obj.getWorldPosition();
     },
@@ -113,6 +117,7 @@ export type JointDynamicSystemConfig = {
  */
 export class JointDynamicsSystem {
   private _controller: JointDynamicsSystemController;
+  private _chainConfig: JointChainConfig;
   /**
    * Create a joint dynamics system for one or more bone chains.
    *
@@ -131,6 +136,10 @@ export class JointDynamicsSystem {
     }[] = [],
     flatPlanes: { up: Vector3; position: Vector3 }[] = []
   ) {
+    this._chainConfig = {
+      systemRoot: config.chainConfig.systemRoot,
+      chains: config.chainConfig.chains.map((chain) => ({ start: chain.start, end: chain.end }))
+    };
     const rootPoints: BoneNode[] = [];
     const boneNodes: BoneNode[] = [];
     const pointTransforms: TransformAccess[] = [];
@@ -181,6 +190,37 @@ export class JointDynamicsSystem {
    */
   get controller(): JointDynamicsSystemController {
     return this._controller;
+  }
+
+  /**
+   * Get the node chain topology used to construct this system.
+   */
+  get chainConfig(): JointChainConfig {
+    return {
+      systemRoot: this._chainConfig.systemRoot,
+      chains: this._chainConfig.chains.map((chain) => ({ start: chain.start, end: chain.end }))
+    };
+  }
+
+  /**
+   * Returns detached collider snapshots for serialization.
+   */
+  getColliderSnapshots(): JointDynamicsColliderSnapshot[] {
+    return this._controller.getColliderSnapshots();
+  }
+
+  /**
+   * Returns detached flat-plane snapshots for serialization.
+   */
+  getFlatPlaneSnapshots(): JointDynamicsFlatPlaneSnapshot[] {
+    return this._controller.getFlatPlaneSnapshots();
+  }
+
+  /**
+   * Returns detached grabber snapshots for serialization.
+   */
+  getGrabberSnapshots(): JointDynamicsGrabberSnapshot[] {
+    return this._controller.getGrabberSnapshots();
   }
 
   /**

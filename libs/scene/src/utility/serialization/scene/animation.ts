@@ -1,11 +1,14 @@
 import type { InterpolationMode, InterpolationTarget } from '@zephyr3d/base';
-import { AABB, Quaternion } from '@zephyr3d/base';
+import { AABB, InterpolatorScalar, Quaternion } from '@zephyr3d/base';
 import { base64ToUint8Array, Matrix4x4, uint8ArrayToBase64 } from '@zephyr3d/base';
 import { Interpolator, Vector3 } from '@zephyr3d/base';
 import { AnimationTrack, Skeleton } from '../../../animation';
 import {
   AnimationClip,
   FixedGeometryCacheTrack,
+  JointDynamicsModifier,
+  JointDynamicsSystem,
+  createTransformAccess,
   PCAGeometryCacheTrack,
   MorphTargetTrack,
   NodeEulerRotationTrack,
@@ -14,10 +17,291 @@ import {
   NodeTranslationTrack,
   PropertyTrack
 } from '../../../animation';
+import type { ControllerConfig } from '../../../animation/joint_dynamics/controller';
+import type { ColliderR, GrabberR, JointDynamicSystemConfig } from '../../../animation/joint_dynamics';
 import type { ResourceManager } from '../manager';
 import { defineProps, type SerializableClass } from '../types';
 import { SceneNode } from '../../../scene';
 import { BoundingBox } from '../../bounding_volume';
+
+type SerializedScalarCurve = {
+  mode: InterpolationMode;
+  inputs: number[];
+  outputs: number[];
+};
+
+type SerializedControllerConfig = Partial<Omit<ControllerConfig, 'gravity' | 'windForce' | 'curves'>> & {
+  gravity?: number[];
+  windForce?: number[];
+  curves?: Record<string, SerializedScalarCurve>;
+};
+
+type SerializedJointDynamicsCollider = {
+  collider: ColliderR;
+  transform?: string;
+  enabled?: boolean;
+};
+
+type SerializedJointDynamicsFlatPlane = {
+  up: number[];
+  position: number[];
+  enabled?: boolean;
+};
+
+type SerializedJointDynamicsGrabber = {
+  grabber: GrabberR;
+  transform?: string;
+  enabled?: boolean;
+};
+
+type SerializedJointDynamicsModifier = {
+  skeleton: string;
+  systemRoot: string;
+  chains: { start: string; end: string }[];
+  controllerConfig?: SerializedControllerConfig;
+  colliders?: SerializedJointDynamicsCollider[];
+  flatPlanes?: SerializedJointDynamicsFlatPlane[];
+  grabbers?: SerializedJointDynamicsGrabber[];
+  enabled?: boolean;
+};
+
+const jointDynamicsModifierSkeletons = new WeakMap<JointDynamicsModifier, Skeleton>();
+
+function vectorToArray(value: Vector3): number[] {
+  return [value.x, value.y, value.z];
+}
+
+function vectorFromArray(value: number[] | undefined, defaultValue = Vector3.zero()): Vector3 {
+  return Array.isArray(value)
+    ? new Vector3(value[0] ?? 0, value[1] ?? 0, value[2] ?? 0)
+    : defaultValue.clone();
+}
+
+function serializeScalarCurve(value: InterpolatorScalar): SerializedScalarCurve {
+  return {
+    mode: value.mode,
+    inputs: [...value.inputs],
+    outputs: [...value.outputs]
+  };
+}
+
+function deserializeScalarCurve(value: SerializedScalarCurve): InterpolatorScalar {
+  return new InterpolatorScalar(
+    value?.mode ?? 'step',
+    new Float32Array(value?.inputs ?? [0]),
+    new Float32Array(value?.outputs ?? [0])
+  );
+}
+
+function serializeControllerConfig(value: ControllerConfig): SerializedControllerConfig {
+  const curves: Record<string, SerializedScalarCurve> = {};
+  for (const [key, curve] of Object.entries(value.curves)) {
+    curves[key] = serializeScalarCurve(curve);
+  }
+  return {
+    gravity: vectorToArray(value.gravity),
+    windForce: vectorToArray(value.windForce),
+    relaxation: value.relaxation,
+    subSteps: value.subSteps,
+    rootSlideLimit: value.rootSlideLimit,
+    rootRotateLimit: value.rootRotateLimit,
+    constraintShrinkLimit: value.constraintShrinkLimit,
+    blendRatio: value.blendRatio,
+    stabilizationFrameRate: value.stabilizationFrameRate,
+    isFakeWave: value.isFakeWave,
+    fakeWaveSpeed: value.fakeWaveSpeed,
+    fakeWavePower: value.fakeWavePower,
+    enableSurfaceCollision: value.enableSurfaceCollision,
+    enableBroadPhase: value.enableBroadPhase,
+    preserveTwist: value.preserveTwist,
+    angleLimitConfig: { ...value.angleLimitConfig },
+    curves,
+    constraintOptions: { ...value.constraintOptions }
+  };
+}
+
+function deserializeControllerConfig(
+  value: SerializedControllerConfig | undefined
+): JointDynamicSystemConfig['controllerConfig'] {
+  if (!value) {
+    return undefined;
+  }
+  const curves = Object.fromEntries(
+    Object.entries(value.curves ?? {}).map(([key, curve]) => [key, deserializeScalarCurve(curve)])
+  ) as Partial<ControllerConfig['curves']>;
+  const config: JointDynamicSystemConfig['controllerConfig'] = {};
+  if (value.gravity) {
+    config.gravity = vectorFromArray(value.gravity, new Vector3(0, -9.8, 0));
+  }
+  if (value.windForce) {
+    config.windForce = vectorFromArray(value.windForce);
+  }
+  for (const key of [
+    'relaxation',
+    'subSteps',
+    'rootSlideLimit',
+    'rootRotateLimit',
+    'constraintShrinkLimit',
+    'blendRatio',
+    'stabilizationFrameRate',
+    'isFakeWave',
+    'fakeWaveSpeed',
+    'fakeWavePower',
+    'enableSurfaceCollision',
+    'enableBroadPhase',
+    'preserveTwist'
+  ] as const) {
+    if (value[key] !== undefined) {
+      config[key] = value[key] as never;
+    }
+  }
+  if (value.angleLimitConfig) {
+    config.angleLimitConfig = { ...value.angleLimitConfig };
+  }
+  if (Object.keys(curves).length > 0) {
+    config.curves = curves;
+  }
+  if (value.constraintOptions) {
+    config.constraintOptions = { ...value.constraintOptions };
+  }
+  return config;
+}
+
+function findSerializedNode(root: SceneNode, id: string | undefined): SceneNode | null {
+  if (!id) {
+    return null;
+  }
+  const prefabNode = root.getPrefabNode() ?? root;
+  return prefabNode.findNodeById(id) ?? root.scene?.findNodeById(id) ?? null;
+}
+
+export function setJointDynamicsModifierSkeleton(modifier: JointDynamicsModifier, skeleton: Skeleton): void {
+  jointDynamicsModifierSkeletons.set(modifier, skeleton);
+}
+
+export function getJointDynamicsModifierSkeleton(modifier: JointDynamicsModifier): Skeleton | null {
+  return jointDynamicsModifierSkeletons.get(modifier) ?? null;
+}
+
+/** @internal */
+export function getJointDynamicsModifierClass(): SerializableClass {
+  return {
+    ctor: JointDynamicsModifier,
+    name: 'JointDynamicsModifier',
+    createFunc(ctx: SceneNode, init: SerializedJointDynamicsModifier) {
+      const skeleton = ctx.findSkeletonById(init.skeleton);
+      const systemRoot = findSerializedNode(ctx, init.systemRoot);
+      if (!skeleton || !systemRoot) {
+        return { obj: null, loadProps: false };
+      }
+      const chains = (init.chains ?? [])
+        .map((chain) => {
+          const start = findSerializedNode(ctx, chain.start);
+          const end = findSerializedNode(ctx, chain.end);
+          return start && end ? { start, end } : null;
+        })
+        .filter((chain): chain is { start: SceneNode; end: SceneNode } => {
+          return !!chain && chain.start.isParentOf(chain.end);
+        });
+      if (chains.length === 0) {
+        return { obj: null, loadProps: false };
+      }
+      const serializedColliders = init.colliders ?? [];
+      const colliders: { r: ColliderR; transform: ReturnType<typeof createTransformAccess> }[] =
+        serializedColliders.map((item) => {
+          const transform = findSerializedNode(ctx, item.transform);
+          return {
+            r: { ...item.collider },
+            transform: transform
+              ? createTransformAccess(transform)
+              : createTransformAccess(new SceneNode(null), false)
+          };
+        });
+      const serializedGrabbers = init.grabbers ?? [];
+      const grabbers: {
+        r: GrabberR;
+        transform: ReturnType<typeof createTransformAccess>;
+        enabled: boolean;
+      }[] = serializedGrabbers.map((item) => {
+        const transform = findSerializedNode(ctx, item.transform);
+        return {
+          r: { ...item.grabber },
+          transform: transform
+            ? createTransformAccess(transform)
+            : createTransformAccess(new SceneNode(null), false),
+          enabled: item.enabled ?? false
+        };
+      });
+      const flatPlanes = (init.flatPlanes ?? []).map((item) => ({
+        up: vectorFromArray(item.up, Vector3.axisPY()),
+        position: vectorFromArray(item.position),
+        enabled: item.enabled ?? true
+      }));
+      const controllerConfig = deserializeControllerConfig(init.controllerConfig);
+      const config: JointDynamicSystemConfig = {
+        chainConfig: {
+          systemRoot,
+          chains
+        },
+        controllerConfig
+      };
+      const system = new JointDynamicsSystem(
+        config,
+        colliders,
+        grabbers,
+        flatPlanes.map((item) => ({ up: item.up, position: item.position }))
+      );
+      for (let i = 0; i < serializedColliders.length; i++) {
+        if (serializedColliders[i]?.enabled === false) {
+          system.controller.setColliderEnabledAt(i, false);
+        }
+      }
+      for (let i = 0; i < flatPlanes.length; i++) {
+        if (!flatPlanes[i].enabled) {
+          system.controller.setFlatPlaneEnabledAt(i, false);
+        }
+      }
+      const modifier = new JointDynamicsModifier(system);
+      modifier.enabled = init.enabled ?? true;
+      setJointDynamicsModifierSkeleton(modifier, skeleton);
+      return { obj: modifier, loadProps: false };
+    },
+    getInitParams(obj: JointDynamicsModifier) {
+      const skeleton = getJointDynamicsModifierSkeleton(obj);
+      const chainConfig = obj.jointDynamicsSystem.chainConfig;
+      const controllerConfig = obj.jointDynamicsSystem.controller.getConfig();
+      const init: SerializedJointDynamicsModifier = {
+        skeleton: skeleton?.persistentId ?? '',
+        systemRoot: chainConfig.systemRoot.persistentId,
+        chains: chainConfig.chains.map((chain) => ({
+          start: chain.start.persistentId,
+          end: chain.end.persistentId
+        })),
+        controllerConfig: serializeControllerConfig(controllerConfig),
+        colliders: obj.jointDynamicsSystem.getColliderSnapshots().map((item) => ({
+          collider: { ...item.r },
+          transform: item.transform instanceof SceneNode ? item.transform.persistentId : undefined,
+          enabled: item.enabled
+        })),
+        flatPlanes: obj.jointDynamicsSystem.getFlatPlaneSnapshots().map((item) => ({
+          up: vectorToArray(item.up),
+          position: vectorToArray(item.position),
+          enabled: item.enabled
+        })),
+        grabbers: obj.jointDynamicsSystem.getGrabberSnapshots().map((item) => ({
+          grabber: { ...item.r },
+          transform: item.transform instanceof SceneNode ? item.transform.persistentId : undefined,
+          enabled: item.enabled
+        })),
+        enabled: obj.enabled
+      };
+      return init;
+    },
+    getProps() {
+      return [];
+    }
+  };
+}
 
 /** @internal */
 export function getInterpolatorClass(): SerializableClass {

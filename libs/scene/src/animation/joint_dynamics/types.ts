@@ -387,6 +387,8 @@ export interface TransformAccess {
   setLocalRotation(q: Quaternion): void;
   /** Write local scale */
   setLocalScale(s: Vector3): void;
+  /** Original scene object backing this adapter, when available for serialization. */
+  readonly node?: unknown;
 }
 
 /**

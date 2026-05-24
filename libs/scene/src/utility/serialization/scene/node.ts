@@ -17,6 +17,7 @@ import { JSONArray, JSONData } from '../json';
 import { ScriptAttachment, normalizeScriptAttachmentConfig } from '../../../scene/script_attachment';
 import { parseZABCBlob, attachZABCAnimationsToSceneNode } from '../../../asset/loaders/zabc/zabc_loader';
 import { restoreGeometryCacheMeshBinding } from '../../../animation/geometry_cache_utils';
+import { getJointDynamicsModifierSkeleton, setJointDynamicsModifierSkeleton } from './animation';
 const geometryCacheBindings = new WeakMap<
   SceneNode,
   {
@@ -534,17 +535,64 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           options: {
             objectTypes: [JointDynamicsModifier]
           },
+          getDefaultValue(this: SceneNode) {
+            const animationSet = this.animationSet;
+            const jdm: JointDynamicsModifier[] = [];
+            for (const sk of animationSet.skeletons) {
+              for (const mod of sk.get()!.modifiers) {
+                if (mod instanceof JointDynamicsModifier) {
+                  setJointDynamicsModifierSkeleton(mod, sk.get()!);
+                  jdm.push(mod);
+                }
+              }
+            }
+            return jdm;
+          },
           get(this: SceneNode, value) {
             const animationSet = this.animationSet;
             const jdm: JointDynamicsModifier[] = [];
             for (const sk of animationSet.skeletons) {
               for (const mod of sk.get()!.modifiers) {
                 if (mod instanceof JointDynamicsModifier) {
+                  setJointDynamicsModifierSkeleton(mod, sk.get()!);
                   jdm.push(mod);
                 }
               }
             }
             value.object = jdm;
+          },
+          set(this: SceneNode, value) {
+            const animationSet = this.animationSet;
+            for (const sk of animationSet.skeletons) {
+              const modifiers = sk.get()!.modifiers;
+              for (let i = modifiers.length - 1; i >= 0; i--) {
+                if (modifiers[i] instanceof JointDynamicsModifier) {
+                  modifiers.splice(i, 1);
+                }
+              }
+            }
+            for (const mod of value.object) {
+              if (!(mod instanceof JointDynamicsModifier)) {
+                continue;
+              }
+              const skeleton = getJointDynamicsModifierSkeleton(mod);
+              if (skeleton && animationSet.skeletons.some((sk) => sk.get() === skeleton)) {
+                skeleton.modifiers.push(mod);
+                setJointDynamicsModifierSkeleton(mod, skeleton);
+                continue;
+              }
+              for (const sk of animationSet.skeletons) {
+                if (
+                  mod.jointDynamicsSystem.chainConfig.chains.every((chain) =>
+                    sk.get()!.joints.includes(chain.start)
+                  )
+                ) {
+                  sk.get()!.modifiers.push(mod);
+                  setJointDynamicsModifierSkeleton(mod, sk.get()!);
+                  break;
+                }
+              }
+            }
           },
           delete(this: SceneNode, index) {
             const animationSet = this.animationSet;
