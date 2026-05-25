@@ -175,7 +175,10 @@ function findSerializedNode(root: SceneNode, id: string | undefined): SceneNode 
   return prefabNode.findNodeById(id) ?? root.scene?.findNodeById(id) ?? null;
 }
 
-export function setJointDynamicsModifierSkeleton(modifier: JointDynamicsModifier, skeleton: SkeletonRig): void {
+export function setJointDynamicsModifierSkeleton(
+  modifier: JointDynamicsModifier,
+  skeleton: SkeletonRig
+): void {
   jointDynamicsModifierSkeletons.set(modifier, skeleton);
 }
 
@@ -406,7 +409,8 @@ export function getJointDynamicsModifierClass(): SerializableClass {
     ctor: JointDynamicsModifier,
     name: 'JointDynamicsModifier',
     createFunc(ctx: SceneNode, init: SerializedJointDynamicsModifier) {
-      const skeleton = ctx.findSkeletonRigById(init.skeleton) ?? ctx.findSkeletonById(init.skeleton)?.rig ?? null;
+      const skeleton =
+        ctx.findSkeletonRigById(init.skeleton) ?? ctx.findSkeletonById(init.skeleton)?.rig ?? null;
       const systemRoot = findSerializedNode(ctx, init.systemRoot);
       if (!skeleton || !systemRoot) {
         return { obj: null, loadProps: false };
@@ -1670,9 +1674,9 @@ export function getSkeletonClass(): SerializableClass {
       let rig =
         (ctx.animationSet.rigs
           .map((ref) => ref.get())
-          .find(
-            (item) => !!item && SkeletonRig.getRigKey(item.joints) === SkeletonRig.getRigKey(joints)
-          ) as SkeletonRig | undefined) ?? null;
+          .find((item) => !!item && SkeletonRig.getRigKey(item.joints) === SkeletonRig.getRigKey(joints)) as
+          | SkeletonRig
+          | undefined) ?? null;
       if (!rig) {
         rig = new SkeletonRig(joints, bindPose);
         ctx.animationSet.rigs.push(new DRef(rig));

@@ -1,6 +1,6 @@
 import { DRef, Matrix4x4, Quaternion, Vector3 } from '@zephyr3d/base';
+import type { AnimationSet } from '@zephyr3d/scene';
 import {
-  AnimationSet,
   NodeRotationTrack,
   Scene,
   SceneNode,

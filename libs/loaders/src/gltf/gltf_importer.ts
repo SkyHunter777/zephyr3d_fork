@@ -59,6 +59,15 @@ import {
 import type { AnimationChannel, AnimationSampler, GlTf, Material, TextureInfo } from './gltf_types';
 import { AbstractModelImporter } from '../importer';
 
+type SpringBoneJointInfo = {
+  node?: unknown;
+  hitRadius?: number;
+  stiffness?: number;
+  gravityPower?: number;
+  gravityDir?: unknown;
+  dragForce?: number;
+};
+
 /** @internal */
 export interface GLTFContent extends GlTf {
   _loadedBuffers: Nullable<ArrayBuffer[]>;
@@ -200,15 +209,17 @@ export class GLTFImporter extends AbstractModelImporter {
       return;
     }
 
-    const colliders: AssetSpringBoneCollider[] = [];
-    for (const colliderInfo of ext.colliders ?? []) {
+    const colliders: Nullable<AssetSpringBoneCollider>[] = [];
+    for (let i = 0; i < (ext.colliders ?? []).length; i++) {
+      const colliderInfo = ext.colliders[i];
       const node = this._getNode(gltf, colliderInfo.node);
-      if (!node || !colliderInfo.shape) {
+      const extendedShape = colliderInfo.extensions?.VRMC_springBone_extended_collider?.shape;
+      if (!node || (!colliderInfo.shape && !extendedShape)) {
+        colliders[i] = null;
         continue;
       }
-      const sphere = colliderInfo.shape.sphere;
-      const capsule = colliderInfo.shape.capsule;
-      const extendedShape = colliderInfo.extensions?.VRMC_springBone_extended_collider?.shape;
+      const sphere = colliderInfo.shape?.sphere;
+      const capsule = colliderInfo.shape?.capsule;
       const extendedSphere = extendedShape?.sphere;
       const extendedCapsule = extendedShape?.capsule;
       const extendedPlane = extendedShape?.plane;
@@ -271,8 +282,10 @@ export class GLTFImporter extends AbstractModelImporter {
         };
       }
       if (collider) {
-        colliders.push(collider);
+        colliders[i] = collider;
         model.springBoneColliders.push(collider);
+      } else {
+        colliders[i] = null;
       }
     }
 
@@ -281,8 +294,10 @@ export class GLTFImporter extends AbstractModelImporter {
       const group: AssetSpringBoneColliderGroup = {
         name: groupInfo.name,
         colliders: (groupInfo.colliders ?? [])
-          .map((index: number) => colliders[index])
-          .filter((collider: AssetSpringBoneCollider) => !!collider)
+          .map((ref: unknown) => colliders[this._getIndex(ref, ['collider', 'index'])])
+          .filter((collider: Nullable<AssetSpringBoneCollider>): collider is AssetSpringBoneCollider => {
+            return !!collider;
+          })
       };
       colliderGroups.push(group);
       model.springBoneColliderGroups.push(group);
@@ -291,7 +306,10 @@ export class GLTFImporter extends AbstractModelImporter {
     for (const springInfo of ext.springs ?? []) {
       const joints: AssetSpringBoneJoint[] = [];
       for (const jointRef of springInfo.joints ?? []) {
-        const jointInfo = typeof jointRef === 'number' ? ext.joints?.[jointRef] : jointRef;
+        const jointInfo = this._getSpringBoneJointInfo(ext, jointRef);
+        if (!jointInfo) {
+          continue;
+        }
         const node = this._getNode(gltf, jointInfo?.node);
         if (!node) {
           continue;
@@ -310,8 +328,10 @@ export class GLTFImporter extends AbstractModelImporter {
         center: this._getNode(gltf, springInfo.center)!,
         joints,
         colliderGroups: (springInfo.colliderGroups ?? [])
-          .map((index: number) => colliderGroups[index])
-          .filter((group: AssetSpringBoneColliderGroup) => !!group)
+          .map((ref: unknown) => colliderGroups[this._getIndex(ref, ['colliderGroup', 'index'])])
+          .filter((group: Nullable<AssetSpringBoneColliderGroup>): group is AssetSpringBoneColliderGroup => {
+            return !!group;
+          })
       });
     }
   }
@@ -322,10 +342,12 @@ export class GLTFImporter extends AbstractModelImporter {
       return;
     }
 
-    const colliderGroups: AssetSpringBoneColliderGroup[] = [];
-    for (const groupInfo of secondaryAnimation.colliderGroups ?? []) {
+    const colliderGroups: Nullable<AssetSpringBoneColliderGroup>[] = [];
+    for (let i = 0; i < (secondaryAnimation.colliderGroups ?? []).length; i++) {
+      const groupInfo = secondaryAnimation.colliderGroups[i];
       const node = this._getNode(gltf, groupInfo.node);
       if (!node) {
+        colliderGroups[i] = null;
         continue;
       }
       const group: AssetSpringBoneColliderGroup = {
@@ -343,7 +365,7 @@ export class GLTFImporter extends AbstractModelImporter {
         group.colliders.push(collider);
         model.springBoneColliders.push(collider);
       }
-      colliderGroups.push(group);
+      colliderGroups[i] = group;
       model.springBoneColliderGroups.push(group);
     }
 
@@ -365,8 +387,10 @@ export class GLTFImporter extends AbstractModelImporter {
         joints,
         rootBones,
         colliderGroups: (boneGroupInfo.colliderGroups ?? [])
-          .map((index: number) => colliderGroups[index])
-          .filter((group: AssetSpringBoneColliderGroup) => !!group)
+          .map((ref: unknown) => colliderGroups[this._getIndex(ref, ['colliderGroup', 'index'])])
+          .filter((group: Nullable<AssetSpringBoneColliderGroup>): group is AssetSpringBoneColliderGroup => {
+            return !!group;
+          })
       });
     }
   }
@@ -379,12 +403,59 @@ export class GLTFImporter extends AbstractModelImporter {
     if (Array.isArray(value)) {
       return new Vector3(value[0] ?? fallback.x, value[1] ?? fallback.y, value[2] ?? fallback.z);
     }
+    if (value && typeof value === 'object') {
+      const obj = value as { x?: unknown; y?: unknown; z?: unknown };
+      return new Vector3(
+        typeof obj.x === 'number' ? obj.x : fallback.x,
+        typeof obj.y === 'number' ? obj.y : fallback.y,
+        typeof obj.z === 'number' ? obj.z : fallback.z
+      );
+    }
     return fallback.clone();
+  }
+
+  private _getIndex(value: unknown, keys: string[] = ['index']): number {
+    if (typeof value === 'number' && value >= 0 && Number.isInteger(value)) {
+      return value;
+    }
+    if (value && typeof value === 'object') {
+      const obj = value as Record<string, unknown>;
+      for (const key of keys) {
+        const index = obj[key];
+        if (typeof index === 'number' && index >= 0 && Number.isInteger(index)) {
+          return index;
+        }
+      }
+    }
+    return -1;
+  }
+
+  private _getSpringBoneJointInfo(
+    ext: { joints?: SpringBoneJointInfo[] },
+    jointRef: unknown
+  ): Nullable<SpringBoneJointInfo> {
+    const directIndex = this._getIndex(jointRef);
+    if (directIndex >= 0) {
+      return ext.joints?.[directIndex] ?? null;
+    }
+    if (jointRef && typeof jointRef === 'object') {
+      const obj = jointRef as SpringBoneJointInfo;
+      if (typeof obj.node === 'number') {
+        return obj;
+      }
+      const jointIndex = this._getIndex(jointRef, ['joint', 'index']);
+      if (jointIndex >= 0) {
+        return ext.joints?.[jointIndex] ?? null;
+      }
+    }
+    return null;
   }
 
   private _buildJointDynamicsSpringBones(model: SharedModel) {
     const colliderMap = new Map<AssetSpringBoneCollider, AssetJointDynamicsCollider>();
     const flatPlaneMap = new Map<AssetSpringBoneCollider, AssetJointDynamicsFlatPlane>();
+    const nodeKeys = new Map<AssetHierarchyNode, number>();
+    model.nodes.forEach((node, index) => nodeKeys.set(node, index));
     for (const collider of model.springBoneColliders) {
       const converted = this._toJointDynamicsCollider(collider);
       if (converted) {
@@ -407,14 +478,20 @@ export class GLTFImporter extends AbstractModelImporter {
       }
       const colliders: AssetJointDynamicsCollider[] = [];
       const flatPlanes: AssetJointDynamicsFlatPlane[] = [];
+      const colliderKeys = new Set<string>();
+      const flatPlaneKeys = new Set<string>();
       for (const group of spring.colliderGroups) {
         for (const collider of group.colliders) {
           const converted = colliderMap.get(collider);
-          if (converted && colliders.indexOf(converted) < 0) {
+          const colliderKey = converted ? this._getJointDynamicsColliderKey(converted, nodeKeys) : '';
+          if (converted && !colliderKeys.has(colliderKey)) {
+            colliderKeys.add(colliderKey);
             colliders.push(converted);
           }
           const flatPlane = flatPlaneMap.get(collider);
-          if (flatPlane && flatPlanes.indexOf(flatPlane) < 0) {
+          const flatPlaneKey = flatPlane ? this._getJointDynamicsFlatPlaneKey(flatPlane, nodeKeys) : '';
+          if (flatPlane && !flatPlaneKeys.has(flatPlaneKey)) {
+            flatPlaneKeys.add(flatPlaneKey);
             flatPlanes.push(flatPlane);
           }
         }
@@ -435,22 +512,19 @@ export class GLTFImporter extends AbstractModelImporter {
     if (joints.length === 0) {
       return chains;
     }
-    if (joints.length === 1) {
-      const start = joints[0].node;
-      const end = this._findSingleChildChainEnd(start);
-      if (end && end !== start) {
-        chains.push({ start, end });
+    let chainStart = joints[0].node;
+    let chainEnd = joints[0].node;
+    for (let i = 1; i < joints.length; i++) {
+      const node = joints[i].node;
+      if (chainEnd.isParentOf(node)) {
+        chainEnd = node;
+        continue;
       }
-      return chains;
+      this._pushJointDynamicsChain(chains, chainStart, chainEnd);
+      chainStart = node;
+      chainEnd = node;
     }
-    for (let i = 0; i < joints.length - 1; i++) {
-      const parent = joints[i].node;
-      const child = joints[i + 1].node;
-      if (!parent.isParentOf(child)) {
-        return [];
-      }
-    }
-    chains.push({ start: joints[0].node, end: joints[joints.length - 1].node });
+    this._pushJointDynamicsChain(chains, chainStart, chainEnd);
     return chains;
   }
 
@@ -463,6 +537,21 @@ export class GLTFImporter extends AbstractModelImporter {
       }
     }
     return chains;
+  }
+
+  private _pushJointDynamicsChain(
+    chains: { start: AssetHierarchyNode; end: AssetHierarchyNode }[],
+    start: AssetHierarchyNode,
+    end: AssetHierarchyNode
+  ) {
+    if (start !== end) {
+      chains.push({ start, end });
+      return;
+    }
+    const inferredEnd = this._findSingleChildChainEnd(start);
+    if (inferredEnd && inferredEnd !== start) {
+      chains.push({ start, end: inferredEnd });
+    }
   }
 
   private _findSingleChildChainEnd(start: AssetHierarchyNode): Nullable<AssetHierarchyNode> {
@@ -505,6 +594,56 @@ export class GLTFImporter extends AbstractModelImporter {
         bendingVertical: true
       }
     };
+  }
+
+  private _getJointDynamicsColliderKey(
+    collider: AssetJointDynamicsCollider,
+    nodeKeys: Map<AssetHierarchyNode, number>
+  ): string {
+    const r = collider.collider;
+    return [
+      this._getAssetNodeKey(collider.node, nodeKeys),
+      this._vector3Key(collider.localPosition),
+      this._quaternionKey(collider.localRotation),
+      this._numberKey(r.radius),
+      this._numberKey(r.radiusTailScale),
+      this._numberKey(r.height),
+      this._numberKey(r.friction),
+      r.isInverseCollider ? 1 : 0,
+      r.forceType
+    ].join('|');
+  }
+
+  private _getJointDynamicsFlatPlaneKey(
+    flatPlane: AssetJointDynamicsFlatPlane,
+    nodeKeys: Map<AssetHierarchyNode, number>
+  ): string {
+    return [
+      this._getAssetNodeKey(flatPlane.node, nodeKeys),
+      this._vector3Key(flatPlane.position),
+      this._vector3Key(flatPlane.up)
+    ].join('|');
+  }
+
+  private _getAssetNodeKey(node: AssetHierarchyNode, nodeKeys: Map<AssetHierarchyNode, number>): number {
+    let key = nodeKeys.get(node);
+    if (key === undefined) {
+      key = nodeKeys.size;
+      nodeKeys.set(node, key);
+    }
+    return key;
+  }
+
+  private _vector3Key(value: Vector3): string {
+    return [value.x, value.y, value.z].map((component) => this._numberKey(component)).join(',');
+  }
+
+  private _quaternionKey(value: Quaternion): string {
+    return [value.x, value.y, value.z, value.w].map((component) => this._numberKey(component)).join(',');
+  }
+
+  private _numberKey(value: number): string {
+    return `${Object.is(value, -0) ? 0 : value}`;
   }
 
   private _toJointDynamicsCollider(collider: AssetSpringBoneCollider): Nullable<AssetJointDynamicsCollider> {

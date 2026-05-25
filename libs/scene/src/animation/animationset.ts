@@ -8,7 +8,8 @@ import { NodeRotationTrack } from './rotationtrack';
 import { NodeEulerRotationTrack } from './eulerrotationtrack';
 import { NodeTranslationTrack } from './translationtrack';
 import { NodeScaleTrack } from './scaletrack';
-import { HumanoidBodyRig, SkeletonRig, SkinBinding } from './skeleton';
+import type { SkeletonRig, SkinBinding } from './skeleton';
+import { HumanoidBodyRig } from './skeleton';
 
 /**
  * Options for playing an animation.
@@ -693,7 +694,7 @@ export class AnimationSet extends Disposable implements IDisposable {
       v.get()?.apply(deltaInSeconds);
     });
     this._skeletons.forEach((v) => {
-      v.get()?.apply(deltaInSeconds);
+      v.get()?.apply();
     });
   }
   /**

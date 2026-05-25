@@ -31,6 +31,7 @@ import type { FixedGeometryCacheFrame } from '../animation/fixed_geometry_cache_
 import type { PCAGeometryCacheTrackData } from '../animation';
 import {
   FixedGeometryCacheTrack,
+  createTransformAccess,
   JointDynamicsModifier,
   JointDynamicsSystem,
   MorphTargetTrack,
@@ -915,8 +916,50 @@ export class SharedModel extends Disposable {
         });
       const rigs = rootNode.animationSet.rigs.filter((ref) => {
         const joints = ref.get()!.joints;
-        return chains.every((chain) => joints.includes(chain.start));
+        return chains.every((chain) => joints.includes(chain.start) && joints.includes(chain.end));
       });
+      if (rigs.length === 0) {
+        continue;
+      }
+      const colliders = jd.colliders
+        .map((collider) => {
+          const parent = nodeMap.get(collider.node);
+          if (!parent) {
+            return null;
+          }
+          const node = new SceneNode(parent.scene);
+          node.name = collider.name ? `${collider.name}_JointDynamicsCollider` : 'JointDynamicsCollider';
+          node.parent = parent;
+          node.position.set(collider.localPosition);
+          node.rotation.set(collider.localRotation);
+          return {
+            r: { ...collider.collider },
+            transform: createTransformAccess(node)
+          };
+        })
+        .filter(
+          (collider): collider is { r: ColliderR; transform: ReturnType<typeof createTransformAccess> } => {
+            return !!collider;
+          }
+        );
+      const flatPlanes = jd.flatPlanes
+        .map((flatPlane) => {
+          const node = nodeMap.get(flatPlane.node);
+          if (!node) {
+            return null;
+          }
+          const up = node.worldMatrix.transformVectorAffine(flatPlane.up, new Vector3());
+          if (up.magnitudeSq === 0) {
+            return null;
+          }
+          return {
+            up: up.inplaceNormalize(),
+            position: node.worldMatrix.transformPointAffine(flatPlane.position, new Vector3())
+          };
+        })
+        .filter((flatPlane): flatPlane is { up: Vector3; position: Vector3 } => {
+          return !!flatPlane;
+        });
       for (const rig of rigs) {
         const system = new JointDynamicsSystem(
           {
@@ -926,9 +969,9 @@ export class SharedModel extends Disposable {
             },
             controllerConfig: jd.controllerConfig
           },
+          colliders,
           [],
-          [],
-          []
+          flatPlanes
         );
         const modifier = new JointDynamicsModifier(system);
         rig.get()!.modifiers.push(modifier);

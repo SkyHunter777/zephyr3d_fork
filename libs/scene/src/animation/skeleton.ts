@@ -398,7 +398,7 @@ export class SkinBinding extends Disposable {
       // pose visible by replacing the rig pose only when explicitly supplied.
       this._rig = new SkeletonRig(rig.joints, bindPose);
     }
-    this.updateJointMatrices(0);
+    this.updateJointMatrices();
     SkinBinding._registry.set(this._id, new DWeakRef(this));
   }
   /**
@@ -502,7 +502,7 @@ export class SkinBinding extends Disposable {
    * @param worldMatrix - Optional world-to-model transform applied before inverse bind.
    * @internal
    */
-  updateJointMatrices(deltaTime: number) {
+  updateJointMatrices() {
     if (!this._jointTexture.get()) {
       this._createJointTexture();
     }
@@ -534,8 +534,8 @@ export class SkinBinding extends Disposable {
    *
    * @internal
    */
-  apply(deltaTime: number) {
-    this.updateJointMatrices(deltaTime);
+  apply() {
+    this.updateJointMatrices();
     const tex = this.jointTexture;
     this._syncJointMatrixArray();
     tex.update(this._jointMatrixArray, 0, 0, tex.width, tex.height);
