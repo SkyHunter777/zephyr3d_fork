@@ -916,7 +916,7 @@ export class SharedModel extends Disposable {
         });
       const rigs = rootNode.animationSet.rigs.filter((ref) => {
         const joints = ref.get()!.joints;
-        return chains.every((chain) => joints.includes(chain.start) && joints.includes(chain.end));
+        return chains.every((chain) => joints.includes(chain.start));
       });
       if (rigs.length === 0) {
         continue;
