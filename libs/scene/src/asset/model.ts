@@ -980,12 +980,12 @@ export class SharedModel extends Disposable {
         for (const v of skeletonMeshMap) {
           const sk = v[0];
           const joints = sk.joints.map((val) => {
-              const node = nodeMap.get(val)!;
-              node.jointTypeT = 'static';
-              node.jointTypeS = 'static';
-              node.jointTypeR = 'static';
-              return node;
-            });
+            const node = nodeMap.get(val)!;
+            node.jointTypeT = 'static';
+            node.jointTypeS = 'static';
+            node.jointTypeR = 'static';
+            return node;
+          });
           const rigKey = SkeletonRig.getRigKey(joints);
           let rig = rigMap.get(rigKey);
           if (!rig) {

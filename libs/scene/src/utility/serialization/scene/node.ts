@@ -359,6 +359,11 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           isHidden() {
             return true;
           },
+          isPersistent(this: SceneNode) {
+            return (
+              !this._prefabId || guessMimeType(this._prefabId) === 'application/vnd.zephyr3d.prefab+json'
+            );
+          },
           get(this: SceneNode, value) {
             value.object = [];
             for (const child of this.children) {
@@ -470,6 +475,11 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           options: {
             objectTypes: [AnimationClip]
           },
+          isPersistent(this: SceneNode) {
+            return (
+              !this._prefabId || guessMimeType(this._prefabId) === 'application/vnd.zephyr3d.prefab+json'
+            );
+          },
           get(this: SceneNode, value) {
             const animationSet = this.animationSet;
             value.object = animationSet
@@ -517,6 +527,11 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           isHidden() {
             return true;
           },
+          isPersistent(this: SceneNode) {
+            return (
+              !this._prefabId || guessMimeType(this._prefabId) === 'application/vnd.zephyr3d.prefab+json'
+            );
+          },
           get(this: SceneNode, value) {
             const animationSet = this.animationSet;
             const rigs = new Set(animationSet.rigs.map((v) => v.get()));
@@ -543,6 +558,11 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           isHidden() {
             return true;
           },
+          isPersistent(this: SceneNode) {
+            return (
+              !this._prefabId || guessMimeType(this._prefabId) === 'application/vnd.zephyr3d.prefab+json'
+            );
+          },
           get(this: SceneNode, value) {
             const animationSet = this.animationSet;
             value.object = animationSet.skeletons.map((v) => v.get());
@@ -568,6 +588,11 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           readonly: true,
           options: {
             objectTypes: [JointDynamicsModifier]
+          },
+          isPersistent(this: SceneNode) {
+            return (
+              !this._prefabId || guessMimeType(this._prefabId) === 'application/vnd.zephyr3d.prefab+json'
+            );
           },
           getDefaultValue(this: SceneNode) {
             const animationSet = this.animationSet;
