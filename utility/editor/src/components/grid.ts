@@ -12,7 +12,15 @@ import {
 } from '@zephyr3d/scene';
 import { FontGlyph } from '../core/fontglyph';
 import type { GenericConstructor, Nullable, RequireOptionals } from '@zephyr3d/base';
-import { AABB, ASSERT, degree2radian, Observable, Quaternion, radian2degree } from '@zephyr3d/base';
+import {
+  AABB,
+  ASSERT,
+  degree2radian,
+  Interpolator,
+  Observable,
+  Quaternion,
+  radian2degree
+} from '@zephyr3d/base';
 import { RotationEditor } from './rotationeditor';
 import { Dialog } from '../views/dlg/dlg';
 import { ProjectService } from '../core/services/project';
@@ -295,6 +303,8 @@ class PropertyGroup {
 export class PropertyEditor extends Observable<{
   request_edit_aabb: [aabb: AABB];
   end_edit_aabb: [aabb: AABB];
+  request_edit_curve1f: [curve: Interpolator, name: string, apply: (curve: Interpolator) => void];
+  end_edit_curve1f: [curve: Interpolator, apply: Nullable<(curve: Interpolator) => void>];
   request_edit_track: [track: PropertyTrack, target: object];
   end_edit_track: [track: PropertyTrack, target: object, edited: boolean];
   object_property_changed: [object: Nullable<object>, prop: PropertyAccessor];
@@ -642,7 +652,10 @@ export class PropertyEditor extends Observable<{
     ) {
       const editable =
         (group.value.object?.[0] instanceof AABB && group.prop.options?.edit === 'aabb') ||
-        (group.value.object?.[0] instanceof PropertyTrack && group.prop.options?.edit === 'proptrack');
+        (group.value.object?.[0] instanceof PropertyTrack && group.prop.options?.edit === 'proptrack') ||
+        (group.value.object?.[0] instanceof Interpolator &&
+          group.value.object[0].target === 'number' &&
+          group.prop.options?.edit === 'curve1f');
       const settable =
         !group.prop.readonly &&
         !!group.prop.set &&
@@ -727,6 +740,8 @@ export class PropertyEditor extends Observable<{
               if (editable) {
                 if (group.prop.options?.edit === 'aabb') {
                   this.dispatchEvent('end_edit_aabb', group.value.object[0] as AABB);
+                } else if (group.prop.options?.edit === 'curve1f') {
+                  this.dispatchEvent('end_edit_curve1f', group.value.object[0] as Interpolator, false);
                 } else if (group.prop.options?.edit === 'proptrack') {
                   const animation: unknown = group.object;
                   ASSERT(
@@ -752,6 +767,14 @@ export class PropertyEditor extends Observable<{
             if (ImGui.Button(`${FontGlyph.glyphs['pencil']}##edit`, new ImGui.ImVec2(-1, 0))) {
               if (group.prop.options?.edit === 'aabb') {
                 this.dispatchEvent('request_edit_aabb', group.value.object[0] as AABB);
+              } else if (group.prop.options?.edit === 'curve1f') {
+                this.dispatchEvent(
+                  'request_edit_curve1f',
+                  group.value.object[0] as Interpolator,
+                  group.name,
+                  (curve) =>
+                    group.prop.set.call(group.object, { num: [], bool: [], str: [], object: [curve] })
+                );
               } else if (group.prop.options?.edit === 'proptrack') {
                 const animation: unknown = group.object;
                 ASSERT(
@@ -816,6 +839,8 @@ export class PropertyEditor extends Observable<{
               if (editable) {
                 if (group.prop.options?.edit === 'aabb') {
                   this.dispatchEvent('end_edit_aabb', group.value.object[0] as AABB);
+                } else if (group.prop.options?.edit === 'curve1f') {
+                  this.dispatchEvent('end_edit_curve1f', group.value.object[0] as Interpolator, false);
                 } else if (group.prop.options?.edit === 'proptrack') {
                   const animation: unknown = group.object;
                   ASSERT(
@@ -843,6 +868,14 @@ export class PropertyEditor extends Observable<{
             if (ImGui.Button(`${FontGlyph.glyphs['pencil']}##edit`, new ImGui.ImVec2(buttonSize, 0))) {
               if (group.prop.options?.edit === 'aabb') {
                 this.dispatchEvent('request_edit_aabb', group.value.object[0] as AABB);
+              } else if (group.prop.options?.edit === 'curve1f') {
+                this.dispatchEvent(
+                  'request_edit_curve1f',
+                  group.value.object[0] as Interpolator,
+                  group.name,
+                  (curve) =>
+                    group.prop.set.call(group.object, { num: [], bool: [], str: [], object: [curve] })
+                );
               } else if (group.prop.options?.edit === 'proptrack') {
                 const animation: unknown = group.object;
                 ASSERT(

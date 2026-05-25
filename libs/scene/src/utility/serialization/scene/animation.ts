@@ -375,10 +375,12 @@ function createJointDynamicsCurveProp(
     name,
     description,
     type: 'object',
+    readonly: true,
     options: {
       ...jointDynamicsPropOptions,
       label,
-      objectTypes: [Interpolator]
+      objectTypes: [Interpolator],
+      edit: 'curve1f' as const
     },
     isPersistent: isJointDynamicsEditorPropPersistent,
     get(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'object'>>) {

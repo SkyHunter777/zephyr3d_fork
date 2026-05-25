@@ -68,7 +68,7 @@ export type PropertyValue = {
  *
  * @public
  */
-export type PropEdit = 'aabb' | 'quaternion' | 'proptrack';
+export type PropEdit = 'aabb' | 'quaternion' | 'proptrack' | 'curve1f';
 
 /**
  * Extra scene-node picker hints for a property.

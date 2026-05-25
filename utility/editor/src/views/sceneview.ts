@@ -36,7 +36,7 @@ import { eventBus } from '../core/eventbus';
 import { ToolBar } from '../components/toolbar';
 import type { ToolBarItem } from '../components/toolbar';
 import { FontGlyph } from '../core/fontglyph';
-import type { AABB, GenericConstructor, Nullable } from '@zephyr3d/base';
+import type { AABB, GenericConstructor, Interpolator, Nullable } from '@zephyr3d/base';
 import { DRef, HttpFS } from '@zephyr3d/base';
 import { ASSERT, Matrix4x4, Quaternion, Vector3 } from '@zephyr3d/base';
 import type { TRS } from '../types';
@@ -142,6 +142,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   private readonly _cameraAnimationDuration: number;
   private _animatedCamera: Nullable<Camera>;
   private readonly _editingProps: Map<object, Map<PropertyAccessor, { id: string; value: number[] }>>;
+  private readonly _editingCurves: Map<Interpolator, string>;
   private _trackId: number;
   private _lastDuplicateTarget: 'scene' | 'asset';
   private _multiTransformItems: MultiTransformItem[];
@@ -183,6 +184,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     this._cameraAnimationDuration = 100;
     this._animatedCamera = null;
     this._editingProps = new Map();
+    this._editingCurves = new Map();
     this._trackId = 0;
     this._lastDuplicateTarget = 'scene';
     this._multiTransformItems = [];
@@ -1512,6 +1514,8 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     this._propGrid.on('object_property_edit_finished', this.handleObjectPropertyEditFinished, this);
     this._propGrid.on('request_edit_aabb', this.editAABB, this);
     this._propGrid.on('end_edit_aabb', this.endEditAABB, this);
+    this._propGrid.on('request_edit_curve1f', this.editCurve1f, this);
+    this._propGrid.on('end_edit_curve1f', this.endEditCurve1f, this);
     this._propGrid.on('request_edit_track', this.editPropAnimation, this);
     this._propGrid.on('end_edit_track', this.endEditPropAnimation, this);
     eventBus.on('scene_add_asset', this.handleAddAsset, this);
@@ -1541,6 +1545,8 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     this._propGrid.off('object_property_edit_finished', this.handleObjectPropertyEditFinished, this);
     this._propGrid.off('request_edit_aabb', this.editAABB, this);
     this._propGrid.off('end_edit_aabb', this.endEditAABB, this);
+    this._propGrid.off('request_edit_curve1f', this.editCurve1f, this);
+    this._propGrid.off('end_edit_curve1f', this.endEditCurve1f, this);
     this._propGrid.off('request_edit_track', this.editPropAnimation, this);
     this._propGrid.off('end_edit_track', this.endEditPropAnimation, this);
     eventBus.off('scene_add_asset', this.handleAddAsset, this);
@@ -1862,6 +1868,21 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     }
     if (this._currentEditTool.get()) {
       this._currentEditTool.get()!.update(dt);
+    }
+  }
+  private editCurve1f(curve: Interpolator, name: string, apply: (curve: Interpolator) => void) {
+    let id = this._editingCurves.get(curve);
+    if (!id) {
+      id = `Edit curve: ${name}`;
+      this._editingCurves.set(curve, id);
+    }
+    Dialog.editCurve(id, curve).then((result) => {
+      this.endEditCurve1f(curve, result ? apply : null);
+    });
+  }
+  private endEditCurve1f(curve: Interpolator, apply: Nullable<(curve: Interpolator) => void>) {
+    if (apply) {
+      apply(curve);
     }
   }
   private editPropAnimation(track: PropertyTrack, target: object) {
