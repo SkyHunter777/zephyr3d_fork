@@ -68,6 +68,12 @@ type SpringBoneJointInfo = {
   dragForce?: number;
 };
 
+const VRM_SPRING_BONE_SUBSTEPS = 3;
+const VRM_GRAVITY_ACCELERATION_SCALE = 3;
+const VRM_BASE_GRAVITY_ACCELERATION = 9.8 * VRM_GRAVITY_ACCELERATION_SCALE;
+const VRM_GRAVITY_POWER_TO_ACCELERATION = 9.8 * VRM_GRAVITY_ACCELERATION_SCALE;
+const VRM_STIFFNESS_TO_FRAME_HARDNESS = 0.12;
+
 /** @internal */
 export interface GLTFContent extends GlTf {
   _loadedBuffers: Nullable<ArrayBuffer[]>;
@@ -569,24 +575,37 @@ export class GLTFImporter extends AbstractModelImporter {
     let stiffness = 0;
     let dragForce = 0;
     let hitRadius = 0;
-    const gravity = new Vector3(0, -9.8, 0);
+    const gravity = new Vector3(0, -VRM_BASE_GRAVITY_ACCELERATION, 0);
+    const gravityPower = Vector3.zero();
     for (const joint of joints) {
       stiffness += joint.stiffness;
       dragForce += joint.dragForce;
       hitRadius = Math.max(hitRadius, joint.hitRadius);
       const gravityDir =
         joint.gravityDir.magnitudeSq > 0 ? Vector3.normalize(joint.gravityDir) : new Vector3(0, -1, 0);
-      Vector3.add(gravity, Vector3.scale(gravityDir, Math.max(0, joint.gravityPower)), gravity);
+      Vector3.add(
+        gravityPower,
+        Vector3.scale(gravityDir, Math.max(0, joint.gravityPower) * VRM_GRAVITY_POWER_TO_ACCELERATION),
+        gravityPower
+      );
     }
     const invCount = joints.length > 0 ? 1 / joints.length : 1;
     stiffness *= invCount;
     dragForce *= invCount;
-    Vector3.scale(gravity, invCount, gravity);
+    Vector3.scale(gravityPower, invCount, gravityPower);
+    Vector3.add(gravity, gravityPower, gravity);
+    const frameHardness = Math.max(0, Math.min(1, stiffness * VRM_STIFFNESS_TO_FRAME_HARDNESS));
+    const frameResistance = Math.max(0, Math.min(1, 1 - dragForce));
     return {
+      subSteps: VRM_SPRING_BONE_SUBSTEPS,
       gravity,
       curves: {
-        hardness: InterpolatorScalar.constant(Math.max(0, Math.min(1, stiffness * 0.002))),
-        resistance: InterpolatorScalar.constant(Math.max(0, Math.min(1, 1 - dragForce))),
+        hardness: InterpolatorScalar.constant(
+          this._frameRatioToSubstepRatio(frameHardness, VRM_SPRING_BONE_SUBSTEPS)
+        ),
+        resistance: InterpolatorScalar.constant(
+          this._frameRateToSubstepRate(frameResistance, VRM_SPRING_BONE_SUBSTEPS)
+        ),
         pointRadius: InterpolatorScalar.constant(Math.max(0, hitRadius))
       },
       constraintOptions: {
@@ -594,6 +613,16 @@ export class GLTFImporter extends AbstractModelImporter {
         bendingVertical: true
       }
     };
+  }
+
+  private _frameRatioToSubstepRatio(frameRatio: number, subSteps: number): number {
+    const ratio = Math.max(0, Math.min(1, frameRatio));
+    return 1 - Math.pow(1 - ratio, 1 / Math.max(1, subSteps));
+  }
+
+  private _frameRateToSubstepRate(frameRate: number, subSteps: number): number {
+    const rate = Math.max(0, Math.min(1, frameRate));
+    return Math.pow(rate, 1 / Math.max(1, subSteps));
   }
 
   private _getJointDynamicsColliderKey(
