@@ -9,10 +9,7 @@ describe('GLTFImporter VRM SpringBone', () => {
       asset: { version: '2.0' },
       scenes: [{ nodes: [0] }],
       scene: 0,
-      nodes: [
-        { name: 'root', children: [1] },
-        { name: 'tail' }
-      ],
+      nodes: [{ name: 'root', children: [1] }, { name: 'tail' }],
       extensions: {
         VRMC_springBone: {
           colliders: [
@@ -61,10 +58,7 @@ describe('GLTFImporter VRM SpringBone', () => {
               }
             }
           ],
-          colliderGroups: [
-            { colliders: [0, 1, 2, 3] },
-            { colliders: [0, 2] }
-          ],
+          colliderGroups: [{ colliders: [0, 1, 2, 3] }, { colliders: [0, 2] }],
           joints: [
             {
               node: 0,
@@ -108,10 +102,7 @@ describe('GLTFImporter VRM SpringBone', () => {
       asset: { version: '2.0' },
       scenes: [{ nodes: [0] }],
       scene: 0,
-      nodes: [
-        { name: 'root', children: [1] },
-        { name: 'tail' }
-      ],
+      nodes: [{ name: 'root', children: [1] }, { name: 'tail' }],
       extensions: {
         VRMC_springBone: {
           joints: [
@@ -161,10 +152,7 @@ describe('GLTFImporter VRM SpringBone', () => {
       asset: { version: '2.0' },
       scenes: [{ nodes: [0] }],
       scene: 0,
-      nodes: [
-        { name: 'root', children: [1] },
-        { name: 'tail' }
-      ],
+      nodes: [{ name: 'root', children: [1] }, { name: 'tail' }],
       extensions: {
         VRMC_springBone: {
           joints: [

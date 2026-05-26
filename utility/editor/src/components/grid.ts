@@ -93,6 +93,7 @@ class PropertyGroup {
   value: RequireOptionals<PropertyValue>;
   parent: Nullable<PropertyGroup>;
   path: string;
+  statePath: string;
   property: Nullable<Property<any>>;
   currentType: number;
   opened: boolean;
@@ -109,6 +110,7 @@ class PropertyGroup {
     this.selected = [-1];
     this.count = 1;
     this.path = '';
+    this.statePath = name;
     this.parent = null;
     this.value = { num: [], str: [], bool: [], object: [null] };
     this.property = null;
@@ -208,6 +210,7 @@ class PropertyGroup {
     const group = new PropertyGroup(name, this.grid);
     group.parent = this;
     group.path = this.path;
+    group.statePath = `${this.statePath}/${name}`;
     this.subgroups.push(group);
     return group;
   }
@@ -219,6 +222,9 @@ class PropertyGroup {
     ) as PropertyGroup;
     if (!parent) {
       parent = new PropertyGroup(firstPart, this.grid);
+      parent.parent = this;
+      parent.path = this.path;
+      parent.statePath = `${this.statePath}/${firstPart}`;
       this.properties.push(parent);
     }
     let group = parent;
@@ -247,6 +253,8 @@ class PropertyGroup {
   ) {
     if (this.value.object[0] !== obj || this.prop !== prop) {
       const resourceManager = getEngine().resourceManager;
+      const parentPath = this.parent?.path ?? '';
+      const parentStatePath = this.parent?.statePath ?? this.name;
       this.value.object[0] = obj ?? null;
       this.property = null;
       this.object = parentObj;
@@ -254,8 +262,11 @@ class PropertyGroup {
       this.index = index ?? 0;
       this.count = count ?? 1;
       this.prop = prop ?? null;
+      this.path = parentPath;
+      this.statePath = parentStatePath;
       if (this.prop) {
         this.path = `${this.path}/${this.prop.name}${typeof index === 'number' ? `[${index}]` : ''}`;
+        this.statePath = `${this.statePath}/${this.prop.name}${typeof index === 'number' ? `[${index}]` : ''}`;
       }
       this.objectTypes =
         prop?.options?.objectTypes?.length! > 0
@@ -331,6 +342,7 @@ export class PropertyEditor extends Observable<{
   private _rowVersion: number;
   private _builtRowVersion: number;
   private _totalRowsHeight: number;
+  private _groupOpenStates: Map<string, boolean>;
   private readonly _extraPropertiesProviders: Map<
     string,
     (object: any) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>
@@ -353,6 +365,7 @@ export class PropertyEditor extends Observable<{
     this._rowVersion = 0;
     this._builtRowVersion = -1;
     this._totalRowsHeight = 0;
+    this._groupOpenStates = new Map();
     this._extraPropertiesProviders = new Map();
     this._extraPropertiesVersion = 0;
   }
@@ -517,6 +530,7 @@ export class PropertyEditor extends Observable<{
     if (group.prop?.isValid && group.object && !group.prop.isValid.call(group.object)) {
       return;
     }
+    this.applyGroupOpenState(group, toplevel);
     if (this.isInlineObjectArrayGroup(group)) {
       this.appendRow({ type: 'inlineObjectArrayGroup', group, level });
       return;
@@ -544,6 +558,16 @@ export class PropertyEditor extends Observable<{
     }
     for (const subgroup of group.subgroups) {
       this.appendGroupRows(subgroup, level + 1);
+    }
+  }
+  private applyGroupOpenState(group: PropertyGroup, toplevel = false) {
+    if (toplevel) {
+      group.opened = true;
+      return;
+    }
+    const opened = this._groupOpenStates.get(group.statePath);
+    if (opened !== undefined) {
+      group.opened = opened;
     }
   }
   private getPropertyHeight(property: Property<any>) {
@@ -610,12 +634,12 @@ export class PropertyEditor extends Observable<{
   private renderRow(row: PropertyRow) {
     switch (row.type) {
       case 'group':
-        ImGui.PushID(row.id);
+        ImGui.PushID(row.group.statePath);
         this.renderGroup(row.group, row.level, row.toplevel);
         ImGui.PopID();
         break;
       case 'inlineObjectArrayGroup':
-        ImGui.PushID(row.id);
+        ImGui.PushID(row.group.statePath);
         this.renderInlineObjectArrayGroup(row.group, row.level);
         ImGui.PopID();
         break;
@@ -638,10 +662,13 @@ export class PropertyEditor extends Observable<{
       ImGui.SetCursorPosX(baseX + level * 10);
     }
     ImGui.AlignTextToFramePadding();
-    const flags = group.opened ? ImGui.TreeNodeFlags.DefaultOpen : 0;
-    const opened = toplevel ? true : ImGui.TreeNodeEx(group.name, flags);
+    if (!toplevel) {
+      ImGui.SetNextItemOpen(group.opened, ImGui.Cond.Always);
+    }
+    const opened = toplevel ? true : ImGui.TreeNodeEx(group.name, 0);
     if (group.opened !== opened) {
       group.opened = opened;
+      this._groupOpenStates.set(group.statePath, opened);
       this.invalidateRows();
     }
     if (
@@ -741,7 +768,7 @@ export class PropertyEditor extends Observable<{
                 if (group.prop.options?.edit === 'aabb') {
                   this.dispatchEvent('end_edit_aabb', group.value.object[0] as AABB);
                 } else if (group.prop.options?.edit === 'curve1f') {
-                  this.dispatchEvent('end_edit_curve1f', group.value.object[0] as Interpolator, false);
+                  this.dispatchEvent('end_edit_curve1f', group.value.object[0] as Interpolator, null);
                 } else if (group.prop.options?.edit === 'proptrack') {
                   const animation: unknown = group.object;
                   ASSERT(
@@ -840,7 +867,7 @@ export class PropertyEditor extends Observable<{
                 if (group.prop.options?.edit === 'aabb') {
                   this.dispatchEvent('end_edit_aabb', group.value.object[0] as AABB);
                 } else if (group.prop.options?.edit === 'curve1f') {
-                  this.dispatchEvent('end_edit_curve1f', group.value.object[0] as Interpolator, false);
+                  this.dispatchEvent('end_edit_curve1f', group.value.object[0] as Interpolator, null);
                 } else if (group.prop.options?.edit === 'proptrack') {
                   const animation: unknown = group.object;
                   ASSERT(
