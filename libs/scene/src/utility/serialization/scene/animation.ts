@@ -3,6 +3,7 @@ import { AABB, DRef, InterpolatorScalar, Quaternion } from '@zephyr3d/base';
 import { base64ToUint8Array, Matrix4x4, uint8ArrayToBase64 } from '@zephyr3d/base';
 import { Interpolator, Vector3 } from '@zephyr3d/base';
 import { AnimationTrack, Skeleton, SkeletonRig, SkinBinding } from '../../../animation';
+import type { SkeletonBindPose } from '../../../animation';
 import {
   AnimationClip,
   FixedGeometryCacheTrack,
@@ -66,6 +67,27 @@ type SerializedJointDynamicsModifier = {
 };
 
 const jointDynamicsModifierSkeletons = new WeakMap<JointDynamicsModifier, SkeletonRig>();
+
+function encodeSkeletonBindPose(bindPose: SkeletonBindPose): string {
+  return uint8ArrayToBase64(
+    new Uint8Array(
+      new Float32Array([
+        ...bindPose.position,
+        ...bindPose.rotation,
+        ...bindPose.scale
+      ]).buffer
+    )
+  );
+}
+
+function decodeSkeletonBindPose(encoded: string): SkeletonBindPose {
+  const data = new Float32Array(base64ToUint8Array(encoded).buffer);
+  return {
+    position: new Vector3(data[0], data[1], data[2]),
+    rotation: new Quaternion(data[3], data[4], data[5], data[6]),
+    scale: new Vector3(data[7], data[8], data[9])
+  };
+}
 
 function vectorToArray(value: Vector3): number[] {
   return [value.x, value.y, value.z];
@@ -1620,6 +1642,8 @@ export function getSkeletonClass(): SerializableClass {
       ctx: SceneNode,
       init: {
         joints: string[];
+        rootJoint?: string;
+        rootBindPose?: string;
         inverseBindMatrices: string;
         bindPoseMatrices: string;
         bindPose: string;
@@ -1635,10 +1659,12 @@ export function getSkeletonClass(): SerializableClass {
           node!.jointTypeR = 'static';
           return node;
         });
+      const rootJoint = init.rootJoint ? prefabNode.findNodeById(init.rootJoint) : null;
       const inverseBindMatricesArray = new Float32Array(base64ToUint8Array(init.inverseBindMatrices).buffer);
       const bindPoseArray = new Float32Array(
         base64ToUint8Array(init.bindPose ?? init.bindPoseMatrices).buffer
       );
+      const rootBindPose = init.rootBindPose ? decodeSkeletonBindPose(init.rootBindPose) : undefined;
       const inverseBindMatrices: Matrix4x4[] = [];
       const bindPose: { rotation: Quaternion; scale: Vector3; position: Vector3 }[] = [];
       for (let i = 0; i < joints.length; i++) {
@@ -1676,11 +1702,18 @@ export function getSkeletonClass(): SerializableClass {
       let rig =
         (ctx.animationSet.rigs
           .map((ref) => ref.get())
-          .find((item) => !!item && SkeletonRig.getRigKey(item.joints) === SkeletonRig.getRigKey(joints)) as
+          .find(
+            (item) =>
+              !!item &&
+              SkeletonRig.getRigKey(item.joints, item.rootJoint) === SkeletonRig.getRigKey(joints, rootJoint)
+          ) as
           | SkeletonRig
           | undefined) ?? null;
       if (!rig) {
-        rig = new SkeletonRig(joints, bindPose);
+        rig = new SkeletonRig(joints, bindPose, {
+          rootJoint,
+          rootBindPose
+        });
         ctx.animationSet.rigs.push(new DRef(rig));
       }
       const skeleton = new SkinBinding(rig, inverseBindMatrices, joints);
@@ -1699,6 +1732,8 @@ export function getSkeletonClass(): SerializableClass {
         .reduce((a, b) => [...a, ...b], []);
       return {
         joints: obj.joints.map((joint) => joint.persistentId),
+        rootJoint: obj.rig.rootJoint?.persistentId ?? '',
+        rootBindPose: encodeSkeletonBindPose(obj.rig.rootBindPose),
         inverseBindMatrices: uint8ArrayToBase64(new Uint8Array(new Float32Array(inverseBindMatrices).buffer)),
         bindPose: uint8ArrayToBase64(new Uint8Array(new Float32Array(bindPose).buffer)),
         id: obj.persistentId
@@ -1719,6 +1754,8 @@ export function getSkeletonRigClass(): SerializableClass {
       ctx: SceneNode,
       init: {
         joints: string[];
+        rootJoint?: string;
+        rootBindPose?: string;
         bindPoseMatrices: string;
         bindPose: string;
         id: string;
@@ -1733,6 +1770,8 @@ export function getSkeletonRigClass(): SerializableClass {
           node!.jointTypeR = 'static';
           return node;
         });
+      const rootJoint = init.rootJoint ? prefabNode.findNodeById(init.rootJoint) : null;
+      const rootBindPose = init.rootBindPose ? decodeSkeletonBindPose(init.rootBindPose) : undefined;
       const bindPoseArray = new Float32Array(
         base64ToUint8Array(init.bindPose ?? init.bindPoseMatrices).buffer
       );
@@ -1768,7 +1807,10 @@ export function getSkeletonRigClass(): SerializableClass {
           });
         }
       }
-      const rig = new SkeletonRig(joints, bindPose);
+      const rig = new SkeletonRig(joints, bindPose, {
+        rootJoint,
+        rootBindPose
+      });
       rig.persistentId = init.id;
       return {
         obj: rig,
@@ -1781,6 +1823,8 @@ export function getSkeletonRigClass(): SerializableClass {
         .reduce((a, b) => [...a, ...b], []);
       return {
         joints: obj.joints.map((joint) => joint.persistentId),
+        rootJoint: obj.rootJoint?.persistentId ?? '',
+        rootBindPose: encodeSkeletonBindPose(obj.rootBindPose),
         bindPose: uint8ArrayToBase64(new Uint8Array(new Float32Array(bindPose).buffer)),
         id: obj.persistentId
       };

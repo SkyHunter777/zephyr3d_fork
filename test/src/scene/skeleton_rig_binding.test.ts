@@ -2,6 +2,7 @@ import { DRef, Matrix4x4, Quaternion, Vector3 } from '@zephyr3d/base';
 import type { AnimationSet } from '@zephyr3d/scene';
 import {
   NodeRotationTrack,
+  NodeTranslationTrack,
   Scene,
   SceneNode,
   SkeletonModifier,
@@ -100,6 +101,21 @@ function buildHumanoid(parent: SceneNode, prefix: string) {
   ];
 }
 
+function scaleHumanoidLegs(joints: SceneNode[], scale: number) {
+  for (const joint of [
+    joints[14],
+    joints[15],
+    joints[16],
+    joints[17],
+    joints[18],
+    joints[19],
+    joints[20],
+    joints[21]
+  ]) {
+    joint.position.scaleBy(scale);
+  }
+}
+
 describe('SkeletonRig and SkinBinding', () => {
   test('updates shared rig modifiers once while preserving multiple skin bindings', () => {
     const scene = new Scene();
@@ -164,5 +180,179 @@ describe('SkeletonRig and SkinBinding', () => {
 
     expect(copied).toBeTruthy();
     expect(copied!.skeletons.has(dstRig.persistentId)).toBe(true);
+  });
+
+  test('retarget scales humanoid hips translation by leg length', () => {
+    const scene = new Scene();
+    const srcModel = appendNode(scene.rootNode, 'srcModel');
+    const dstModel = appendNode(scene.rootNode, 'dstModel');
+    const srcRoot = appendNode(srcModel, 'SrcRoot');
+    const dstRoot = appendNode(dstModel, 'DstRoot');
+    const srcJoints = buildHumanoid(srcRoot, 'Src');
+    const dstJoints = buildHumanoid(dstRoot, 'Dst');
+    const srcHips = srcJoints[0];
+    const dstHips = dstJoints[0];
+    srcHips.position.setXYZ(0, 0, 0);
+    dstHips.position.setXYZ(0, 0, 0);
+    srcJoints[14].position.setXYZ(0.2, -0.5, 0);
+    srcJoints[15].position.setXYZ(0, -0.5, 0);
+    srcJoints[16].position.setXYZ(0, -0.1, 0.2);
+    srcJoints[17].position.setXYZ(0, 0, 0.2);
+    srcJoints[18].position.setXYZ(-0.2, -0.5, 0);
+    srcJoints[19].position.setXYZ(0, -0.5, 0);
+    srcJoints[20].position.setXYZ(0, -0.1, 0.2);
+    srcJoints[21].position.setXYZ(0, 0, 0.2);
+    for (let i = 14; i <= 21; i++) {
+      dstJoints[i].position.set(srcJoints[i].position);
+    }
+    scaleHumanoidLegs(dstJoints, 2);
+    const srcRig = new SkeletonRig(srcJoints, bindPose(srcJoints));
+    const dstRig = new SkeletonRig(dstJoints, bindPose(dstJoints));
+    srcModel.animationSet.rigs.push(new DRef(srcRig));
+    dstModel.animationSet.rigs.push(new DRef(dstRig));
+
+    const srcClip = srcModel.animationSet.createAnimation('jump')!;
+    srcClip.addSkeleton(srcRig.persistentId);
+    srcClip.addTrack(
+      srcHips,
+      new NodeTranslationTrack('linear', [
+        { time: 0, value: new Vector3(0, 0, 0) },
+        { time: 1, value: new Vector3(0, 0.25, 0) }
+      ])
+    );
+
+    const copied = dstModel.animationSet.copyHumanoidAnimationFrom(
+      srcModel.animationSet as AnimationSet,
+      'jump',
+      'jump_copy'
+    );
+
+    expect(copied).toBeTruthy();
+    const dstTrack = copied!.tracks.get(dstHips)!.find((track) => track instanceof NodeTranslationTrack);
+    expect(dstTrack).toBeInstanceOf(NodeTranslationTrack);
+    const outputs = (dstTrack as NodeTranslationTrack).interpolator.outputs as Float32Array;
+    expect(outputs[1]).toBeCloseTo(0);
+    expect(outputs[4]).toBeCloseTo(0.5);
+  });
+
+  test('retarget handles explicit humanoid root motion modes', () => {
+    const scene = new Scene();
+    const srcModel = appendNode(scene.rootNode, 'srcModel');
+    const dstModel = appendNode(scene.rootNode, 'dstModel');
+    const srcRoot = appendNode(srcModel, 'SrcRoot');
+    const dstRoot = appendNode(dstModel, 'DstRoot');
+    const srcJoints = buildHumanoid(srcRoot, 'Src');
+    const dstJoints = buildHumanoid(dstRoot, 'Dst');
+    srcRoot.position.setXYZ(0, 0.1, 0);
+    dstRoot.position.setXYZ(0, 1, 0);
+    srcJoints[14].position.setXYZ(0.2, -0.5, 0);
+    srcJoints[15].position.setXYZ(0, -0.5, 0);
+    srcJoints[16].position.setXYZ(0, -0.1, 0.2);
+    srcJoints[17].position.setXYZ(0, 0, 0.2);
+    srcJoints[18].position.setXYZ(-0.2, -0.5, 0);
+    srcJoints[19].position.setXYZ(0, -0.5, 0);
+    srcJoints[20].position.setXYZ(0, -0.1, 0.2);
+    srcJoints[21].position.setXYZ(0, 0, 0.2);
+    for (let i = 14; i <= 21; i++) {
+      dstJoints[i].position.set(srcJoints[i].position);
+    }
+    scaleHumanoidLegs(dstJoints, 2);
+
+    const srcRig = new SkeletonRig(srcJoints, bindPose(srcJoints), { rootJoint: srcRoot });
+    const dstRig = new SkeletonRig(dstJoints, bindPose(dstJoints), { rootJoint: dstRoot });
+    srcModel.animationSet.rigs.push(new DRef(srcRig));
+    dstModel.animationSet.rigs.push(new DRef(dstRig));
+
+    const srcClip = srcModel.animationSet.createAnimation('walk')!;
+    srcClip.addSkeleton(srcRig.persistentId);
+    srcClip.addTrack(
+      srcRoot,
+      new NodeTranslationTrack('linear', [
+        { time: 0, value: new Vector3(0, 0.1, 0) },
+        { time: 1, value: new Vector3(0, 0.35, 0) }
+      ])
+    );
+
+    const scaled = dstModel.animationSet.copyHumanoidAnimationFrom(
+      srcModel.animationSet as AnimationSet,
+      'walk',
+      'walk_scaled',
+      { rootMotion: 'scaled' }
+    );
+    expect(scaled).toBeTruthy();
+    const scaledTrack = scaled!.tracks.get(dstRoot)!.find((track) => track instanceof NodeTranslationTrack);
+    expect(scaledTrack).toBeInstanceOf(NodeTranslationTrack);
+    expect(scaledTrack!.target).toBe(dstRoot.persistentId);
+    expect(scaledTrack!.jointIndex).toBe(-1);
+    const scaledOutputs = (scaledTrack as NodeTranslationTrack).interpolator.outputs as Float32Array;
+    expect(scaledOutputs[1]).toBeCloseTo(1);
+    expect(scaledOutputs[4]).toBeCloseTo(1.5);
+
+    const locked = dstModel.animationSet.copyHumanoidAnimationFrom(
+      srcModel.animationSet as AnimationSet,
+      'walk',
+      'walk_locked',
+      { rootMotion: 'locked' }
+    );
+    expect(locked).toBeTruthy();
+    const lockedTrack = locked!.tracks.get(dstRoot)!.find((track) => track instanceof NodeTranslationTrack);
+    expect(lockedTrack).toBeInstanceOf(NodeTranslationTrack);
+    const lockedOutputs = (lockedTrack as NodeTranslationTrack).interpolator.outputs as Float32Array;
+    expect(lockedOutputs[0]).toBeCloseTo(0);
+    expect(lockedOutputs[1]).toBeCloseTo(1);
+    expect(lockedOutputs[2]).toBeCloseTo(0);
+  });
+
+  test('retarget skips non-root humanoid translations unless explicitly preserved', () => {
+    const scene = new Scene();
+    const srcModel = appendNode(scene.rootNode, 'srcModel');
+    const dstModel = appendNode(scene.rootNode, 'dstModel');
+    const srcRoot = appendNode(srcModel, 'SrcRoot');
+    const dstRoot = appendNode(dstModel, 'DstRoot');
+    const srcJoints = buildHumanoid(srcRoot, 'Src');
+    const dstJoints = buildHumanoid(dstRoot, 'Dst');
+    const srcLowerLeg = srcJoints[15];
+    const dstLowerLeg = dstJoints[15];
+    const srcRig = new SkeletonRig(srcJoints, bindPose(srcJoints), { rootJoint: srcRoot });
+    const dstRig = new SkeletonRig(dstJoints, bindPose(dstJoints), { rootJoint: dstRoot });
+    srcModel.animationSet.rigs.push(new DRef(srcRig));
+    dstModel.animationSet.rigs.push(new DRef(dstRig));
+
+    const srcClip = srcModel.animationSet.createAnimation('bend')!;
+    srcClip.addSkeleton(srcRig.persistentId);
+    srcClip.addTrack(
+      srcRoot,
+      new NodeTranslationTrack('linear', [
+        { time: 0, value: Vector3.zero() },
+        { time: 1, value: new Vector3(0, 0.1, 0) }
+      ])
+    );
+    srcClip.addTrack(
+      srcLowerLeg,
+      new NodeTranslationTrack('linear', [
+        { time: 0, value: srcLowerLeg.position.clone() },
+        { time: 1, value: srcLowerLeg.position.clone().addBy(new Vector3(0, 0.2, 0)) }
+      ])
+    );
+
+    const skipped = dstModel.animationSet.copyHumanoidAnimationFrom(
+      srcModel.animationSet as AnimationSet,
+      'bend',
+      'bend_skipped'
+    );
+    expect(skipped).toBeTruthy();
+    expect(skipped!.tracks.get(dstLowerLeg)).toBeUndefined();
+
+    const preserved = dstModel.animationSet.copyHumanoidAnimationFrom(
+      srcModel.animationSet as AnimationSet,
+      'bend',
+      'bend_preserved',
+      { jointTranslations: 'preserve' }
+    );
+    expect(preserved).toBeTruthy();
+    const preservedTrack = preserved!.tracks
+      .get(dstLowerLeg)!
+      .find((track) => track instanceof NodeTranslationTrack);
+    expect(preservedTrack).toBeInstanceOf(NodeTranslationTrack);
   });
 });

@@ -8,7 +8,7 @@ import { NodeRotationTrack } from './rotationtrack';
 import { NodeEulerRotationTrack } from './eulerrotationtrack';
 import { NodeTranslationTrack } from './translationtrack';
 import { NodeScaleTrack } from './scaletrack';
-import type { SkeletonRig, SkinBinding } from './skeleton';
+import type { SkeletonBindPose, SkeletonRig, SkinBinding } from './skeleton';
 import { HumanoidBodyRig } from './skeleton';
 
 /**
@@ -66,6 +66,49 @@ export type StopAnimationOptions = {
   fadeOut?: number;
 };
 
+/** @public */
+export type HumanoidRootMotionMode = 'scaled' | 'copy' | 'locked' | 'none';
+
+/** @public */
+export type HumanoidRootMotionScaleMode = 'legLength' | 'none' | number;
+
+/** @public */
+export type HumanoidRetargetAxisLocks = {
+  x?: boolean;
+  y?: boolean;
+  z?: boolean;
+};
+
+/** @public */
+export type CopyHumanoidAnimationOptions = {
+  /**
+   * Name for the new clip. Ignored when the legacy third `targetName` argument is a string.
+   */
+  targetName?: string;
+  /**
+   * How root translation should be handled.
+   *
+   * - `scaled`: retarget and scale root motion to the destination rig size.
+   * - `copy`: retarget root motion without scale.
+   * - `locked`: write a constant destination bind-pose root translation.
+   * - `none`: do not create a root translation track.
+   */
+  rootMotion?: HumanoidRootMotionMode;
+  /**
+   * Scale used when `rootMotion` is `scaled`.
+   */
+  rootMotionScale?: HumanoidRootMotionScaleMode;
+  /**
+   * Axis locks applied after root motion retargeting. Locked axes stay at the destination bind pose.
+   */
+  lockRootMotionAxes?: HumanoidRetargetAxisLocks;
+  /**
+   * Whether to preserve non-root humanoid translation tracks. These are skipped by default because
+   * retargeting humanoid joints should normally keep the destination skeleton lengths intact.
+   */
+  jointTranslations?: 'skip' | 'preserve';
+};
+
 type JointRetargetRemap = {
   dstNode: SceneNode;
   dstJointIndex: number;
@@ -76,6 +119,7 @@ type JointRetargetRemap = {
   dstBindPos: Vector3;
   translationScale: number;
   translationRotation?: Quaternion;
+  translationAxisLocks?: HumanoidRetargetAxisLocks;
 };
 
 function cloneInterpolator(src: Interpolator): Interpolator {
@@ -92,7 +136,9 @@ function createJointRetargetRemap(
   dstSkeleton: SkeletonRig,
   srcJoint: SceneNode,
   dstJoint: SceneNode,
-  translationRotation?: Quaternion
+  translationRotation?: Quaternion,
+  translationScale?: number,
+  translationAxisLocks?: HumanoidRetargetAxisLocks
 ): JointRetargetRemap {
   const si = srcSkeleton.joints.indexOf(srcJoint);
   const di = dstSkeleton.joints.indexOf(dstJoint);
@@ -108,9 +154,137 @@ function createJointRetargetRemap(
     dstBindRot: dstBindPose.rotation.clone(),
     srcBindPos: srcBindPose.position.clone(),
     dstBindPos: dstBindPose.position.clone(),
-    translationScale: srcLen > 1e-6 ? dstLen / srcLen : 1,
-    translationRotation
+    translationScale: translationScale ?? (srcLen > 1e-6 ? dstLen / srcLen : 1),
+    translationRotation,
+    translationAxisLocks
   };
+}
+
+function createTranslationRetargetRemap(
+  srcNode: SceneNode,
+  dstNode: SceneNode,
+  srcBindPos: Vector3,
+  dstBindPos: Vector3,
+  dstJointIndex: number,
+  translationScale: number,
+  translationRotation?: Quaternion,
+  translationAxisLocks?: HumanoidRetargetAxisLocks
+): JointRetargetRemap {
+  return {
+    dstNode,
+    dstJointIndex,
+    srcNode,
+    srcBindRotInv: Quaternion.identity(),
+    dstBindRot: Quaternion.identity(),
+    srcBindPos: srcBindPos.clone(),
+    dstBindPos: dstBindPos.clone(),
+    translationScale,
+    translationRotation,
+    translationAxisLocks
+  };
+}
+
+function getBindPosition(skeleton: SkeletonRig, joint: SceneNode): Vector3 | null {
+  const index = skeleton.joints.indexOf(joint);
+  return index >= 0 ? skeleton.bindPose[index].position : null;
+}
+
+function getRigBindPoseForNode(skeleton: SkeletonRig, node: SceneNode): SkeletonBindPose {
+  return (
+    skeleton.getBindPoseForJoint(node) ??
+    (node === skeleton.rootJoint
+      ? skeleton.rootBindPose
+      : {
+          position: node.position,
+          rotation: node.rotation,
+          scale: node.scale
+        })
+  );
+}
+
+function getBindDistanceToAncestor(
+  skeleton: SkeletonRig,
+  joint: SceneNode,
+  ancestor: SceneNode
+): number {
+  let distance = 0;
+  let node: SceneNode | null = joint;
+  while (node && node !== ancestor) {
+    const bindPosition = getBindPosition(skeleton, node);
+    if (!bindPosition) {
+      return 0;
+    }
+    distance += bindPosition.magnitude;
+    node = node.parent;
+  }
+  return node === ancestor ? distance : 0;
+}
+
+function getHumanoidLegLength(
+  skeleton: SkeletonRig,
+  side: 'left' | 'right'
+): number {
+  const mapping = skeleton.humanoidJointMapping;
+  if (!mapping) {
+    return 0;
+  }
+  const body = mapping.body;
+  const hips = body[HumanoidBodyRig.Hips];
+  const foot =
+    side === 'left' ? body[HumanoidBodyRig.LeftFoot] : body[HumanoidBodyRig.RightFoot];
+  const toes =
+    side === 'left' ? body[HumanoidBodyRig.LeftToes] : body[HumanoidBodyRig.RightToes];
+  return Math.max(
+    getBindDistanceToAncestor(skeleton, foot, hips),
+    getBindDistanceToAncestor(skeleton, toes, hips)
+  );
+}
+
+function getHumanoidRootMotionScale(srcSkeleton: SkeletonRig, dstSkeleton: SkeletonRig): number {
+  const srcLeftLeg = getHumanoidLegLength(srcSkeleton, 'left');
+  const srcRightLeg = getHumanoidLegLength(srcSkeleton, 'right');
+  const dstLeftLeg = getHumanoidLegLength(dstSkeleton, 'left');
+  const dstRightLeg = getHumanoidLegLength(dstSkeleton, 'right');
+  const srcLegLength = Math.max(srcLeftLeg, srcRightLeg);
+  const dstLegLength = Math.max(dstLeftLeg, dstRightLeg);
+  return srcLegLength > 1e-6 && dstLegLength > 1e-6 ? dstLegLength / srcLegLength : 1;
+}
+
+function findTranslationTrack(tracks: AnimationTrack[] | undefined): NodeTranslationTrack | null {
+  return (tracks?.find((track) => track instanceof NodeTranslationTrack) ?? null) as
+    | NodeTranslationTrack
+    | null;
+}
+
+function applyTranslationAxisLocks(
+  value: Vector3,
+  bindValue: Vector3,
+  locks: HumanoidRetargetAxisLocks | undefined
+) {
+  if (locks?.x) {
+    value.x = bindValue.x;
+  }
+  if (locks?.y) {
+    value.y = bindValue.y;
+  }
+  if (locks?.z) {
+    value.z = bindValue.z;
+  }
+}
+
+function applyTranslationTangentAxisLocks(
+  value: Vector3,
+  locks: HumanoidRetargetAxisLocks | undefined
+) {
+  if (locks?.x) {
+    value.x = 0;
+  }
+  if (locks?.y) {
+    value.y = 0;
+  }
+  if (locks?.z) {
+    value.z = 0;
+  }
 }
 
 function retargetRotation(qSrcAnim: Quaternion, remap: JointRetargetRemap, out: Quaternion): Quaternion {
@@ -137,6 +311,7 @@ function retargetTranslationValue(srcValue: Vector3, remap: JointRetargetRemap, 
     remap.translationRotation.transform(out, out);
   }
   out.addBy(remap.dstBindPos);
+  applyTranslationAxisLocks(out, remap.dstBindPos, remap.translationAxisLocks);
   return out;
 }
 
@@ -146,6 +321,7 @@ function retargetTranslationTangent(srcValue: Vector3, remap: JointRetargetRemap
   if (remap.translationRotation) {
     remap.translationRotation.transform(out, out);
   }
+  applyTranslationTangentAxisLocks(out, remap.translationAxisLocks);
   return out;
 }
 
@@ -251,6 +427,17 @@ function retargetTranslationTrack(
       'vec3',
       new Float32Array(src.interpolator.inputs as Float32Array),
       newOutputs
+    )
+  );
+}
+
+function createConstantTranslationTrack(value: Vector3): NodeTranslationTrack {
+  return new NodeTranslationTrack(
+    new Interpolator(
+      'step',
+      'vec3',
+      new Float32Array([0]),
+      new Float32Array([value.x, value.y, value.z])
     )
   );
 }
@@ -898,9 +1085,30 @@ export class AnimationSet extends Disposable implements IDisposable {
   copyHumanoidAnimationFrom(
     sourceSet: AnimationSet,
     animationName: string,
-    targetName?: string
+    options?: CopyHumanoidAnimationOptions
+  ): AnimationClip | null;
+  copyHumanoidAnimationFrom(
+    sourceSet: AnimationSet,
+    animationName: string,
+    targetName?: string,
+    options?: CopyHumanoidAnimationOptions
+  ): AnimationClip | null;
+  copyHumanoidAnimationFrom(
+    sourceSet: AnimationSet,
+    animationName: string,
+    targetNameOrOptions?: string | CopyHumanoidAnimationOptions,
+    copyOptions?: CopyHumanoidAnimationOptions
   ): AnimationClip | null {
-    const destName = targetName ?? animationName;
+    const options =
+      typeof targetNameOrOptions === 'string'
+        ? copyOptions ?? {}
+        : targetNameOrOptions ?? {};
+    const destName =
+      typeof targetNameOrOptions === 'string'
+        ? targetNameOrOptions
+        : options.targetName ?? animationName;
+    const rootMotion = options.rootMotion ?? 'scaled';
+    const jointTranslations = options.jointTranslations ?? 'skip';
     const sourceClip = sourceSet.get(animationName);
     if (!sourceClip) {
       console.error(`copyHumanoidAnimationFrom: animation '${animationName}' not found in source set`);
@@ -1004,19 +1212,19 @@ export class AnimationSet extends Disposable implements IDisposable {
       return null;
     }
 
-    // Compute the world-space rotation of the parent chain above the Hips joint,
+    // Compute the world-space rotation of the parent chain above a motion node,
     // walking ALL ancestor nodes up to (but not including) the model root.
     // This must include non-joint nodes such as "Armature" in Mixamo rigs, which
     // carry a 90° X rotation that is NOT captured by humanoidRootRotation (which
     // only traverses nodes inside the skeleton joints list).
-    function computeHipsParentChainRotation(
-      hipsNode: SceneNode,
+    function computeParentChainRotation(
+      node: SceneNode,
       modelRoot: SceneNode,
       skeleton: SkeletonRig
     ): Quaternion {
       const result = Quaternion.identity();
       const jointSet = new Set(skeleton.joints);
-      let p = hipsNode.parent;
+      let p = node.parent;
       while (p && p !== modelRoot) {
         if (!jointSet.has(p)) {
           Quaternion.multiply(p.rotation, result, result);
@@ -1028,9 +1236,33 @@ export class AnimationSet extends Disposable implements IDisposable {
 
     const srcHipsNode = srcSkeleton.humanoidJointMapping!.body[HumanoidBodyRig.Hips];
     const dstHipsNode = dstSkeleton.humanoidJointMapping!.body[HumanoidBodyRig.Hips];
-    const srcRootRot = computeHipsParentChainRotation(srcHipsNode, sourceSet.model, srcSkeleton);
-    const dstRootRot = computeHipsParentChainRotation(dstHipsNode, this._model, dstSkeleton);
-    const hipsTranslationRotation = Quaternion.multiply(Quaternion.inverse(dstRootRot), srcRootRot);
+    const srcRootNode = srcSkeleton.rootJoint ?? srcHipsNode;
+    const dstRootNode = dstSkeleton.rootJoint ?? dstHipsNode;
+    const srcRootRot = computeParentChainRotation(srcRootNode, sourceSet.model, srcSkeleton);
+    const dstRootRot = computeParentChainRotation(dstRootNode, this._model, dstSkeleton);
+    const srcRootTranslationTrack = findTranslationTrack(sourceClip.tracks.get(srcRootNode));
+    const srcFallbackHipsTranslationTrack =
+      !srcRootTranslationTrack && srcRootNode !== srcHipsNode
+        ? findTranslationTrack(sourceClip.tracks.get(srcHipsNode))
+        : null;
+    const srcMotionTrack = srcRootTranslationTrack ?? srcFallbackHipsTranslationTrack;
+    const srcMotionNode = srcRootTranslationTrack
+      ? srcRootNode
+      : srcFallbackHipsTranslationTrack
+        ? srcHipsNode
+        : null;
+    const srcMotionParentRot = srcMotionNode
+      ? computeParentChainRotation(srcMotionNode, sourceSet.model, srcSkeleton)
+      : srcRootRot;
+    const rootTranslationRotation = Quaternion.multiply(Quaternion.inverse(dstRootRot), srcMotionParentRot);
+    const rootTranslationScale =
+      rootMotion === 'scaled'
+        ? typeof options.rootMotionScale === 'number'
+          ? options.rootMotionScale
+          : options.rootMotionScale === 'none'
+            ? 1
+            : getHumanoidRootMotionScale(srcSkeleton, dstSkeleton)
+        : 1;
     const jointRemaps: JointRetargetRemap[] = [];
     const mappedSrcNodes = new Set<SceneNode>();
     const mappedDstNodes = new Set<SceneNode>();
@@ -1043,14 +1275,12 @@ export class AnimationSet extends Disposable implements IDisposable {
       }
       mappedSrcNodes.add(srcJoint);
       mappedDstNodes.add(dstJoint);
-      const isHipsBone = srcJoint === srcHipsNode;
       nodeMap.set(srcJoint, dstJoint);
       const remap = createJointRetargetRemap(
         srcSkeleton,
         dstSkeleton,
         srcJoint,
-        dstJoint,
-        isHipsBone ? hipsTranslationRotation : undefined
+        dstJoint
       );
       jointRemaps.push(remap);
       jointRemapBySrcNode.set(srcJoint, remap);
@@ -1077,6 +1307,33 @@ export class AnimationSet extends Disposable implements IDisposable {
       jointRemaps
     );
 
+    if (rootMotion !== 'none') {
+      const dstRootBindPose = getRigBindPoseForNode(dstSkeleton, dstRootNode);
+      let dstRootTrack: NodeTranslationTrack | null = null;
+      if (rootMotion === 'locked') {
+        dstRootTrack = createConstantTranslationTrack(dstRootBindPose.position);
+      } else if (srcMotionTrack && srcMotionNode) {
+        const srcMotionBindPose = getRigBindPoseForNode(srcSkeleton, srcMotionNode);
+        const rootRemap = createTranslationRetargetRemap(
+          srcMotionNode,
+          dstRootNode,
+          srcMotionBindPose.position,
+          dstRootBindPose.position,
+          dstSkeleton.joints.indexOf(dstRootNode),
+          rootTranslationScale,
+          rootTranslationRotation,
+          options.lockRootMotionAxes
+        );
+        dstRootTrack = retargetTranslationTrack(srcMotionTrack, rootRemap);
+      }
+      if (dstRootTrack) {
+        dstRootTrack.name = srcMotionTrack?.name ?? 'translation';
+        dstRootTrack.target = dstRootNode.persistentId;
+        dstRootTrack.jointIndex = dstSkeleton.joints.indexOf(dstRootNode);
+        dstClip.addTrack(dstRootNode, dstRootTrack);
+      }
+    }
+
     for (const srcNode of srcJointsFiltered) {
       const srcTracks = sourceClip.tracks.get(srcNode);
       if (!srcTracks) {
@@ -1093,6 +1350,9 @@ export class AnimationSet extends Disposable implements IDisposable {
         } else if (srcTrack instanceof NodeEulerRotationTrack) {
           continue;
         } else if (srcTrack instanceof NodeTranslationTrack) {
+          if (srcNode === srcRootNode || srcTrack === srcMotionTrack || jointTranslations !== 'preserve') {
+            continue;
+          }
           dstTrack = retargetTranslationTrack(srcTrack, remap);
         } else if (srcTrack instanceof NodeScaleTrack) {
           dstTrack = new NodeScaleTrack(cloneInterpolator(srcTrack.interpolator));

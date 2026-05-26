@@ -115,6 +115,12 @@ export type HumanoidJointMapping<T extends { name: string; parent: Nullable<T>; 
 /** @public */
 export type SkeletonBindPose = { rotation: Quaternion; scale: Vector3; position: Vector3 };
 
+/** @public */
+export type SkeletonRigOptions = {
+  rootJoint?: Nullable<SceneNode>;
+  rootBindPose?: SkeletonBindPose;
+};
+
 type HumanoidJointPattern = {
   all?: string[];
   any?: string[];
@@ -150,12 +156,14 @@ export class SkeletonRig extends Disposable {
   protected _joints: SceneNode[];
   protected _bindPoseByJoint: Map<SceneNode, SkeletonBindPose>;
   protected _bindPose: SkeletonBindPose[];
+  protected _rootJoint: Nullable<SceneNode>;
+  protected _rootBindPose: SkeletonBindPose;
   protected _playing: boolean;
   protected _modifiers: SkeletonModifier[];
   protected _humanoidJointMapping: Nullable<HumanoidJointMapping<SceneNode>>;
   protected _humanoidRootRotation: Quaternion;
 
-  constructor(joints: SceneNode[], bindPose: SkeletonBindPose[]) {
+  constructor(joints: SceneNode[], bindPose: SkeletonBindPose[], options?: SkeletonRigOptions) {
     super();
     this._id = randomUUID();
     this._joints = joints;
@@ -164,10 +172,12 @@ export class SkeletonRig extends Disposable {
     for (let i = 0; i < joints.length; i++) {
       this._bindPoseByJoint.set(joints[i], bindPose[i]);
     }
+    const skeletonRoot = this.findRootJoint(this._joints);
+    this._rootJoint = options?.rootJoint ?? skeletonRoot;
+    this._rootBindPose = options?.rootBindPose ?? this.getNodeBindPose(this._rootJoint);
     this._playing = false;
     this._modifiers = [];
     this.computeBindPose();
-    const skeletonRoot = this.findRootJoint(this._joints);
     if (skeletonRoot) {
       this._humanoidJointMapping = Skeleton.tryExtractHumanoidJoints(skeletonRoot);
       this._humanoidRootRotation = Quaternion.identity();
@@ -185,11 +195,13 @@ export class SkeletonRig extends Disposable {
     SkeletonRig._registry.set(this._id, new DWeakRef(this));
   }
 
-  static getRigKey(joints: SceneNode[]) {
-    return joints
-      .map((joint) => joint.persistentId)
-      .sort()
-      .join('|');
+  static getRigKey(joints: SceneNode[], rootJoint?: Nullable<SceneNode>) {
+    return [
+      rootJoint?.persistentId ?? '',
+      ...joints
+        .map((joint) => joint.persistentId)
+        .sort()
+    ].join('|');
   }
 
   static findRigById(id: string) {
@@ -223,6 +235,19 @@ export class SkeletonRig extends Disposable {
 
   get bindPose() {
     return this._bindPose;
+  }
+
+  get rootJoint(): Nullable<SceneNode> {
+    return this._rootJoint;
+  }
+
+  set rootJoint(joint: Nullable<SceneNode>) {
+    this._rootJoint = joint;
+    this._rootBindPose = this.getNodeBindPose(joint);
+  }
+
+  get rootBindPose(): SkeletonBindPose {
+    return this._rootBindPose;
   }
 
   getBindPoseForJoint(joint: SceneNode) {
@@ -265,6 +290,11 @@ export class SkeletonRig extends Disposable {
       joint.rotation.set(bindpose.rotation);
       joint.scale.set(bindpose.scale);
     }
+    if (this._rootJoint && !this._bindPoseByJoint.has(this._rootJoint)) {
+      this._rootJoint.position.set(this._rootBindPose.position);
+      this._rootJoint.rotation.set(this._rootBindPose.rotation);
+      this._rootJoint.scale.set(this._rootBindPose.scale);
+    }
   }
 
   apply(deltaTime: number): void {
@@ -300,6 +330,21 @@ export class SkeletonRig extends Disposable {
       }
     }
     return root;
+  }
+
+  private getNodeBindPose(node: Nullable<SceneNode>): SkeletonBindPose {
+    const bindPose = node ? this._bindPoseByJoint.get(node) : null;
+    return bindPose
+      ? {
+          position: bindPose.position.clone(),
+          rotation: bindPose.rotation.clone(),
+          scale: bindPose.scale.clone()
+        }
+      : {
+          position: node?.position.clone() ?? Vector3.zero(),
+          rotation: node?.rotation.clone() ?? Quaternion.identity(),
+          scale: node?.scale.clone() ?? Vector3.one()
+        };
   }
 }
 
@@ -396,7 +441,10 @@ export class SkinBinding extends Disposable {
     if (bindPose && bindPose !== rig.bindPose) {
       // Legacy callers used Skeleton as both rig and binding. Keep the old bind
       // pose visible by replacing the rig pose only when explicitly supplied.
-      this._rig = new SkeletonRig(rig.joints, bindPose);
+      this._rig = new SkeletonRig(rig.joints, bindPose, {
+        rootJoint: rig.rootJoint,
+        rootBindPose: rig.rootBindPose
+      });
     }
     this.updateJointMatrices();
     SkinBinding._registry.set(this._id, new DWeakRef(this));

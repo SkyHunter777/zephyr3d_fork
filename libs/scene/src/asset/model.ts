@@ -1029,10 +1029,11 @@ export class SharedModel extends Disposable {
             node.jointTypeR = 'static';
             return node;
           });
-          const rigKey = SkeletonRig.getRigKey(joints);
+          const rootJoint = sk.root ? nodeMap.get(sk.root) ?? null : null;
+          const rigKey = SkeletonRig.getRigKey(joints, rootJoint);
           let rig = rigMap.get(rigKey);
           if (!rig) {
-            rig = new SkeletonRig(joints, sk.bindPose);
+            rig = new SkeletonRig(joints, sk.bindPose, { rootJoint });
             rigMap.set(rigKey, rig);
             group.animationSet.rigs.push(new DRef(rig));
           }
