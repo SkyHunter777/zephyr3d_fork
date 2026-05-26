@@ -70,13 +70,7 @@ const jointDynamicsModifierSkeletons = new WeakMap<JointDynamicsModifier, Skelet
 
 function encodeSkeletonBindPose(bindPose: SkeletonBindPose): string {
   return uint8ArrayToBase64(
-    new Uint8Array(
-      new Float32Array([
-        ...bindPose.position,
-        ...bindPose.rotation,
-        ...bindPose.scale
-      ]).buffer
-    )
+    new Uint8Array(new Float32Array([...bindPose.position, ...bindPose.rotation, ...bindPose.scale]).buffer)
   );
 }
 
@@ -1706,9 +1700,7 @@ export function getSkeletonClass(): SerializableClass {
             (item) =>
               !!item &&
               SkeletonRig.getRigKey(item.joints, item.rootJoint) === SkeletonRig.getRigKey(joints, rootJoint)
-          ) as
-          | SkeletonRig
-          | undefined) ?? null;
+          ) as SkeletonRig | undefined) ?? null;
       if (!rig) {
         rig = new SkeletonRig(joints, bindPose, {
           rootJoint,

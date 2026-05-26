@@ -196,12 +196,7 @@ export class SkeletonRig extends Disposable {
   }
 
   static getRigKey(joints: SceneNode[], rootJoint?: Nullable<SceneNode>) {
-    return [
-      rootJoint?.persistentId ?? '',
-      ...joints
-        .map((joint) => joint.persistentId)
-        .sort()
-    ].join('|');
+    return [rootJoint?.persistentId ?? '', ...joints.map((joint) => joint.persistentId).sort()].join('|');
   }
 
   static findRigById(id: string) {

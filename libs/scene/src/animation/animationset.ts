@@ -202,11 +202,7 @@ function getRigBindPoseForNode(skeleton: SkeletonRig, node: SceneNode): Skeleton
   );
 }
 
-function getBindDistanceToAncestor(
-  skeleton: SkeletonRig,
-  joint: SceneNode,
-  ancestor: SceneNode
-): number {
+function getBindDistanceToAncestor(skeleton: SkeletonRig, joint: SceneNode, ancestor: SceneNode): number {
   let distance = 0;
   let node: SceneNode | null = joint;
   while (node && node !== ancestor) {
@@ -220,20 +216,15 @@ function getBindDistanceToAncestor(
   return node === ancestor ? distance : 0;
 }
 
-function getHumanoidLegLength(
-  skeleton: SkeletonRig,
-  side: 'left' | 'right'
-): number {
+function getHumanoidLegLength(skeleton: SkeletonRig, side: 'left' | 'right'): number {
   const mapping = skeleton.humanoidJointMapping;
   if (!mapping) {
     return 0;
   }
   const body = mapping.body;
   const hips = body[HumanoidBodyRig.Hips];
-  const foot =
-    side === 'left' ? body[HumanoidBodyRig.LeftFoot] : body[HumanoidBodyRig.RightFoot];
-  const toes =
-    side === 'left' ? body[HumanoidBodyRig.LeftToes] : body[HumanoidBodyRig.RightToes];
+  const foot = side === 'left' ? body[HumanoidBodyRig.LeftFoot] : body[HumanoidBodyRig.RightFoot];
+  const toes = side === 'left' ? body[HumanoidBodyRig.LeftToes] : body[HumanoidBodyRig.RightToes];
   return Math.max(
     getBindDistanceToAncestor(skeleton, foot, hips),
     getBindDistanceToAncestor(skeleton, toes, hips)
@@ -251,9 +242,8 @@ function getHumanoidRootMotionScale(srcSkeleton: SkeletonRig, dstSkeleton: Skele
 }
 
 function findTranslationTrack(tracks: AnimationTrack[] | undefined): NodeTranslationTrack | null {
-  return (tracks?.find((track) => track instanceof NodeTranslationTrack) ?? null) as
-    | NodeTranslationTrack
-    | null;
+  return (tracks?.find((track) => track instanceof NodeTranslationTrack) ??
+    null) as NodeTranslationTrack | null;
 }
 
 function applyTranslationAxisLocks(
@@ -272,10 +262,7 @@ function applyTranslationAxisLocks(
   }
 }
 
-function applyTranslationTangentAxisLocks(
-  value: Vector3,
-  locks: HumanoidRetargetAxisLocks | undefined
-) {
+function applyTranslationTangentAxisLocks(value: Vector3, locks: HumanoidRetargetAxisLocks | undefined) {
   if (locks?.x) {
     value.x = 0;
   }
@@ -433,12 +420,7 @@ function retargetTranslationTrack(
 
 function createConstantTranslationTrack(value: Vector3): NodeTranslationTrack {
   return new NodeTranslationTrack(
-    new Interpolator(
-      'step',
-      'vec3',
-      new Float32Array([0]),
-      new Float32Array([value.x, value.y, value.z])
-    )
+    new Interpolator('step', 'vec3', new Float32Array([0]), new Float32Array([value.x, value.y, value.z]))
   );
 }
 
@@ -1100,13 +1082,9 @@ export class AnimationSet extends Disposable implements IDisposable {
     copyOptions?: CopyHumanoidAnimationOptions
   ): AnimationClip | null {
     const options =
-      typeof targetNameOrOptions === 'string'
-        ? copyOptions ?? {}
-        : targetNameOrOptions ?? {};
+      typeof targetNameOrOptions === 'string' ? (copyOptions ?? {}) : (targetNameOrOptions ?? {});
     const destName =
-      typeof targetNameOrOptions === 'string'
-        ? targetNameOrOptions
-        : options.targetName ?? animationName;
+      typeof targetNameOrOptions === 'string' ? targetNameOrOptions : (options.targetName ?? animationName);
     const rootMotion = options.rootMotion ?? 'scaled';
     const jointTranslations = options.jointTranslations ?? 'skip';
     const sourceClip = sourceSet.get(animationName);
@@ -1276,12 +1254,7 @@ export class AnimationSet extends Disposable implements IDisposable {
       mappedSrcNodes.add(srcJoint);
       mappedDstNodes.add(dstJoint);
       nodeMap.set(srcJoint, dstJoint);
-      const remap = createJointRetargetRemap(
-        srcSkeleton,
-        dstSkeleton,
-        srcJoint,
-        dstJoint
-      );
+      const remap = createJointRetargetRemap(srcSkeleton, dstSkeleton, srcJoint, dstJoint);
       jointRemaps.push(remap);
       jointRemapBySrcNode.set(srcJoint, remap);
     }
