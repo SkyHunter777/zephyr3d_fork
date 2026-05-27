@@ -196,6 +196,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           name: 'Id',
           description: 'Unique persistent id for the node',
           type: 'string',
+          readonly: true,
           get(this: SceneNode, value) {
             value.str[0] = this.persistentId;
           },
@@ -207,6 +208,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           name: 'PrefabId',
           description: 'Persistent ID of the prefab source for this node',
           type: 'string',
+          readonly: true,
           isHidden() {
             return true;
           },

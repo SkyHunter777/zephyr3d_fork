@@ -1379,7 +1379,7 @@ export class PropertyEditor extends Observable<{
       const editSessionKey = this.getEditSessionKey(object, property.path);
       ImGui.TableNextColumn();
       ImGui.SetNextItemWidth(-1);
-      const readonly = !value.set;
+      const readonly = !!value.readonly || !value.set;
       let changed = false;
       const tmpProperty = {
         num: [0, 0, 0, 0],
