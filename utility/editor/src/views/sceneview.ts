@@ -1,7 +1,7 @@
 import { ImGui } from '@zephyr3d/imgui';
 import type { SceneModel } from '../models/scenemodel';
 import { PostGizmoRenderer } from './gizmo/postgizmo';
-import type { TransformSpace } from './gizmo/postgizmo';
+import type { LineGizmo, TransformSpace } from './gizmo/postgizmo';
 import { PropertyEditor } from '../components/grid';
 import type {
   Camera,
@@ -28,7 +28,8 @@ import {
   Sprite,
   TextSprite,
   MSDFTextSprite,
-  MSDFText
+  MSDFText,
+  JointDynamicsModifier
 } from '@zephyr3d/scene';
 import { SceneNode } from '@zephyr3d/scene';
 import { DirectionalLight } from '@zephyr3d/scene';
@@ -37,6 +38,7 @@ import { ToolBar } from '../components/toolbar';
 import type { ToolBarItem } from '../components/toolbar';
 import { FontGlyph } from '../core/fontglyph';
 import type { AABB, GenericConstructor, Interpolator, Nullable } from '@zephyr3d/base';
+import { Vector4 } from '@zephyr3d/base';
 import { DRef, HttpFS } from '@zephyr3d/base';
 import { ASSERT, Matrix4x4, Quaternion, Vector3 } from '@zephyr3d/base';
 import type { TRS } from '../types';
@@ -153,6 +155,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   private _syncedPropertySessions: Map<string, Map<SceneNode, SyncedPropertyRecord>>;
   private readonly _editToolContext: EditToolContext;
   private _activePluginContributionShortcuts: boolean;
+  private _springBoneGizmo: LineGizmo;
   constructor(controller: SceneController) {
     super(controller);
     this._cmdManager = new CommandManager();
@@ -175,6 +178,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     this._showDeviceInfo = false;
     this._clipBoardNodes = [];
     this._proxy = null;
+    this._springBoneGizmo = null;
     this._currentEditTool = new DRef();
     this._cameraAnimationEyeFrom = new Vector3();
     this._cameraAnimationTargetFrom = new Vector3();
@@ -1868,6 +1872,31 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     }
     if (this._currentEditTool.get()) {
       this._currentEditTool.get()!.update(dt);
+    }
+    const inspectedObj = this._propGrid.currentObject;
+    if (inspectedObj instanceof JointDynamicsModifier) {
+      const system = inspectedObj.jointDynamicsSystem;
+      const chainConfig = system.chainConfig;
+      if (!this._springBoneGizmo) {
+        this._springBoneGizmo = { lines: [], width: 2, color: new Vector4(1, 1, 0, 1) };
+      }
+      this._springBoneGizmo.lines = [];
+      const vpMatrix = this.controller.model.scene.mainCamera.viewProjectionMatrix;
+      for (const chain of chainConfig.chains) {
+        const line: Vector4[] = [];
+        for (let node = chain.end; ; node = node.parent) {
+          const p = vpMatrix.transformPoint(node.getWorldPosition());
+          line.push(p);
+          if (node === chain.start) {
+            break;
+          }
+        }
+        this._springBoneGizmo.lines.push(line);
+      }
+      this._postGizmoRenderer.addLineGizmo(this._springBoneGizmo);
+    } else if (this._springBoneGizmo) {
+      this._postGizmoRenderer.removeLineGizmo(this._springBoneGizmo);
+      this._springBoneGizmo = null;
     }
   }
   private editCurve1f(curve: Interpolator, name: string, apply: (curve: Interpolator) => void) {

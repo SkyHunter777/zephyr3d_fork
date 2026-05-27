@@ -46,6 +46,7 @@ const selectLineWidth3D = 1;
 const selectLineColor2D = new Vector4(0, 1, 1, 1);
 const selectLineWidth2D = 2;
 
+export type LineGizmo = { lines: Vector4[][]; width?: number; color?: Vector4 };
 export type HitType =
   | 'move_axis'
   | 'move_plane'
@@ -176,6 +177,7 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
   private _rectInfo: Nullable<RectInfo>;
   private _hitInfo: Nullable<GizmoHitInfo>;
   private _transformSpace: TransformSpace;
+  private _lineGizmos: LineGizmo[];
   private readonly _screenSize: number;
   private _drawGrid: boolean;
   private readonly _scaleBox: AABB;
@@ -216,6 +218,7 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
     this._aabbInfo = null;
     this._rectInfo = null;
     this._hitInfo = null;
+    this._lineGizmos = [];
     this._transformSpace = 'world';
     this._screenSize = 0.4;
     this._gridParams = new Vector4(10000, 500, 0, 0);
@@ -362,6 +365,17 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
   set transformSpace(val: TransformSpace) {
     this._transformSpace = val;
   }
+  addLineGizmo(lineGizmo: LineGizmo) {
+    if (!this._lineGizmos.includes(lineGizmo)) {
+      this._lineGizmos.push(lineGizmo);
+    }
+  }
+  removeLineGizmo(lineGizmo: LineGizmo) {
+    const index = this._lineGizmos.indexOf(lineGizmo);
+    if (index >= 0) {
+      this._lineGizmos.splice(index, 1);
+    }
+  }
   endEditAABB(aabb: AABB) {
     if (aabb && aabb === this._aabbForEdit) {
       PostGizmoRenderer._aabbMesh.get()?.off('transformchanged', this.applyAABBChange, this);
@@ -450,6 +464,7 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
       }
     }
     this.renderSelectionOutlines(ctx, destFramebuffer!.getDepthAttachment()!);
+    this.renderLineGizmos(ctx, destFramebuffer!.getDepthAttachment()!);
     PostGizmoRenderer._blendBlitter.renderStates = PostGizmoRenderer._blendRenderState;
     PostGizmoRenderer._blendBlitter.srgbOut = srgbOutput;
     PostGizmoRenderer._blendBlitter.blit(
@@ -2101,19 +2116,33 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
         depthTex
       );
     }
-    /*
-    ctx.device.setRenderStates(PostGizmoRenderer._blendRenderState);
-    PostGizmoRenderer._bindGroup!.setValue('mvpMatrix', PostGizmoRenderer._mvpMatrix);
-    PostGizmoRenderer._bindGroup!.setValue('flip', this.needFlip(ctx.device) ? -1 : 1);
-    PostGizmoRenderer._bindGroup!.setValue('texSize', PostGizmoRenderer._texSize);
-    PostGizmoRenderer._bindGroup!.setValue('cameraNearFar', PostGizmoRenderer._cameraNearFar);
-    PostGizmoRenderer._bindGroup!.setValue('time', (ctx.device.frameInfo.elapsedOverall % 1000) * 0.001);
-    PostGizmoRenderer._bindGroup!.setValue('axisMode', 0);
-    PostGizmoRenderer._bindGroup!.setTexture('depthTex', depthTex, fetchSampler('clamp_nearest_nomip'));
-    ctx.device.setProgram(PostGizmoRenderer._gizmoSelectProgram);
-    ctx.device.setBindGroup(0, PostGizmoRenderer._bindGroup!);
-    PostGizmoRenderer._primitives!['select'][0]!.draw();
-    */
+  }
+  private renderLineGizmos(ctx: DrawContext, depthTex: BaseTexture) {
+    const defaultColor = Vector4.one();
+    const viewport = ctx.device.getViewport();
+    for (const lineGizmo of this._lineGizmos) {
+      for (const line of lineGizmo.lines) {
+        for (let i = 0; i < line.length - 1; i++) {
+          const a = line[i];
+          const b = line[i + 1];
+          this.renderAALine(
+            a.x,
+            a.y,
+            a.z,
+            a.w,
+            b.x,
+            b.y,
+            b.z,
+            b.w,
+            lineGizmo.width ?? 1,
+            lineGizmo.color ?? defaultColor,
+            ctx.device.screenXToDevice(viewport.width),
+            ctx.device.screenYToDevice(viewport.height),
+            depthTex
+          );
+        }
+      }
+    }
   }
   private renderSelectionOutlines(ctx: DrawContext, depthTex: BaseTexture) {
     if (this._selectedNodes.length === 0) {

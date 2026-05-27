@@ -61,6 +61,7 @@ type PropertyRowData =
       group: PropertyGroup;
       level: number;
       toplevel: boolean;
+      navigable: boolean;
     }
   | {
       type: 'inlineObjectArrayGroup';
@@ -343,6 +344,10 @@ export class PropertyEditor extends Observable<{
   private _builtRowVersion: number;
   private _totalRowsHeight: number;
   private _groupOpenStates: Map<string, boolean>;
+  private _currentGroup: PropertyGroup;
+  private _navigationBackStack: string[];
+  private _navigationForwardStack: string[];
+  private _scrollToTopRequested: boolean;
   private readonly _extraPropertiesProviders: Map<
     string,
     (object: any) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>
@@ -366,6 +371,10 @@ export class PropertyEditor extends Observable<{
     this._builtRowVersion = -1;
     this._totalRowsHeight = 0;
     this._groupOpenStates = new Map();
+    this._currentGroup = this._rootGroup;
+    this._navigationBackStack = [];
+    this._navigationForwardStack = [];
+    this._scrollToTopRequested = false;
     this._extraPropertiesProviders = new Map();
     this._extraPropertiesVersion = 0;
   }
@@ -373,8 +382,13 @@ export class PropertyEditor extends Observable<{
     return this._rootGroup.getObject();
   }
   set object(value: any) {
+    const oldObject = this.object;
     this._rootGroup.setObject(value);
-    this.invalidateRows();
+    if (oldObject !== value) {
+      this.resetNavigation();
+    } else {
+      this.invalidateRows();
+    }
     if (this._extraPropertiesProviders.size > 0) {
       const version = ++this._extraPropertiesVersion;
       void this.appendExtraProperties(value, version);
@@ -382,6 +396,116 @@ export class PropertyEditor extends Observable<{
   }
   get root() {
     return this._rootGroup;
+  }
+  get currentObject() {
+    const prop = this._currentGroup.prop;
+    if (!prop) {
+      return this.object;
+    }
+    ASSERT(prop.type === 'object' || prop.type === 'object_array');
+    ASSERT(this._currentGroup.object);
+    const value = { num: [], bool: [], str: [], object: [] };
+    prop.get.call(this._currentGroup.object, value);
+    return value.object[this._currentGroup.index ?? 0];
+  }
+  private resetNavigation() {
+    this._currentGroup = this._rootGroup;
+    this._navigationBackStack = [];
+    this._navigationForwardStack = [];
+    this._scrollToTopRequested = true;
+    this.invalidateRows();
+  }
+  private isObjectNavigationGroup(group: PropertyGroup) {
+    return !!group.prop && (group.prop.type === 'object' || group.prop.type === 'object_array');
+  }
+  private getGroupLabel(group: PropertyGroup) {
+    if (group === this._rootGroup) {
+      return 'Root';
+    }
+    return group.prop?.options?.label ?? group.name;
+  }
+  private findGroupByStatePath(path: string) {
+    const visit = (group: PropertyGroup): Nullable<PropertyGroup> => {
+      if (group.statePath === path) {
+        return group;
+      }
+      for (const property of group.properties) {
+        if (property instanceof PropertyGroup) {
+          const found = visit(property);
+          if (found) {
+            return found;
+          }
+        }
+      }
+      for (const subgroup of group.subgroups) {
+        const found = visit(subgroup);
+        if (found) {
+          return found;
+        }
+      }
+      return null;
+    };
+    return visit(this._rootGroup);
+  }
+  private resolveExistingNavigationGroup(path: string) {
+    let currentPath = path;
+    while (currentPath) {
+      const group = this.findGroupByStatePath(currentPath);
+      if (group && (group === this._rootGroup || this.isObjectNavigationGroup(group))) {
+        return group;
+      }
+      const index = currentPath.lastIndexOf('/');
+      if (index < 0) {
+        break;
+      }
+      currentPath = currentPath.slice(0, index);
+    }
+    return this._rootGroup;
+  }
+  private restoreCurrentGroup(statePath: string) {
+    this._currentGroup = this.resolveExistingNavigationGroup(statePath);
+    this._navigationBackStack = this._navigationBackStack
+      .map((path) => this.resolveExistingNavigationGroup(path).statePath)
+      .filter((path) => path !== this._currentGroup.statePath);
+    this._navigationForwardStack = this._navigationForwardStack
+      .map((path) => this.resolveExistingNavigationGroup(path).statePath)
+      .filter((path) => path !== this._currentGroup.statePath);
+    this.invalidateRows();
+  }
+  private navigateToGroup(group: PropertyGroup, recordHistory = true) {
+    if (group === this._currentGroup) {
+      return;
+    }
+    if (recordHistory) {
+      this._navigationBackStack.push(this._currentGroup.statePath);
+      this._navigationForwardStack = [];
+    }
+    this._currentGroup = group;
+    this._scrollToTopRequested = true;
+    this.invalidateRows();
+  }
+  private navigateBack() {
+    const path = this._navigationBackStack.pop();
+    if (!path) {
+      return;
+    }
+    this._navigationForwardStack.push(this._currentGroup.statePath);
+    this.navigateToGroup(this.resolveExistingNavigationGroup(path), false);
+  }
+  private navigateForward() {
+    const path = this._navigationForwardStack.pop();
+    if (!path) {
+      return;
+    }
+    this._navigationBackStack.push(this._currentGroup.statePath);
+    this.navigateToGroup(this.resolveExistingNavigationGroup(path), false);
+  }
+  private navigateUp() {
+    let parent = this._currentGroup.parent;
+    while (parent && parent !== this._rootGroup && !this.isObjectNavigationGroup(parent)) {
+      parent = parent.parent;
+    }
+    this.navigateToGroup(parent ?? this._rootGroup);
   }
   set extraPropertiesProvider(
     provider: Nullable<(object: any) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>>
@@ -406,7 +530,7 @@ export class PropertyEditor extends Observable<{
   }
   clear() {
     this._rootGroup = new PropertyGroup('Root', this);
-    this.invalidateRows();
+    this.resetNavigation();
   }
   set showLeadingColumn(value: boolean) {
     this._showLeadingColumn = !!value;
@@ -421,11 +545,15 @@ export class PropertyEditor extends Observable<{
   async rebuild() {
     const object = this.object;
     const rawProps = this._rootGroup.rawProperties;
-    this.clear();
+    const currentGroupStatePath = this._currentGroup.statePath;
+    this._rootGroup = new PropertyGroup('Root', this);
+    this._currentGroup = this._rootGroup;
+    this.invalidateRows();
     const version = ++this._extraPropertiesVersion;
     this._rootGroup.setObject(object);
     this._rootGroup.rawProperties = rawProps;
     await this.appendExtraProperties(object, version);
+    this.restoreCurrentGroup(currentGroupStatePath);
   }
   private async appendExtraProperties(object: any, version: number) {
     if (!object || this._extraPropertiesProviders.size === 0) {
@@ -448,6 +576,11 @@ export class PropertyEditor extends Observable<{
     if (this._dirty) {
       this._dirty = false;
       void this.rebuild();
+    }
+    this.renderNavigationBar();
+    if (this._scrollToTopRequested) {
+      ImGui.SetScrollY(0);
+      this._scrollToTopRequested = false;
     }
     const availableWidth = ImGui.GetContentRegionAvail().x;
     const animateLabelWidth = this._showLeadingColumn ? ImGui.GetFrameHeight() : 0;
@@ -491,6 +624,72 @@ export class PropertyEditor extends Observable<{
       ImGui.EndTable();
     }
   }
+  private renderNavigationBar() {
+    const buttonSize = ImGui.GetFrameHeight();
+    ImGui.PushID('property_navigation');
+    this.renderNavigationButton(
+      FontGlyph.glyphs['left-dir'] ?? '<',
+      'Back',
+      this._navigationBackStack.length > 0,
+      () => this.navigateBack()
+    );
+    ImGui.SameLine(0, 0);
+    this.renderNavigationButton(
+      FontGlyph.glyphs['right-dir'] ?? '>',
+      'Forward',
+      this._navigationForwardStack.length > 0,
+      () => this.navigateForward()
+    );
+    ImGui.SameLine(0, 0);
+    this.renderNavigationButton(
+      FontGlyph.glyphs['up-dir'] ?? '^',
+      'Up',
+      this._currentGroup !== this._rootGroup,
+      () => this.navigateUp()
+    );
+    ImGui.SameLine(0, 0);
+    this.renderNavigationButton(
+      FontGlyph.glyphs['home'] ?? 'H',
+      'Root',
+      this._currentGroup !== this._rootGroup,
+      () => this.navigateToGroup(this._rootGroup)
+    );
+    ImGui.SameLine();
+    ImGui.BeginChild('##path', new ImGui.ImVec2(-1, buttonSize));
+    ImGui.AlignTextToFramePadding();
+    ImGui.Text(this.getNavigationPath());
+    if (ImGui.IsItemHovered()) {
+      ImGui.SetTooltip(this.getNavigationPath());
+    }
+    ImGui.EndChild();
+    ImGui.PopID();
+    ImGui.Separator();
+  }
+  private renderNavigationButton(label: string, tooltip: string, enabled: boolean, action: () => void) {
+    if (!enabled) {
+      ImGui.PushStyleVar(ImGui.StyleVar.Alpha, ImGui.GetStyle().Alpha * 0.45);
+    }
+    if (ImGui.Button(`${label}##${tooltip}`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0)) && enabled) {
+      action();
+    }
+    if (ImGui.IsItemHovered()) {
+      ImGui.SetTooltip(tooltip);
+    }
+    if (!enabled) {
+      ImGui.PopStyleVar();
+    }
+  }
+  private getNavigationPath() {
+    const parts: string[] = [];
+    let group: Nullable<PropertyGroup> = this._currentGroup;
+    while (group && group !== this._rootGroup) {
+      if (this.isObjectNavigationGroup(group)) {
+        parts.push(this.getGroupLabel(group));
+      }
+      group = group.parent;
+    }
+    return parts.length > 0 ? `Root / ${parts.reverse().join(' / ')}` : 'Root';
+  }
   private beginVirtualizedContent() {
     const drawList = ImGui.GetWindowDrawList();
     const clipMin = drawList.GetClipRectMin();
@@ -514,7 +713,8 @@ export class PropertyEditor extends Observable<{
     }
     this._rows = [];
     this._totalRowsHeight = 0;
-    this.appendGroupRows(this._rootGroup, 0, true);
+    this._currentGroup = this.resolveExistingNavigationGroup(this._currentGroup.statePath);
+    this.appendGroupRows(this._currentGroup, 0, true);
     this._builtRowVersion = this._rowVersion;
   }
   private appendRow(row: PropertyRowData, height = this._rowHeight) {
@@ -535,8 +735,9 @@ export class PropertyEditor extends Observable<{
       this.appendRow({ type: 'inlineObjectArrayGroup', group, level });
       return;
     }
-    this.appendRow({ type: 'group', group, level, toplevel });
-    if (!toplevel && !group.opened) {
+    const navigable = !toplevel && this.isObjectNavigationGroup(group);
+    this.appendRow({ type: 'group', group, level, toplevel, navigable });
+    if (navigable || (!toplevel && !group.opened)) {
       return;
     }
     for (const property of group.properties) {
@@ -635,7 +836,7 @@ export class PropertyEditor extends Observable<{
     switch (row.type) {
       case 'group':
         ImGui.PushID(row.group.statePath);
-        this.renderGroup(row.group, row.level, row.toplevel);
+        this.renderGroup(row.group, row.level, row.toplevel, row.navigable);
         ImGui.PopID();
         break;
       case 'inlineObjectArrayGroup':
@@ -651,7 +852,7 @@ export class PropertyEditor extends Observable<{
         break;
     }
   }
-  private renderGroup(group: PropertyGroup, level = 0, toplevel = false) {
+  private renderGroup(group: PropertyGroup, level = 0, toplevel = false, navigable = false) {
     ImGui.TableNextRow(0, this._rowHeight);
     if (this._showLeadingColumn) {
       ImGui.TableNextColumn();
@@ -662,14 +863,25 @@ export class PropertyEditor extends Observable<{
       ImGui.SetCursorPosX(baseX + level * 10);
     }
     ImGui.AlignTextToFramePadding();
-    if (!toplevel) {
+    if (!toplevel && !navigable) {
       ImGui.SetNextItemOpen(group.opened, ImGui.Cond.Always);
     }
-    const opened = toplevel ? true : ImGui.TreeNodeEx(group.name, 0);
+    let opened = true;
+    if (navigable) {
+      opened = this.renderObjectNavigationEntry(group);
+    } else if (toplevel) {
+      if (group !== this._rootGroup) {
+        ImGui.TextDisabled(this.getGroupLabel(group));
+      }
+    } else {
+      opened = ImGui.TreeNodeEx(group.name, 0);
+    }
     if (group.opened !== opened) {
       group.opened = opened;
-      this._groupOpenStates.set(group.statePath, opened);
-      this.invalidateRows();
+      if (!navigable && group !== this._currentGroup) {
+        this._groupOpenStates.set(group.statePath, opened);
+        this.invalidateRows();
+      }
     }
     if (
       group.object &&
@@ -924,12 +1136,28 @@ export class PropertyEditor extends Observable<{
         ImGui.EndChild();
       }
     }
-    if (opened && !toplevel) {
+    if (opened && !toplevel && !navigable && group !== this._currentGroup) {
       ImGui.TreePop();
     }
     if (level > 0) {
       ImGui.SetCursorPosX(baseX);
     }
+  }
+  private renderObjectNavigationEntry(group: PropertyGroup) {
+    const label = this.getGroupLabel(group);
+    const hasObject = !!group.value.object?.[0];
+    const suffix = '';
+    const text = `${label}${suffix}`;
+    const prefix = hasObject ? (FontGlyph.glyphs['right-dir'] ?? '>') : '-';
+    const selectableFlags = !hasObject ? ImGui.SelectableFlags.Disabled : ImGui.SelectableFlags.None;
+    const clicked = ImGui.Selectable(`${prefix} ${text}##navigate`, false, selectableFlags);
+    if (clicked && hasObject) {
+      this.navigateToGroup(group);
+    }
+    if (ImGui.IsItemHovered()) {
+      ImGui.SetTooltip(hasObject ? 'Open object properties' : 'No object assigned');
+    }
+    return true;
   }
   private isInlineObjectArrayGroup(group: PropertyGroup) {
     return (
