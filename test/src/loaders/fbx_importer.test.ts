@@ -59,6 +59,7 @@ describe('FBXImporter skeleton-only FBX support', () => {
         false,
         true,
         false,
+        false,
         new NullVFS()
       );
 

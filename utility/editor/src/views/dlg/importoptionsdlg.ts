@@ -28,9 +28,10 @@ export class DlgImportOptions extends DialogRenderer<SaveOptions[]> {
     this._current = 0;
     this._modelNames = names;
     this._options = models.map((model) => ({
-      importMeshes: true,
+      importMeshes: model.primitives.length > 0,
       importSkeletons: model.skeletons.length > 0,
-      importAnimations: model.animations.length > 0
+      importAnimations: model.animations.length > 0,
+      importJointDynamics: model.jointDynamicsSpringBones.length > 0
     }));
   }
   doRender(): void {
@@ -39,10 +40,23 @@ export class DlgImportOptions extends DialogRenderer<SaveOptions[]> {
       this._current = selected[0];
     }
     ImGui.Separator();
+
+    // Mesh option
+    const hasMeshes = this._models[this._current].primitives.length > 0;
+    if (!hasMeshes) {
+      ImGui.PushStyleVar(ImGui.StyleVar.Alpha, ImGui.GetStyle().Alpha * 0.5);
+    }
     const importMeshes = [this._options[this._current].importMeshes] as [boolean];
     if (ImGui.Checkbox('Import Meshes', importMeshes)) {
-      this._options[this._current].importMeshes = importMeshes[0];
+      if (hasMeshes) {
+        this._options[this._current].importMeshes = importMeshes[0];
+      }
     }
+    if (!hasMeshes) {
+      ImGui.PopStyleVar();
+    }
+
+    // Skeleton option
     const hasSkeletons = this._models[this._current].skeletons.length > 0;
     if (!hasSkeletons) {
       ImGui.PushStyleVar(ImGui.StyleVar.Alpha, ImGui.GetStyle().Alpha * 0.5);
@@ -62,6 +76,8 @@ export class DlgImportOptions extends DialogRenderer<SaveOptions[]> {
         DlgSkeletonEditor.editSkeleton('SkeletonEditor', this._models[this._current].skeletons, 500, 500);
       }
     }
+
+    // Animation option
     const hasAnimations = hasSkeletons && this._models[this._current].animations.length > 0;
     if (!hasAnimations) {
       ImGui.PushStyleVar(ImGui.StyleVar.Alpha, ImGui.GetStyle().Alpha * 0.5);
@@ -75,6 +91,24 @@ export class DlgImportOptions extends DialogRenderer<SaveOptions[]> {
     if (!hasAnimations) {
       ImGui.PopStyleVar();
     }
+
+    // Joint dynamics option
+    const hasJointDynamics = hasSkeletons && this._models[this._current].jointDynamicsSpringBones.length > 0;
+    if (!hasJointDynamics) {
+      ImGui.PushStyleVar(ImGui.StyleVar.Alpha, ImGui.GetStyle().Alpha * 0.5);
+    }
+    const importJointDynamics = [hasJointDynamics && this._options[this._current].importJointDynamics] as [
+      boolean
+    ];
+    if (ImGui.Checkbox('Import Joint Dynamics', importJointDynamics)) {
+      if (hasJointDynamics) {
+        this._options[this._current].importJointDynamics = importJointDynamics[0];
+      }
+    }
+    if (!hasJointDynamics) {
+      ImGui.PopStyleVar();
+    }
+
     ImGui.Separator();
     if (ImGui.Button('OK')) {
       this.close(this._options);

@@ -7,6 +7,7 @@ export type SaveOptions = {
   importMeshes: boolean;
   importSkeletons: boolean;
   importAnimations: boolean;
+  importJointDynamics: boolean;
 };
 
 export class ResourceService {
@@ -67,6 +68,7 @@ export class ResourceService {
     const saveMeshes = saveOptions?.importMeshes ?? true;
     const saveSkeletons = saveOptions?.importSkeletons ?? true;
     const saveAnimations = saveOptions?.importAnimations ?? true;
+    const saveJointDynamics = saveOptions?.importJointDynamics ?? true;
     const tmpScene = new Scene();
     const node = await model.createSceneNode(
       manager,
@@ -75,6 +77,7 @@ export class ResourceService {
       saveMeshes,
       saveSkeletons,
       saveAnimations,
+      saveJointDynamics,
       getEngine().resourceManager.VFS
     );
     const numSkeletons = node.animationSet?.skeletons?.length ?? 0;

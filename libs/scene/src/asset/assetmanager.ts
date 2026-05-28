@@ -122,6 +122,26 @@ export type ModelFetchOptions = BaseFetchOptions & {
    */
   enableInstancing?: boolean;
   /**
+   * If true, meshes will be loaded from this model.
+   * Default is true.
+   */
+  loadMeshes?: boolean;
+  /**
+   * If true, rigs and skin bindings will be loaded from this model.
+   * Default is true.
+   */
+  loadSkeletons?: boolean;
+  /**
+   * If true, animations will be loaded from this model.
+   * Default is true.
+   */
+  loadAnimations?: boolean;
+  /**
+   * If true, automatically create joint dynamics (for VRM models only).
+   * Default is true.
+   */
+  loadJointDynamics?: boolean;
+  /**
    * Optional post-process callback applied to the loaded SharedModel before creating nodes.
    * Use this to remap materials, merge meshes, or apply custom data transforms.
    */
@@ -602,10 +622,11 @@ export class AssetManager {
     const node = await sharedModel.createSceneNode(
       getEngine().resourceManager,
       scene,
-      !!options?.enableInstancing,
-      true,
-      true,
-      true,
+      options?.enableInstancing ?? false,
+      options?.loadMeshes ?? true,
+      options?.loadSkeletons ?? true,
+      options?.loadAnimations ?? true,
+      options?.loadJointDynamics ?? true,
       options?.overrideVFS ?? getEngine().resourceManager.VFS
     );
     return node;

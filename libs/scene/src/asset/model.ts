@@ -725,6 +725,10 @@ export class SharedModel extends Disposable {
   get scenes(): AssetScene[] {
     return this._scenes;
   }
+  /** All Primitives that the model contains */
+  get primitives(): AssetPrimitiveInfo[] {
+    return this._primitiveList;
+  }
   /** All nodes that the model contains */
   get nodes(): AssetHierarchyNode[] {
     return this._nodes;
@@ -985,6 +989,7 @@ export class SharedModel extends Disposable {
     saveMeshes: boolean,
     saveSkeletons: boolean,
     saveAnimations: boolean,
+    saveJointDynamics: boolean,
     srcVFS: VFS
   ): Promise<SceneNode> {
     const group = new SceneNode(scene);
@@ -1127,7 +1132,9 @@ export class SharedModel extends Disposable {
         }
       }
     }
-    this.createJointDynamics(group, nodeMap);
+    if (saveJointDynamics && saveSkeletons) {
+      this.createJointDynamics(group, nodeMap);
+    }
     return group;
   }
 

@@ -28,6 +28,7 @@ export abstract class AbstractModelImporter {
       true,
       true,
       true,
+      true,
       vfs ?? getEngine().VFS
     );
   }
