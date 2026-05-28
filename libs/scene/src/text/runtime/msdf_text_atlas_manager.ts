@@ -5,6 +5,10 @@ import { MSDFGlyphAtlas } from './msdf_glyph_atlas';
 const DEFAULT_DISTANCE_RANGE = 8;
 const DEFAULT_PADDING = 6;
 
+/**
+ * Manages MSDF glyph atlases for font assets.
+ * @public
+ */
 export class MSDFTextAtlasManager {
   private readonly _atlases: Map<FontAsset, MSDFGlyphAtlas>;
   constructor() {

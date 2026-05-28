@@ -82,9 +82,7 @@ export class BatchGroup extends GraphNode {
       });
     });
   }
-  /**
-   * {@inheritDoc Drawable.getName}
-   */
+  /** Gets the batch group name. */
   getName() {
     return this._name;
   }

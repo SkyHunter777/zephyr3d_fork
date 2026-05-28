@@ -1359,7 +1359,7 @@ export class AnimationSet extends Disposable implements IDisposable {
    *   skeleton structure matching.
    * @returns The newly created AnimationClip, or null on failure.
    *
-   * @deprecated Use the new {@link AnimationSet.copyHumanoidAnimationFrom} method instead.
+   * @deprecated Use AnimationSet.copyHumanoidAnimationFrom instead.
    */
   copyAnimationFrom(
     sourceSet: AnimationSet,

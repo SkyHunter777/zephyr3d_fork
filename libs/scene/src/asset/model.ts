@@ -63,6 +63,10 @@ export class NamedObject {
   }
 }
 
+/**
+ * Texture sampler settings for model loading.
+ * @public
+ */
 export interface AssetSamplerInfo {
   wrapS: TextureAddressMode;
   wrapT: TextureAddressMode;
@@ -71,17 +75,29 @@ export interface AssetSamplerInfo {
   minFilter: TextureFilterMode;
 }
 
+/**
+ * Image payload information for model loading.
+ * @public
+ */
 export interface AssetImageInfo {
   uri?: string;
   data?: Uint8Array<ArrayBuffer>;
   mimeType?: string;
 }
 
+/**
+ * Vertex buffer payload information for model loading.
+ * @public
+ */
 export interface AssetVertexBufferInfo {
   attrib: VertexAttribFormat;
   data: TypedArray;
 }
 
+/**
+ * Primitive geometry information for model loading.
+ * @public
+ */
 export interface AssetPrimitiveInfo {
   vertices: Record<VertexSemantic, { format: VertexAttribFormat; data: TypedArray }>;
   indices: Nullable<Uint16Array<ArrayBuffer> | Uint32Array<ArrayBuffer>>;
@@ -105,6 +121,10 @@ export interface AssetTextureInfo {
   transform: Nullable<Matrix4x4>;
 }
 
+/**
+ * Resolved material texture information.
+ * @public
+ */
 export interface MaterialTextureInfo {
   texture: Texture2D;
   sampler: TextureSampler;
@@ -277,12 +297,20 @@ export interface AssetAnimationTrack {
   defaultMorphWeights?: number[];
 }
 
+/**
+ * A single geometry cache frame.
+ * @public
+ */
 export interface AssetGeometryCacheFrame {
   positions: Float32Array;
   normals?: Nullable<Float32Array>;
   boundingBox: BoundingBox;
 }
 
+/**
+ * Fixed-vertex geometry cache animation track information.
+ * @public
+ */
 export interface AssetFixedGeometryCacheAnimationTrack {
   node: AssetHierarchyNode;
   type: 'geometry-cache';
@@ -292,6 +320,10 @@ export interface AssetFixedGeometryCacheAnimationTrack {
   frames: AssetGeometryCacheFrame[];
 }
 
+/**
+ * PCA-compressed geometry cache animation track information.
+ * @public
+ */
 export interface AssetPCAGeometryCacheAnimationTrack {
   node: AssetHierarchyNode;
   type: 'geometry-cache';
@@ -308,6 +340,10 @@ export interface AssetPCAGeometryCacheAnimationTrack {
   normalCoefficients?: Nullable<Float32Array[]>;
 }
 
+/**
+ * Geometry cache animation track information.
+ * @public
+ */
 export type AssetGeometryCacheAnimationTrack =
   | AssetFixedGeometryCacheAnimationTrack
   | AssetPCAGeometryCacheAnimationTrack;
@@ -589,6 +625,10 @@ export class AssetScene extends NamedObject {
   }
 }
 
+/**
+ * Spring bone collider shape information.
+ * @public
+ */
 export type AssetSpringBoneColliderShape =
   | {
       type: 'sphere';
@@ -609,17 +649,29 @@ export type AssetSpringBoneColliderShape =
       normal: Vector3;
     };
 
+/**
+ * Spring bone collider information.
+ * @public
+ */
 export interface AssetSpringBoneCollider {
   name?: string;
   node: AssetHierarchyNode;
   shape: AssetSpringBoneColliderShape;
 }
 
+/**
+ * Spring bone collider group information.
+ * @public
+ */
 export interface AssetSpringBoneColliderGroup {
   name?: string;
   colliders: AssetSpringBoneCollider[];
 }
 
+/**
+ * Spring bone joint information.
+ * @public
+ */
 export interface AssetSpringBoneJoint {
   node: AssetHierarchyNode;
   hitRadius: number;
@@ -629,6 +681,10 @@ export interface AssetSpringBoneJoint {
   dragForce: number;
 }
 
+/**
+ * Spring bone chain information.
+ * @public
+ */
 export interface AssetSpringBone {
   name?: string;
   center?: AssetHierarchyNode;
@@ -637,6 +693,10 @@ export interface AssetSpringBone {
   colliderGroups: AssetSpringBoneColliderGroup[];
 }
 
+/**
+ * Joint dynamics collider information.
+ * @public
+ */
 export interface AssetJointDynamicsCollider {
   name?: string;
   node: AssetHierarchyNode;
@@ -645,17 +705,29 @@ export interface AssetJointDynamicsCollider {
   collider: ColliderR;
 }
 
+/**
+ * Joint dynamics chain information.
+ * @public
+ */
 export interface AssetJointDynamicsChain {
   start: AssetHierarchyNode;
   end: AssetHierarchyNode;
 }
 
+/**
+ * Joint dynamics flat plane information.
+ * @public
+ */
 export interface AssetJointDynamicsFlatPlane {
   node: AssetHierarchyNode;
   position: Vector3;
   up: Vector3;
 }
 
+/**
+ * Joint dynamics spring bone information.
+ * @public
+ */
 export interface AssetJointDynamicsSpringBone {
   name?: string;
   center?: AssetHierarchyNode;
@@ -665,6 +737,10 @@ export interface AssetJointDynamicsSpringBone {
   flatPlanes: AssetJointDynamicsFlatPlane[];
 }
 
+/**
+ * Options controlling which model resources are persisted.
+ * @public
+ */
 export type SaveOptions = {
   importMeshes: boolean;
   importSkeletons: boolean;

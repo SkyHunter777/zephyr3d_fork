@@ -3,6 +3,7 @@ import { BaseGraphNode } from '../node';
 
 /**
  * Vertex output node
+ * @public
  */
 export class VertexOutputNode extends BaseGraphNode {
   private _index: number;
@@ -67,6 +68,7 @@ export class VertexOutputNode extends BaseGraphNode {
 
 /**
  * Vertex index input node
+ * @public
  */
 export class VertexIndexNode extends BaseGraphNode {
   /**
@@ -121,6 +123,7 @@ export class VertexIndexNode extends BaseGraphNode {
 
 /**
  * Instance index input node
+ * @public
  */
 export class InstanceIndexNode extends BaseGraphNode {
   /**

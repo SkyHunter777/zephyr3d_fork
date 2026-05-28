@@ -1,6 +1,10 @@
 import type { GlyphContour, GlyphPoint } from '../font';
 import type { ColoredEdge, EdgeColor, MSDFShape } from './types';
 
+/**
+ * Builds an MSDF shape from glyph contours.
+ * @public
+ */
 export function buildMSDFShape(contours: GlyphContour[]): MSDFShape {
   return {
     sourceContours: contours.map((contour) => contour.map(clonePoint)),

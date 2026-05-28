@@ -182,7 +182,9 @@ export class AnimationSet extends Disposable implements IDisposable {
     constructor(model: SceneNode);
     // @deprecated
     copyAnimationFrom(sourceSet: AnimationSet, animationName: string, targetName?: string, excludeJoint?: (jointName: string) => boolean): AnimationClip | null;
-    copyHumanoidAnimationFrom(sourceSet: AnimationSet, animationName: string, targetName?: string): AnimationClip | null;
+    copyHumanoidAnimationFrom(sourceSet: AnimationSet, animationName: string, options?: CopyHumanoidAnimationOptions): AnimationClip | null;
+    // (undocumented)
+    copyHumanoidAnimationFrom(sourceSet: AnimationSet, animationName: string, targetName?: string, options?: CopyHumanoidAnimationOptions): AnimationClip | null;
     createAnimation(name: string, embedded?: boolean): AnimationClip | null;
     deleteAnimation(name: string): void;
     get(name: string): AnimationClip | null;
@@ -193,8 +195,10 @@ export class AnimationSet extends Disposable implements IDisposable {
     get numAnimations(): number;
     protected onDispose(): void;
     playAnimation(name: string, options?: PlayAnimationOptions): void;
+    get rigs(): DRef<SkeletonRig>[];
     setAnimationWeight(name: string, weight: number): void;
-    get skeletons(): DRef<Skeleton>[];
+    get skeletons(): DRef<SkinBinding>[];
+    get skinBindings(): DRef<SkinBinding>[];
     stopAnimation(name: string, options?: StopAnimationOptions): void;
     update(deltaInSeconds: number): void;
 }
@@ -396,7 +400,7 @@ export interface AssetFixedGeometryCacheAnimationTrack {
     // (undocumented)
     codec?: 'fixed';
     // (undocumented)
-    frames: FixedGeometryCacheFrame[];
+    frames: AssetGeometryCacheFrame[];
     // (undocumented)
     node: AssetHierarchyNode;
     // (undocumented)
@@ -411,20 +415,35 @@ export interface AssetFixedGeometryCacheAnimationTrack {
 export type AssetGeometryCacheAnimationTrack = AssetFixedGeometryCacheAnimationTrack | AssetPCAGeometryCacheAnimationTrack;
 
 // @public
+export interface AssetGeometryCacheFrame {
+    // (undocumented)
+    boundingBox: BoundingBox;
+    // (undocumented)
+    normals?: Nullable<Float32Array>;
+    // (undocumented)
+    positions: Float32Array;
+}
+
+// @public
 export class AssetHierarchyNode extends NamedObject {
-    constructor(name: string, parent?: Nullable<AssetHierarchyNode>);
+    constructor(name: string, model: SharedModel, parent?: AssetHierarchyNode);
     addChild(child: AssetHierarchyNode): void;
     attachToSkeleton(skeleton: AssetSkeleton): void;
     get children(): AssetHierarchyNode[];
+    // (undocumented)
+    computeTransforms(parentTransform: Nullable<Matrix4x4>): void;
+    // (undocumented)
+    getWorldPosition(): Vector3;
     get instances(): {
         t: Vector3;
         s: Vector3;
         r: Quaternion;
-    }[] | null;
+    }[];
+    // (undocumented)
+    isParentOf(child: Nullable<AssetHierarchyNode>): boolean;
     get matrix(): Nullable<Matrix4x4>;
     get mesh(): Nullable<AssetMeshData>;
     set mesh(data: Nullable<AssetMeshData>);
-    get meshAttached(): boolean;
     get parent(): Nullable<AssetHierarchyNode>;
     get position(): Vector3;
     set position(val: Vector3);
@@ -442,10 +461,66 @@ export class AssetHierarchyNode extends NamedObject {
 }
 
 // @public
+export interface AssetImageInfo {
+    // (undocumented)
+    data?: Uint8Array<ArrayBuffer>;
+    // (undocumented)
+    mimeType?: string;
+    // (undocumented)
+    uri?: string;
+}
+
+// @public
+export interface AssetJointDynamicsChain {
+    // (undocumented)
+    end: AssetHierarchyNode;
+    // (undocumented)
+    start: AssetHierarchyNode;
+}
+
+// @public
+export interface AssetJointDynamicsCollider {
+    // (undocumented)
+    collider: ColliderR;
+    // (undocumented)
+    localPosition: Vector3;
+    // (undocumented)
+    localRotation: Quaternion;
+    // (undocumented)
+    name?: string;
+    // (undocumented)
+    node: AssetHierarchyNode;
+}
+
+// @public
+export interface AssetJointDynamicsFlatPlane {
+    // (undocumented)
+    node: AssetHierarchyNode;
+    // (undocumented)
+    position: Vector3;
+    // (undocumented)
+    up: Vector3;
+}
+
+// @public
+export interface AssetJointDynamicsSpringBone {
+    // (undocumented)
+    center?: AssetHierarchyNode;
+    // (undocumented)
+    chains: AssetJointDynamicsChain[];
+    // (undocumented)
+    colliders: AssetJointDynamicsCollider[];
+    // (undocumented)
+    controllerConfig: DeepPartial<ControllerConfig, 2>;
+    // (undocumented)
+    flatPlanes: AssetJointDynamicsFlatPlane[];
+    // (undocumented)
+    name?: string;
+}
+
+// @public
 export class AssetManager {
     constructor(resourceManager?: ResourceManager);
-    // Warning: (ae-forgotten-export) The symbol "AbstractModelLoader" needs to be exported by the entry point index.d.ts
-    static addModelLoader(loader: AbstractModelLoader): void;
     // Warning: (ae-forgotten-export) The symbol "AbstractTextureLoader" needs to be exported by the entry point index.d.ts
     static addTextureLoader(loader: AbstractTextureLoader): void;
     clearCache(): void;
@@ -461,40 +536,41 @@ export class AssetManager {
         roots: number[];
         order: number[];
     };
-    fetchBinaryData(url: string, postProcess?: Nullable<(data: ArrayBuffer) => ArrayBuffer>, httpRequest?: Nullable<HttpRequest>, VFSs?: VFS[]): Promise<Nullable<ArrayBuffer>>;
+    fetchBinaryData(url: string, postProcess?: Nullable<(data: ArrayBuffer) => ArrayBuffer>, httpRequest?: Nullable<HttpRequest>, options?: BaseFetchOptions): Promise<Nullable<ArrayBuffer>>;
     // (undocumented)
-    fetchBluePrint(url: string, VFSs?: VFS[]): Promise<Nullable<Record<string, MaterialBlueprintIR>>>;
+    fetchBluePrint(url: string, options?: BaseFetchOptions): Promise<Nullable<Record<string, MaterialBlueprintIR>>>;
     fetchBuiltinTexture<T extends BaseTexture>(name: string, texture?: T): T;
-    fetchFontAsset(url: string, options?: FontAssetFetchOptions, VFSs?: VFS[]): Promise<Nullable<FontAsset>>;
-    fetchJsonData<T = any>(url: string, postProcess?: (json: T) => T, httpRequest?: HttpRequest, VFSs?: VFS[]): Promise<T>;
-    fetchMaterial<T extends Material = Material>(url: string, VFSs?: VFS[]): Promise<Nullable<T>>;
-    fetchModel(scene: Scene, url: string, options?: ModelFetchOptions, VFSs?: VFS[]): Promise<{
-        group: SceneNode;
-        animationSet: AnimationSet;
-    }>;
-    fetchPrimitive<T extends Primitive = Primitive>(url: string, VFSs?: VFS[]): Promise<Nullable<T>>;
-    fetchTextData(url: string, postProcess?: (text: string) => string, httpRequest?: HttpRequest, VFSs?: VFS[]): Promise<string>;
-    fetchTexture<T extends BaseTexture>(url: string, options?: TextureFetchOptions<T>, VFSs?: VFS[]): Promise<T>;
+    fetchFontAsset(url: string, options?: FontAssetFetchOptions): Promise<Nullable<FontAsset>>;
+    fetchJsonData<T = any>(url: string, postProcess?: (json: T) => T, httpRequest?: HttpRequest, options?: BaseFetchOptions): Promise<T>;
+    fetchMaterial<T extends Material = Material>(url: string, options?: BaseFetchOptions): Promise<Nullable<T>>;
+    fetchPrimitive<T extends Primitive = Primitive>(url: string, options?: BaseFetchOptions): Promise<Nullable<T>>;
+    fetchTextData(url: string, postProcess?: (text: string) => string, httpRequest?: HttpRequest, options?: BaseFetchOptions): Promise<string>;
+    fetchTexture<T extends BaseTexture>(url: string, options?: TextureFetchOptions<T>): Promise<T>;
     getFontAsset(url: string): Nullable<FontAsset>;
     // (undocumented)
     invalidateBluePrint(path: string): void;
     // (undocumented)
-    loadBluePrint(path: string, VFSs?: VFS[]): Promise<Record<string, MaterialBlueprintIR> | null>;
+    loadBluePrint(path: string, vfs?: VFS): Promise<Record<string, MaterialBlueprintIR> | null>;
     // (undocumented)
-    loadPrimitive<T extends Primitive = Primitive>(url: string, VFSs?: VFS[]): Promise<Nullable<T>>;
+    loadPrimitive<T extends Primitive = Primitive>(url: string, vfs?: VFS): Promise<Nullable<T>>;
     loadTextureFromBuffer<T extends BaseTexture>(arrayBuffer: ArrayBuffer | TypedArray, mimeType: string, srgb?: boolean, samplerOptions?: SamplerOptions, texture?: BaseTexture): Promise<T>;
     releaseFontAsset(url: string): boolean;
     // (undocumented)
     reloadBluePrintMaterials(filter?: (m: PBRBluePrintMaterial) => boolean): Promise<void>;
     static setBuiltinTextureLoader(name: string, loader: (assetManager: AssetManager) => BaseTexture): void;
+    setModelLoader(mimeType: string, loader: ModelLoader): void;
     get vfs(): VFS;
-    writeFileToVFSs(path: string, data: ArrayBuffer | string, options: WriteOptions, vfsList?: VFS[]): Promise<void>;
+    writeFileToVFSs(path: string, data: ArrayBuffer | string, options: WriteOptions, vfs?: VFS): Promise<void>;
 }
 
 // @public
 export interface AssetMaterial {
     // (undocumented)
     common: AssetMaterialCommon;
+    // (undocumented)
+    material?: MeshMaterial;
+    // (undocumented)
+    path?: string;
     // (undocumented)
     type: string;
 }
@@ -504,13 +580,13 @@ export interface AssetMaterialClearcoat {
     // (undocumented)
     clearCoatFactor?: number;
     // (undocumented)
-    clearCoatIntensityMap?: Nullable<MaterialTextureInfo>;
+    clearCoatIntensityMap?: AssetTextureInfo;
     // (undocumented)
-    clearCoatNormalMap?: Nullable<MaterialTextureInfo>;
+    clearCoatNormalMap?: AssetTextureInfo;
     // (undocumented)
     clearCoatRoughnessFactor?: number;
     // (undocumented)
-    clearCoatRoughnessMap?: Nullable<MaterialTextureInfo>;
+    clearCoatRoughnessMap?: AssetTextureInfo;
 }
 
 // @public
@@ -526,13 +602,13 @@ export interface AssetMaterialCommon {
     // (undocumented)
     emissiveColor?: Vector3;
     // (undocumented)
-    emissiveMap?: Nullable<MaterialTextureInfo>;
+    emissiveMap?: AssetTextureInfo;
     // (undocumented)
     emissiveStrength?: number;
     // (undocumented)
-    normalMap?: Nullable<MaterialTextureInfo>;
+    normalMap?: AssetTextureInfo;
     // (undocumented)
-    occlusionMap?: Nullable<MaterialTextureInfo>;
+    occlusionMap?: AssetTextureInfo;
     // (undocumented)
     occlusionStrength?: number;
     // (undocumented)
@@ -550,9 +626,9 @@ export interface AssetMaterialIridescence {
     // (undocumented)
     iridescenceIor?: number;
     // (undocumented)
-    iridescenceMap?: Nullable<MaterialTextureInfo>;
+    iridescenceMap?: AssetTextureInfo;
     // (undocumented)
-    iridescenceThicknessMap?: Nullable<MaterialTextureInfo>;
+    iridescenceThicknessMap?: AssetTextureInfo;
     // (undocumented)
     iridescenceThicknessMaximum?: number;
     // (undocumented)
@@ -564,11 +640,11 @@ export interface AssetMaterialSheen {
     // (undocumented)
     sheenColorFactor?: Vector3;
     // (undocumented)
-    sheenColorMap?: Nullable<MaterialTextureInfo>;
+    sheenColorMap?: AssetTextureInfo;
     // (undocumented)
     sheenRoughnessFactor?: number;
     // (undocumented)
-    sheenRoughnessMap?: Nullable<MaterialTextureInfo>;
+    sheenRoughnessMap?: AssetTextureInfo;
 }
 
 // @public
@@ -580,17 +656,19 @@ export interface AssetMaterialTransmission {
     // (undocumented)
     thicknessFactor?: number;
     // (undocumented)
-    thicknessMap?: Nullable<MaterialTextureInfo>;
+    thicknessMap?: AssetTextureInfo;
     // (undocumented)
     transmissionFactor?: number;
     // (undocumented)
-    transmissionMap?: Nullable<MaterialTextureInfo>;
+    transmissionMap?: AssetTextureInfo;
 }
 
 // @public
 export interface AssetMeshData {
     // (undocumented)
-    morphWeights?: Nullable<number[]>;
+    morphNames?: string[];
+    // (undocumented)
+    morphWeights?: number[];
     // (undocumented)
     subMeshes: AssetSubMeshData[];
 }
@@ -612,7 +690,7 @@ export interface AssetPBRMaterialMR extends AssetPBRMaterialCommon {
     // (undocumented)
     metallicIndex?: number;
     // (undocumented)
-    metallicMap?: Nullable<MaterialTextureInfo>;
+    metallicMap?: AssetTextureInfo;
     // (undocumented)
     roughness?: number;
     // (undocumented)
@@ -620,11 +698,11 @@ export interface AssetPBRMaterialMR extends AssetPBRMaterialCommon {
     // (undocumented)
     sheen?: AssetMaterialSheen;
     // (undocumented)
-    specularColorMap?: Nullable<MaterialTextureInfo>;
+    specularColorMap?: AssetTextureInfo;
     // (undocumented)
     specularFactor?: Vector4;
     // (undocumented)
-    specularMap?: Nullable<MaterialTextureInfo>;
+    specularMap?: AssetTextureInfo;
     // (undocumented)
     transmission?: AssetMaterialTransmission;
 }
@@ -636,7 +714,7 @@ export interface AssetPBRMaterialSG extends AssetPBRMaterialCommon {
     // (undocumented)
     specular?: Vector3;
     // (undocumented)
-    specularGlossnessMap?: Nullable<MaterialTextureInfo>;
+    specularGlossnessMap?: AssetTextureInfo;
 }
 
 // @public
@@ -670,11 +748,48 @@ export interface AssetPCAGeometryCacheAnimationTrack {
 }
 
 // @public
+export interface AssetPrimitiveInfo {
+    // (undocumented)
+    boxMax: Vector3;
+    // (undocumented)
+    boxMin: Vector3;
+    // (undocumented)
+    indexCount: number;
+    // (undocumented)
+    indices: Nullable<Uint16Array<ArrayBuffer> | Uint32Array<ArrayBuffer>>;
+    // (undocumented)
+    path?: string;
+    // (undocumented)
+    primitive?: Primitive;
+    // (undocumented)
+    type: PrimitiveType;
+    // (undocumented)
+    vertices: Record<VertexSemantic, {
+        format: VertexAttribFormat;
+        data: TypedArray;
+    }>;
+}
+
+// @public
 export interface AssetRotationTrack extends AssetAnimationTrack {
     // (undocumented)
     keyFrames: Record<number, Quaternion[]>;
     // (undocumented)
     nodes: number[];
+}
+
+// @public
+export interface AssetSamplerInfo {
+    // (undocumented)
+    magFilter: TextureFilterMode;
+    // (undocumented)
+    minFilter: TextureFilterMode;
+    // (undocumented)
+    mipFilter: TextureFilterMode;
+    // (undocumented)
+    wrapS: TextureAddressMode;
+    // (undocumented)
+    wrapT: TextureAddressMode;
 }
 
 // @public
@@ -715,12 +830,80 @@ export class AssetSkeleton extends NamedObject {
     inverseBindMatrices: Matrix4x4[];
     joints: AssetHierarchyNode[];
     pivot: Nullable<AssetHierarchyNode>;
+    // (undocumented)
+    get root(): AssetHierarchyNode;
+}
+
+// @public
+export interface AssetSpringBone {
+    // (undocumented)
+    center?: AssetHierarchyNode;
+    // (undocumented)
+    colliderGroups: AssetSpringBoneColliderGroup[];
+    // (undocumented)
+    joints: AssetSpringBoneJoint[];
+    // (undocumented)
+    name?: string;
+    // (undocumented)
+    rootBones?: AssetHierarchyNode[];
+}
+
+// @public
+export interface AssetSpringBoneCollider {
+    // (undocumented)
+    name?: string;
+    // (undocumented)
+    node: AssetHierarchyNode;
+    // (undocumented)
+    shape: AssetSpringBoneColliderShape;
+}
+
+// @public
+export interface AssetSpringBoneColliderGroup {
+    // (undocumented)
+    colliders: AssetSpringBoneCollider[];
+    // (undocumented)
+    name?: string;
+}
+
+// @public
+export type AssetSpringBoneColliderShape = {
+    type: 'sphere';
+    offset: Vector3;
+    radius: number;
+    inside?: boolean;
+} | {
+    type: 'capsule';
+    offset: Vector3;
+    tail: Vector3;
+    radius: number;
+    inside?: boolean;
+} | {
+    type: 'plane';
+    offset: Vector3;
+    normal: Vector3;
+};
+
+// @public
+export interface AssetSpringBoneJoint {
+    // (undocumented)
+    dragForce: number;
+    // (undocumented)
+    gravityDir: Vector3;
+    // (undocumented)
+    gravityPower: number;
+    // (undocumented)
+    hitRadius: number;
+    // (undocumented)
+    node: AssetHierarchyNode;
+    // (undocumented)
+    stiffness: number;
 }
 
 // @public
 export interface AssetSubMeshData {
     // (undocumented)
-    material: DRef<MeshMaterial>;
+    material: Nullable<AssetMaterial>;
     // (undocumented)
     mesh?: Mesh;
     // (undocumented)
@@ -730,7 +913,7 @@ export interface AssetSubMeshData {
     // (undocumented)
     numTargets: number;
     // (undocumented)
-    primitive: DRef<Primitive>;
+    primitive: Nullable<AssetPrimitiveInfo>;
     // (undocumented)
     rawBlendIndices: Nullable<TypedArray>;
     // (undocumented)
@@ -747,6 +930,20 @@ export interface AssetSubMeshData {
 }
 
 // @public
+export interface AssetTextureInfo {
+    // (undocumented)
+    image: Nullable<AssetImageInfo>;
+    // (undocumented)
+    sampler: Nullable<AssetSamplerInfo>;
+    // (undocumented)
+    sRGB?: boolean;
+    // (undocumented)
+    texCoord: number;
+    // (undocumented)
+    transform: Nullable<Matrix4x4>;
+}
+
+// @public
 export interface AssetTranslationTrack extends AssetAnimationTrack {
     // (undocumented)
     keyFrames: Record<number, Vector3[]>;
@@ -759,7 +956,15 @@ export interface AssetUnlitMaterial extends AssetMaterial {
     // (undocumented)
     diffuse?: Vector4;
     // (undocumented)
-    diffuseMap?: Nullable<MaterialTextureInfo>;
+    diffuseMap?: AssetTextureInfo;
+}
+
+// @public
+export interface AssetVertexBufferInfo {
+    // (undocumented)
+    attrib: VertexAttribFormat;
+    // (undocumented)
+    data: TypedArray;
 }
 
 // @public
@@ -789,6 +994,11 @@ export class BaseCameraController {
     _setCamera(camera: Nullable<Camera>): void;
     update(): void;
 }
+
+// @public
+export type BaseFetchOptions = {
+    overrideVFS?: VFS;
+};
 
 // @public
 export abstract class BaseGraphNode extends Observable<{
@@ -904,9 +1114,6 @@ export interface BatchDrawable extends Drawable {
 // @public
 export class BatchGroup extends GraphNode {
     constructor(scene: Scene);
-    // Warning: (ae-unresolved-inheritdoc-reference) The @inheritDoc reference could not be resolved: No member was found with name "getName"
-    //
-    // (undocumented)
     getName(): string;
     invalidate(): void;
     isBatchGroup(): this is BatchGroup;
@@ -1168,7 +1375,7 @@ export function buildConstraints(rootPoints: BoneNode[], options: ConstraintBuil
 // @public
 export function buildForwardPlusGraph(graph: RenderGraph, ctx: DrawContext, renderQueue: RenderQueue, options: ForwardPlusOptions): RGHandle;
 
-// @public (undocumented)
+// @public
 export function buildMSDFShape(contours: GlyphContour[]): MSDFShape;
 
 // @public
@@ -2032,12 +2239,24 @@ export interface ControllerConfig {
 }
 
 // @public
+export type ControllerConfigUpdate = DeepPartial<ControllerConfig, 2>;
+
+// @public
 export class CopyBlitter extends Blitter {
     // @override
     protected calcHash(): string;
     // @override
     filter(scope: PBInsideFunctionScope, type: BlitType, srcTex: PBShaderExp, srcUV: PBShaderExp, srcLayer: PBShaderExp, sampleType: 'float' | 'int' | 'uint'): PBShaderExp;
 }
+
+// @public (undocumented)
+export type CopyHumanoidAnimationOptions = {
+    targetName?: string;
+    rootMotion?: HumanoidRootMotionMode;
+    rootMotionScale?: HumanoidRootMotionScaleMode;
+    lockRootMotionAxes?: HumanoidRetargetAxisLocks;
+    jointTranslations?: 'skip' | 'preserve';
+};
 
 // @public
 export class CosHNode extends GenericMathNode {
@@ -2089,7 +2308,7 @@ export function createSpringParticle(position: Vector3, options?: {
 }): SpringParticle;
 
 // @public
-export function createTransformAccess(obj: SceneNode): TransformAccess;
+export function createTransformAccess(obj: SceneNode, exposeNode?: boolean): TransformAccess;
 
 // @public
 export class CrossProductNode extends GenericMathNode {
@@ -2996,13 +3215,13 @@ export class FontAsset {
     get msdfGlyphSize(): number;
 }
 
-// @public (undocumented)
-export type FontAssetFetchOptions = {
+// @public
+export type FontAssetFetchOptions = BaseFetchOptions & {
     pageSize?: number;
     glyphSize?: number;
 };
 
-// @public (undocumented)
+// @public
 export type FontAssetMSDFAtlasSettings = Readonly<{
     pageSize: number;
     glyphSize: number;
@@ -3714,6 +3933,19 @@ export type HumanoidJointMapping<T extends {
     rightHand?: Record<HumanoidHandRig, T>;
 };
 
+// @public (undocumented)
+export type HumanoidRetargetAxisLocks = {
+    x?: boolean;
+    y?: boolean;
+    z?: boolean;
+};
+
+// @public (undocumented)
+export type HumanoidRootMotionMode = 'scaled' | 'copy' | 'locked' | 'none';
+
+// @public (undocumented)
+export type HumanoidRootMotionScaleMode = 'legLength' | 'none' | number;
+
 // @public
 export interface IAttachedScript {
     id: string;
@@ -3842,7 +4074,7 @@ export interface IKJoint {
 // @public
 export class IKModifier<Solver extends IKSolver = IKSolver> extends SkeletonModifier {
     constructor(solver: Solver, target: Vector3, weight?: number);
-    apply(_skeleton: Skeleton, _deltaTime: number): void;
+    apply(_skeleton: SkeletonRig, _deltaTime: number): void;
     // (undocumented)
     protected _getWeight(): number;
     reset(): void;
@@ -4186,11 +4418,31 @@ export interface JointDynamicsColliderHandle {
 }
 
 // @public
+export interface JointDynamicsColliderSnapshot {
+    // (undocumented)
+    enabled: boolean;
+    // (undocumented)
+    r: ColliderR;
+    // (undocumented)
+    transform: unknown;
+}
+
+// @public
 export interface JointDynamicsFlatPlaneHandle {
     // (undocumented)
     readonly id: number;
     // (undocumented)
     readonly type: 'flatPlane';
+}
+
+// @public
+export interface JointDynamicsFlatPlaneSnapshot {
+    // (undocumented)
+    enabled: boolean;
+    // (undocumented)
+    position: Vector3;
+    // (undocumented)
+    up: Vector3;
 }
 
 // @public
@@ -4202,9 +4454,19 @@ export interface JointDynamicsGrabberHandle {
 }
 
 // @public
+export interface JointDynamicsGrabberSnapshot {
+    // (undocumented)
+    enabled: boolean;
+    // (undocumented)
+    r: GrabberR;
+    // (undocumented)
+    transform: unknown;
+}
+
+// @public
 export class JointDynamicsModifier extends SkeletonModifier {
     constructor(jointDynamicsSystem: JointDynamicsSystem);
-    apply(_skeleton: Skeleton, deltaTime: number): void;
+    apply(_skeleton: SkeletonRig, deltaTime: number): void;
     // (undocumented)
     protected _getWeight(): number;
     get jointDynamicsSystem(): JointDynamicsSystem;
@@ -4233,7 +4495,11 @@ export class JointDynamicsSystem {
     addFlatPlane(up: Vector3, position: Vector3): JointDynamicsFlatPlaneHandle;
     addGrabber(r: GrabberR, transform?: SceneNode): JointDynamicsGrabberHandle;
     addSphereCollider(radius: number, transform?: SceneNode, friction?: number, inversed?: boolean): JointDynamicsColliderHandle;
+    get chainConfig(): JointChainConfig;
     get controller(): JointDynamicsSystemController;
+    getColliderSnapshots(): JointDynamicsColliderSnapshot[];
+    getFlatPlaneSnapshots(): JointDynamicsFlatPlaneSnapshot[];
+    getGrabberSnapshots(): JointDynamicsGrabberSnapshot[];
     removeCollider(handle: JointDynamicsColliderHandle): boolean;
     removeColliderAt(index: number): boolean;
     removeFlatPlane(handle: JointDynamicsFlatPlaneHandle): boolean;
@@ -4259,6 +4525,10 @@ export class JointDynamicsSystemController {
     fadeOut(seconds: number): void;
     fixPoint(index: number): void;
     get flatPlaneCount(): number;
+    getColliderSnapshots(): JointDynamicsColliderSnapshot[];
+    getConfig(): ControllerConfig;
+    getFlatPlaneSnapshots(): JointDynamicsFlatPlaneSnapshot[];
+    getGrabberSnapshots(): JointDynamicsGrabberSnapshot[];
     getResults(): Array<{
         position: Vector3;
         rotation: Quaternion;
@@ -4288,6 +4558,7 @@ export class JointDynamicsSystemController {
     setBroadPhaseEnabled(enabled: boolean): void;
     setColliderEnabled(handle: JointDynamicsColliderHandle, enabled: boolean): boolean;
     setColliderEnabledAt(index: number, enabled: boolean): boolean;
+    setConfig(config: ControllerConfig): void;
     setFlatPlaneEnabled(handle: JointDynamicsFlatPlaneHandle, enabled: boolean): boolean;
     setFlatPlaneEnabledAt(index: number, enabled: boolean): boolean;
     setGrabberEnabled(handle: JointDynamicsGrabberHandle, enabled: boolean): boolean;
@@ -4295,6 +4566,7 @@ export class JointDynamicsSystemController {
     setPaused(paused: boolean): void;
     setWindForce(wind: Vector3): void;
     step(deltaTime: number): void;
+    updateConfig(config: ControllerConfigUpdate): void;
     warp(): void;
 }
 
@@ -4480,13 +4752,13 @@ export interface MaterialBlueprintIRBehaviors {
 // @public
 export interface MaterialTextureInfo {
     // (undocumented)
-    sampler: Nullable<TextureSampler>;
+    sampler: TextureSampler;
     // (undocumented)
     texCoord: number;
     // (undocumented)
-    texture: Nullable<Texture2D>;
+    texture: Texture2D;
     // (undocumented)
-    transform: Nullable<Matrix4x4>;
+    transform: Matrix4x4;
 }
 
 // @public
@@ -4569,6 +4841,9 @@ export class Mesh extends MeshBase implements BatchDrawable {
     // (undocumented)
     get skeletonName(): string;
     set skeletonName(name: string);
+    // (undocumented)
+    get skinBindingName(): string;
+    set skinBindingName(name: string);
     update(frameId: number, elapsedInSeconds: number, deltaInSeconds: number): void;
     updateMorphWeights(weight: number[]): void;
 }
@@ -4690,10 +4965,14 @@ export class MixNode extends GenericMathNode {
 }
 
 // @public
-export type ModelFetchOptions = {
+export type ModelFetchOptions = BaseFetchOptions & {
     mimeType?: string;
     dracoDecoderModule?: DecoderModule;
     enableInstancing?: boolean;
+    loadMeshes?: boolean;
+    loadSkeletons?: boolean;
+    loadAnimations?: boolean;
+    loadJointDynamics?: boolean;
     postProcess?: (model: SharedModel) => SharedModel;
 };
 
@@ -4702,6 +4981,12 @@ export type ModelInfo = {
     group: SceneNode;
     animationSet: AnimationSet;
 };
+
+// @public
+export interface ModelLoader {
+    // (undocumented)
+    loadModel(path: string, vfs?: VFS): Promise<SharedModel>;
+}
 
 // @public
 export class ModNode extends GenericMathNode {
@@ -4867,7 +5152,7 @@ export class MSDFText extends GraphNode {
     update(): void;
 }
 
-// @public (undocumented)
+// @public
 export class MSDFTextAtlasManager {
     constructor();
     // (undocumented)
@@ -6007,7 +6292,7 @@ export class ProjectionMatrixNode extends BaseGraphNode {
 }
 
 // @public
-export type PropEdit = 'aabb' | 'quaternion' | 'proptrack';
+export type PropEdit = 'aabb' | 'quaternion' | 'proptrack' | 'curve1f';
 
 // @public
 export type PropertyAccessor<T = object, U extends string = ''> = {
@@ -6436,14 +6721,11 @@ export class ResourceManager {
     deserializeObject<T extends object>(ctx: any, json: Record<string, unknown>): Promise<Nullable<T>>;
     deserializeObjectProps(obj: any, json: any, info?: SerializableClass): Promise<void>;
     get editorMode(): boolean;
-    fetchBinary(path: string): Promise<Nullable<ArrayBuffer>>;
+    fetchBinary(path: string, options?: BaseFetchOptions): Promise<Nullable<ArrayBuffer>>;
     fetchFontAsset(path: string, options?: FontAssetFetchOptions): Promise<Nullable<FontAsset>>;
-    fetchMaterial<T extends Material = MeshMaterial>(path: string): Promise<Nullable<T>>;
-    fetchModel(path: string, scene: Scene, options?: ModelFetchOptions): Promise<{
-        group: SceneNode;
-        animationSet: AnimationSet;
-    }>;
-    fetchPrimitive<T extends Primitive = Primitive>(path: string): Promise<Nullable<T>>;
+    fetchMaterial<T extends Material = MeshMaterial>(path: string, options?: BaseFetchOptions): Promise<Nullable<T>>;
+    fetchModel(path: string, scene: Scene, options?: ModelFetchOptions): Promise<SceneNode>;
+    fetchPrimitive<T extends Primitive = Primitive>(path: string, options?: BaseFetchOptions): Promise<Nullable<T>>;
     fetchTexture<T extends Texture2D | TextureCube | Texture2DArray>(path: string, options?: TextureFetchOptions<T>): Promise<T>;
     findAnimationTarget(node: SceneNode, track: PropertyTrack): object | null;
     getAllPropertiesByClass(cls: Nullable<SerializableClass>): PropertyAccessor[];
@@ -6475,6 +6757,7 @@ export class ResourceManager {
     serializeObject(obj: any, json?: any, asyncTasks?: Nullable<Promise<unknown>[]>): Promise<any>;
     serializeObjectProps(obj: any, json?: any, asyncTasks?: Nullable<Promise<unknown>[]>, info?: SerializableClass): Promise<any>;
     setAssetId(asset: unknown, id?: Nullable<string>): void;
+    setModelLoader(mimeType: string, loader: ModelLoader): void;
     get VFS(): VFS;
     set VFS(vfs: VFS);
 }
@@ -6701,6 +6984,13 @@ export class SaturateNode extends GenericMathNode {
     };
 }
 
+// @public
+export type SaveOptions = {
+    importMeshes: boolean;
+    importSkeletons: boolean;
+    importAnimations: boolean;
+};
+
 // Warning: (ae-forgotten-export) The symbol "Scene_base" needs to be exported by the entry point index.d.ts
 //
 // @public
@@ -6767,7 +7057,9 @@ export class SceneNode extends SceneNode_base implements IDisposable {
     computeWorldBoundingVolume(localBV: Nullable<BoundingVolume>): Nullable<BoundingVolume>;
     findNodeById<T extends SceneNode>(id: string): T;
     findNodeByName<T extends SceneNode>(name: string): Nullable<T>;
-    findSkeletonById(id: string): Skeleton | null;
+    findSkeletonById(id: string): SkinBinding | null;
+    findSkeletonRigById(id: string): SkeletonRig | null;
+    findSkinBindingById(id: string): SkinBinding | null;
     getBoundingVolume(): Nullable<BoundingVolume>;
     getPrefabNode(): Nullable<SceneNode>;
     getWorldBoundingVolume(): Nullable<BoundingVolume>;
@@ -7233,22 +7525,40 @@ export type ShapeType = BoxShape | BoxFrameShape | CapsuleShape | SphereShape | 
 
 // @public
 export class SharedModel extends Disposable {
-    constructor(name?: string);
+    constructor();
     get activeScene(): number;
     set activeScene(val: number);
     addAnimation(animation: AssetAnimationData): void;
-    addNode(parent: Nullable<AssetHierarchyNode>, index: number, name: string): AssetHierarchyNode;
+    // (undocumented)
+    addPrimitive(prim: AssetPrimitiveInfo): void;
     addSkeleton(skeleton: AssetSkeleton): void;
     get animations(): AssetAnimationData[];
     // (undocumented)
-    createSceneNode(scene: Scene, instancing: boolean): SceneNode;
-    get name(): string;
-    set name(val: string);
+    createJointDynamics(rootNode: SceneNode, nodeMap: Map<AssetHierarchyNode, SceneNode>): void;
+    // (undocumented)
+    createSceneNode(manager: ResourceManager, scene: Scene, instancing: boolean, saveMeshes: boolean, saveSkeletons: boolean, saveAnimations: boolean, saveJointDynamics: boolean, srcVFS: VFS): Promise<SceneNode>;
+    // (undocumented)
+    getImage(index: number): AssetImageInfo;
+    // (undocumented)
+    getMaterial(hash: string): AssetMaterial;
+    get jointDynamicsColliders(): AssetJointDynamicsCollider[];
+    get jointDynamicsSpringBones(): AssetJointDynamicsSpringBone[];
     get nodes(): AssetHierarchyNode[];
     // (undocumented)
     protected onDispose(): void;
+    preprocess(manager: ResourceManager, name: string, destPath: string, srcVFS: VFS, dstVFS: VFS): Promise<void>;
+    get primitives(): AssetPrimitiveInfo[];
     get scenes(): AssetScene[];
+    // (undocumented)
+    setImage(index: number, img: AssetImageInfo): void;
+    // (undocumented)
+    setMaterial(hash: string, material: AssetMaterial): void;
     get skeletons(): AssetSkeleton[];
+    get springBoneColliderGroups(): AssetSpringBoneColliderGroup[];
+    get springBoneColliders(): AssetSpringBoneCollider[];
+    get springBones(): AssetSpringBone[];
+    // (undocumented)
+    static writePrimitive(vfs: VFS, primitive: AssetPrimitiveInfo, path: string): Promise<void>;
 }
 
 // @public
@@ -7327,12 +7637,118 @@ export class SinNode extends GenericMathNode {
 }
 
 // @public
-export class Skeleton extends Disposable {
-    constructor(joints: SceneNode[], inverseBindMatrices: Matrix4x4[], bindPose: {
-        rotation: Quaternion;
-        scale: Vector3;
-        position: Vector3;
-    }[]);
+export class Skeleton extends SkinBinding {
+    constructor(joints: SceneNode[], inverseBindMatrices: Matrix4x4[], bindPose: SkeletonBindPose[]);
+    // (undocumented)
+    static findSkeletonById(id: string): Nullable<SkinBinding>;
+    // (undocumented)
+    static tryExtractHumanoidJoints: typeof SkinBinding.tryExtractHumanoidJoints;
+    // (undocumented)
+    static tryExtractHumanoidJointsBiped: typeof SkinBinding.tryExtractHumanoidJointsBiped;
+    // (undocumented)
+    static tryExtractHumanoidJointsMixamo: typeof SkinBinding.tryExtractHumanoidJointsMixamo;
+    // (undocumented)
+    static tryExtractHumanoidJointsUnityHumanoid: typeof SkinBinding.tryExtractHumanoidJointsUnityHumanoid;
+    // (undocumented)
+    static tryExtractHumanoidJointsVRM: typeof SkinBinding.tryExtractHumanoidJointsVRM;
+}
+
+// @public (undocumented)
+export type SkeletonBindPose = {
+    rotation: Quaternion;
+    scale: Vector3;
+    position: Vector3;
+};
+
+// @public
+export abstract class SkeletonModifier {
+    constructor();
+    abstract apply(skeleton: SkeletonRig, deltaTime: number): void;
+    get enabled(): boolean;
+    set enabled(value: boolean);
+    protected _enabled: boolean;
+    protected abstract _getWeight(): number;
+    abstract reset(): void;
+    protected abstract _setWeight(_value: number): void;
+    get weight(): number;
+    set weight(value: number);
+}
+
+// @public
+export class SkeletonRig extends Disposable {
+    constructor(joints: SceneNode[], bindPose: SkeletonBindPose[], options?: SkeletonRigOptions);
+    // (undocumented)
+    apply(deltaTime: number): void;
+    // (undocumented)
+    get bindPose(): SkeletonBindPose[];
+    // (undocumented)
+    protected _bindPose: SkeletonBindPose[];
+    // (undocumented)
+    protected _bindPoseByJoint: Map<SceneNode, SkeletonBindPose>;
+    // (undocumented)
+    computeBindPose(): void;
+    // (undocumented)
+    static findRigById(id: string): Nullable<SkeletonRig>;
+    // (undocumented)
+    getBindPoseForJoint(joint: SceneNode): SkeletonBindPose | null;
+    // (undocumented)
+    getJointIndex(joint: SceneNode): number;
+    // (undocumented)
+    getJointIndexByName(jointName: string): number;
+    // (undocumented)
+    static getRigKey(joints: SceneNode[], rootJoint?: Nullable<SceneNode>): string;
+    // (undocumented)
+    get humanoidJointMapping(): Nullable<HumanoidJointMapping<SceneNode>>;
+    // (undocumented)
+    protected _humanoidJointMapping: Nullable<HumanoidJointMapping<SceneNode>>;
+    // (undocumented)
+    get humanoidRootRotation(): Quaternion;
+    // (undocumented)
+    protected _humanoidRootRotation: Quaternion;
+    // (undocumented)
+    protected _id: string;
+    // (undocumented)
+    get joints(): SceneNode[];
+    // (undocumented)
+    protected _joints: SceneNode[];
+    // (undocumented)
+    get modifiers(): SkeletonModifier[];
+    // (undocumented)
+    protected _modifiers: SkeletonModifier[];
+    // (undocumented)
+    protected onDispose(): void;
+    // (undocumented)
+    get persistentId(): string;
+    set persistentId(val: string);
+    // (undocumented)
+    get playing(): boolean;
+    set playing(b: boolean);
+    // (undocumented)
+    protected _playing: boolean;
+    // (undocumented)
+    reset(): void;
+    // (undocumented)
+    get rootBindPose(): SkeletonBindPose;
+    // (undocumented)
+    protected _rootBindPose: SkeletonBindPose;
+    // (undocumented)
+    get rootJoint(): Nullable<SceneNode>;
+    set rootJoint(joint: Nullable<SceneNode>);
+    // (undocumented)
+    protected _rootJoint: Nullable<SceneNode>;
+}
+
+// @public (undocumented)
+export type SkeletonRigOptions = {
+    rootJoint?: Nullable<SceneNode>;
+    rootBindPose?: SkeletonBindPose;
+};
+
+// @public
+export class SkinBinding extends Disposable {
+    constructor(rig: SkeletonRig, inverseBindMatrices: Matrix4x4[], joints?: SceneNode[], bindPose?: SkeletonBindPose[]);
+    // (undocumented)
+    static findSkeletonById(id: string): Nullable<SkinBinding>;
     getBoundingInfo(data: {
         positions: Float32Array;
         blendIndices: TypedArray;
@@ -7352,6 +7768,8 @@ export class Skeleton extends Disposable {
     // (undocumented)
     get playing(): boolean;
     set playing(b: boolean);
+    // (undocumented)
+    get rig(): SkeletonRig;
     static tryExtractHumanoidJoints<T extends {
         name: string;
         parent: Nullable<T>;
@@ -7381,20 +7799,6 @@ export class Skeleton extends Disposable {
         parent: Nullable<T>;
         children: T[];
     }>(root: T): HumanoidJointMapping<T> | null;
-}
-
-// @public
-export abstract class SkeletonModifier {
-    constructor();
-    abstract apply(skeleton: Skeleton, deltaTime: number): void;
-    get enabled(): boolean;
-    set enabled(value: boolean);
-    protected _enabled: boolean;
-    protected abstract _getWeight(): number;
-    abstract reset(): void;
-    protected abstract _setWeight(_value: number): void;
-    get weight(): number;
-    set weight(value: number);
 }
 
 // @public
@@ -7599,7 +8003,7 @@ export interface SpringConstraint {
 // @public @deprecated
 export class SpringModifier extends SkeletonModifier {
     constructor(springSystem: SpringSystem, weight?: number);
-    apply(_skeleton: Skeleton, deltaTime: number): void;
+    apply(_skeleton: SkeletonRig, deltaTime: number): void;
     protected _getWeight(): number;
     reset(): void;
     protected _setWeight(value: number): void;
@@ -7924,7 +8328,7 @@ export class TextSprite extends BaseSprite<StandardSpriteMaterial> {
 }
 
 // @public
-export type TextureFetchOptions<T extends BaseTexture> = {
+export type TextureFetchOptions<T extends BaseTexture> = BaseFetchOptions & {
     mimeType?: string;
     linearColorSpace?: boolean;
     texture?: T;
@@ -8033,6 +8437,7 @@ export interface TransformAccess {
     getWorldPosition(): Vector3;
     getWorldRotation(): Quaternion;
     getWorldScale(): Vector3;
+    readonly node?: unknown;
     setLocalPosition(p: Vector3): void;
     setLocalRotation(q: Quaternion): void;
     setLocalScale(s: Vector3): void;
