@@ -63,6 +63,10 @@ export class NodeScaleTrack extends AnimationTrack<Vector3> {
     }
     this._interpolator = interp ?? null;
   }
+  /** {@inheritDoc AnimationTrack.clone} */
+  clone(): this {
+    return new NodeScaleTrack(this._interpolator?.clone(), false) as this;
+  }
   /** {@inheritDoc AnimationTrack.calculateState} */
   calculateState(target: object, currentTime: number) {
     this._interpolator.interpolate(currentTime, this._state);

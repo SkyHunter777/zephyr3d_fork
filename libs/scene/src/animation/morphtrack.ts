@@ -71,6 +71,15 @@ export class MorphTargetTrack extends AnimationTrack<MorphState> {
         defaultMorphWeights ?? Array.from({ length: this._state.numTargets }).map(() => 0);
     }
   }
+  clone(): this {
+    return new MorphTargetTrack(
+      this._interpolator ?? undefined,
+      this._defaultWeights?.slice(),
+      this._boundingBox?.map((bbox) => bbox.clone()) ?? undefined,
+      this._originBox?.clone() ?? undefined,
+      false
+    ) as this;
+  }
   get interpolator() {
     return this._interpolator;
   }

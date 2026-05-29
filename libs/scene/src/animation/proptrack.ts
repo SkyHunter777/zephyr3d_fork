@@ -109,6 +109,10 @@ export class PropertyTrack extends AnimationTrack<number[]> {
         throw new Error(`Property '${this._prop.name}' cannot be animated`);
     }
   }
+  /** {@inheritDoc AnimationTrack.clone} */
+  clone(): this {
+    return new PropertyTrack(this._prop, this._state, false) as this;
+  }
   /**
    * The primary interpolator for the property components.
    *

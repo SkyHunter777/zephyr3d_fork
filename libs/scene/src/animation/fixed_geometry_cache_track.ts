@@ -34,6 +34,18 @@ export class FixedGeometryCacheTrack extends AnimationTrack<FixedGeometryCacheSt
     this._meshBindings = new WeakMap();
   }
 
+  clone(): this {
+    return new FixedGeometryCacheTrack(
+      this._times.slice(),
+      this._frames.map((frame) => ({
+        positions: frame.positions.slice(),
+        normals: frame.normals?.slice() ?? null,
+        boundingBox: frame.boundingBox.clone()
+      })),
+      false
+    ) as this;
+  }
+
   get times() {
     return this._times;
   }

@@ -85,6 +85,10 @@ export abstract class AnimationTrack<StateType = unknown> {
     this._jointIndex = index;
   }
   /**
+   * Clone this animation track
+   */
+  abstract clone(): this;
+  /**
    * Reset the track to its initial state for the given target.
    *
    * Intended to stop playback and rewind the target to the first frame or default state.

@@ -70,6 +70,10 @@ export class PCAGeometryCacheTrack extends AnimationTrack<PCAGeometryCacheState>
     this._meshBindings = new WeakMap();
   }
 
+  clone(): this {
+    throw new Error('ERROR: Cloning of PCAGeometryCacheTrack is not implemented');
+  }
+
   get times() {
     return this._times;
   }

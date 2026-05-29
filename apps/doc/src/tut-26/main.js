@@ -22,6 +22,10 @@ class MyAnimationTrack extends AnimationTrack {
     this._interpolator = interpolator;
     this._state = new Float32Array(1);
   }
+  /** @returns {this} */
+  clone() {
+    return /** @type {this} */ (new MyAnimationTrack(this._interpolator));
+  }
   // Calculate the track state at the given time
   calculateState(target, currentTime) {
     this._interpolator.interpolate(currentTime, this._state);

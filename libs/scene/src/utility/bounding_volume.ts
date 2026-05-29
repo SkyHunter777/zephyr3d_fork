@@ -64,7 +64,7 @@ export class BoundingBox extends AABB implements BoundingVolume {
   }
   /** {@inheritDoc BoundingVolume.clone} */
   clone() {
-    return new BoundingBox(this);
+    return new BoundingBox(this) as this;
   }
   /** {@inheritDoc BoundingVolume.transform} */
   transform(matrix: Matrix4x4) {

@@ -40,25 +40,25 @@ function numberClamp(x: number, min: number, max: number) {
  */
 export class Interpolator {
   /** @internal */
-  private _prevKey: number;
+  protected _prevKey: number;
   /** @internal */
-  private _prevT: number;
+  protected _prevT: number;
   /** @internal */
-  private _inputs: InterpolateData;
+  protected _inputs: InterpolateData;
   /** @internal */
-  private _outputs: InterpolateData;
+  protected _outputs: InterpolateData;
   /** @internal */
-  private _mode: InterpolationMode;
+  protected _mode: InterpolationMode;
   /** @internal */
-  private _target: Nullable<InterpolationTarget>;
+  protected _target: Nullable<InterpolationTarget>;
   /** @internal */
-  private _stride: number;
+  protected _stride: number;
   /** @internal */
-  private readonly _maxTime: number;
+  protected readonly _maxTime: number;
   /** @internal */
-  private _a: Nullable<number[]>;
+  protected _a: Nullable<number[]>;
   /** @internal */
-  private _h: Nullable<number[]>;
+  protected _h: Nullable<number[]>;
 
   /**
    * Interpolation target to stride
@@ -92,6 +92,11 @@ export class Interpolator {
     this._maxTime = inputs[inputs.length - 1];
     this._a = null;
     this._h = null;
+  }
+  clone() {
+    const inputs = this._inputs.slice();
+    const outputs = this._outputs.slice();
+    return new Interpolator(this._mode, this._target, inputs, outputs);
   }
   /** Gets the interpolation mode */
   get mode() {
@@ -366,6 +371,11 @@ const tmpArray = new Float32Array(1);
 export class InterpolatorScalar extends Interpolator {
   constructor(mode: InterpolationMode, inputs: InterpolateData, outputs: InterpolateData) {
     super(mode, 'number', inputs, outputs);
+  }
+  clone() {
+    const inputs = this._inputs.slice();
+    const outputs = this._outputs.slice();
+    return new InterpolatorScalar(this._mode, inputs, outputs);
   }
   static constant(value: number) {
     return new InterpolatorScalar('step', new Float32Array([0]), new Float32Array([value]));

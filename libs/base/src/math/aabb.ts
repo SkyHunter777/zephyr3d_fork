@@ -51,6 +51,10 @@ export class AABB {
       this._maxPoint = new Vector3(1, 1, 1);
     }
   }
+  /** Clone this aabb */
+  clone(): this {
+    return new AABB(this._minPoint.clone(), this._maxPoint.clone()) as this;
+  }
   /** Get the min point of the AABB. */
   get minPoint() {
     return this._minPoint;

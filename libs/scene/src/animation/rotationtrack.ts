@@ -64,6 +64,10 @@ export class NodeRotationTrack extends AnimationTrack<Quaternion> {
     }
     this._interpolator = interp ?? null;
   }
+  /** {@inheritDoc AnimationTrack.clone} */
+  clone(): this {
+    return new NodeRotationTrack(this._interpolator?.clone(), false) as this;
+  }
   /** {@inheritDoc AnimationTrack.calculateState} */
   calculateState(target: object, currentTime: number) {
     this._interpolator.interpolate(currentTime, this._state);
