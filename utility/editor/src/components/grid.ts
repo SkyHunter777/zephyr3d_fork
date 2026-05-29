@@ -736,7 +736,9 @@ export class PropertyEditor extends Observable<{
       return;
     }
     const navigable = !toplevel && this.isObjectNavigationGroup(group);
-    this.appendRow({ type: 'group', group, level, toplevel, navigable });
+    if (!toplevel || group !== this._rootGroup) {
+      this.appendRow({ type: 'group', group, level, toplevel, navigable });
+    }
     if (navigable || (!toplevel && !group.opened)) {
       return;
     }

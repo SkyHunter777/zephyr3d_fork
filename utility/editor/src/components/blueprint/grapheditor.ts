@@ -16,6 +16,7 @@ export class GraphEditor
   private _nodeEditor: Record<string, NodeEditor>;
   private _activeTab: string;
   private _readonly: boolean;
+  private _propertySelection: Nullable<IGraphNode>;
   protected _label: string;
   constructor(label: string, tabs: string[]) {
     super();
@@ -29,6 +30,7 @@ export class GraphEditor
       }
     }
     this._readonly = false;
+    this._propertySelection = null;
     this._label = label ?? 'Graph Editor';
     this._propGrid.on('object_property_changed', this.onPropChanged, this);
   }
@@ -51,16 +53,18 @@ export class GraphEditor
   render() {
     const editor = this.getNodeEditor(this._activeTab);
     if (editor) {
+      let propertySelection: Nullable<IGraphNode> = null;
       if (editor.selectedNodes.length === 1) {
         const selectedNode = editor.nodes.get(editor.selectedNodes[0]);
-        if (selectedNode && selectedNode.impl !== this._propGrid.object) {
-          this._propGrid.clear();
-          this._propGrid.object = selectedNode.impl;
-          this.onSelectionChanged(selectedNode.impl);
-        }
-      } else if (this._propGrid.object) {
+        propertySelection = selectedNode?.impl ?? null;
+      }
+      if (propertySelection !== this._propertySelection) {
+        this._propertySelection = propertySelection;
         this._propGrid.clear();
-        this.onSelectionChanged(null);
+        if (propertySelection) {
+          this._propGrid.object = propertySelection;
+        }
+        this.onSelectionChanged(propertySelection);
       }
     }
     const regionAvail = ImGui.GetContentRegionAvail();

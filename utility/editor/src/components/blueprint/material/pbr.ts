@@ -751,7 +751,7 @@ export class PBRMaterialEditor extends GraphEditor {
   protected onPropChanged(): void {
     this.graphChanged();
   }
-  protected onSelectionChanged(object: IGraphNode): void {
+  protected onSelectionChanged(object: Nullable<IGraphNode>): void {
     if (!object) {
       this.propEditor.object = this._editMaterial.get();
       /*

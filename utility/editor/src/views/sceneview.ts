@@ -1560,6 +1560,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     eventBus.off('workspace_drag_drop', this.handleWorkspaceDragDrop, this);
     eventBus.off('edit_material', this.editMaterial, this);
     eventBus.off('edit_material_function', this.editMaterialFunction, this);
+    this.endEditAll();
     this.sceneFinialize();
   }
   private sceneSetup() {
@@ -1656,6 +1657,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       this._proxy.dispose();
       this._proxy = null;
     }
+    this._currentEditTool?.dispose();
     this.closeAllTrackEditors();
   }
   private renderDeviceInfo() {
@@ -1910,8 +1912,13 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     });
   }
   private endEditCurve1f(curve: Interpolator, apply: Nullable<(curve: Interpolator) => void>) {
-    if (apply) {
-      apply(curve);
+    let id = this._editingCurves.get(curve);
+    if (id) {
+      DialogRenderer.close(id, null);
+      this._editingCurves.delete(curve);
+      if (apply) {
+        apply(curve);
+      }
     }
   }
   private editPropAnimation(track: PropertyTrack, target: object) {
@@ -1982,6 +1989,13 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   }
   private endEditAABB(aabb: AABB) {
     this._postGizmoRenderer!.endEditAABB(aabb);
+  }
+  private endEditAll() {
+    this._postGizmoRenderer!.endEditAABB();
+    DialogRenderer.forceCloseAll();
+    this._editingProps.clear();
+    this._editingCurves.clear();
+    this._editingCurves.clear();
   }
   private handleCopySelectedNodes() {
     const selectedNodes = this.getTopLevelSelection(this.getSelectedSceneNodes()).filter(

@@ -35,6 +35,14 @@ export class DialogRenderer<T> extends Observable<{
       }
     }
   }
+  static forceCloseAll(result: unknown = null) {
+    while (DialogRenderer._modeless.length > 0) {
+      DialogRenderer._modeless[DialogRenderer._modeless.length - 1].close(result);
+    }
+    while (DialogRenderer._currentModal.length > 0) {
+      DialogRenderer._currentModal[0].close(result);
+    }
+  }
   static isModalDialogOpened() {
     return this._currentModal.length > 0;
   }
