@@ -10,6 +10,8 @@ import { NodeTranslationTrack } from './translationtrack';
 import { NodeScaleTrack } from './scaletrack';
 import type { SkeletonBindPose, SkeletonRig, SkinBinding } from './skeleton';
 import { HumanoidBodyRig } from './skeleton';
+import type { SkeletalAnimationMaskOptions } from './animationmask';
+import { createSkeletalMaskedAnimationClip } from './animationmask';
 
 /**
  * Options for playing an animation.
@@ -1050,6 +1052,35 @@ export class AnimationSet extends Disposable implements IDisposable {
         });
       }
     }
+  }
+  /**
+   * Create a skeletal-only masked clip from an existing clip in this set.
+   *
+   * The generated clip is a regular `AnimationClip`: it contains cloned node transform tracks
+   * for the selected rig joints and can be played/blended through the normal animation system.
+   * Non-skeletal tracks are skipped by default.
+   *
+   * @param sourceName - Name of the source clip.
+   * @param targetName - Name of the generated clip.
+   * @param options - Humanoid semantic or joint-name based mask options.
+   * @returns The generated clip, or null on failure.
+   */
+  createSkeletalMaskedAnimation(
+    sourceName: string,
+    targetName: string,
+    options: SkeletalAnimationMaskOptions
+  ): AnimationClip | null {
+    const sourceClip = this.get(sourceName);
+    if (!sourceClip) {
+      console.error(`createSkeletalMaskedAnimation: animation '${sourceName}' not found`);
+      return null;
+    }
+    const rig = this.resolveClipRig(sourceClip);
+    if (!rig) {
+      console.error(`createSkeletalMaskedAnimation: source animation must resolve to exactly one rig`);
+      return null;
+    }
+    return createSkeletalMaskedAnimationClip(this, sourceClip, targetName, rig, options);
   }
   /**
    * Copy a humanoid animation clip from another AnimationSet into this one via humanoid rig mapping.

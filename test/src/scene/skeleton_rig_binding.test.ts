@@ -2,12 +2,14 @@ import { DRef, Matrix4x4, Quaternion, Vector3 } from '@zephyr3d/base';
 import type { AnimationSet } from '@zephyr3d/scene';
 import {
   NodeRotationTrack,
+  NodeScaleTrack,
   NodeTranslationTrack,
   Scene,
   SceneNode,
   SkeletonModifier,
   SkeletonRig,
-  SkinBinding
+  SkinBinding,
+  HumanoidBodyRig
 } from '@zephyr3d/scene';
 
 jest.mock('@zephyr3d/scene/app/api', () => ({
@@ -50,6 +52,27 @@ function bindPose(nodes: SceneNode[]) {
 
 function inverseBind(nodes: SceneNode[]) {
   return nodes.map(() => Matrix4x4.identity());
+}
+
+type MaskedAnimationSet = AnimationSet & {
+  createSkeletalMaskedAnimation: (
+    sourceName: string,
+    targetName: string,
+    options: {
+      type: 'humanoid' | 'joints';
+      preset?: string;
+      boundary?: HumanoidBodyRig;
+      includeBody?: HumanoidBodyRig[];
+      include?: (string | RegExp | ((joint: SceneNode) => boolean))[];
+      exclude?: (string | RegExp | ((joint: SceneNode) => boolean))[];
+      includeDescendants?: boolean;
+      rootMotion?: 'include' | 'exclude' | 'only';
+    }
+  ) => ReturnType<AnimationSet['getAnimationClip']>;
+};
+
+function getMaskedAnimationSet(node: SceneNode): MaskedAnimationSet {
+  return node.animationSet as MaskedAnimationSet;
 }
 
 function buildHumanoid(parent: SceneNode, prefix: string) {
@@ -354,5 +377,201 @@ describe('SkeletonRig and SkinBinding', () => {
       .get(dstLowerLeg)!
       .find((track) => track instanceof NodeTranslationTrack);
     expect(preservedTrack).toBeInstanceOf(NodeTranslationTrack);
+  });
+
+  test('creates humanoid upper and lower body masked clips from a full body clip', () => {
+    const scene = new Scene();
+    const model = appendNode(scene.rootNode, 'model');
+    const root = appendNode(model, 'Root');
+    const joints = buildHumanoid(root, '');
+    const rig = new SkeletonRig(joints, bindPose(joints), { rootJoint: root });
+    model.animationSet.rigs.push(new DRef(rig));
+
+    const [hips, spine, chest, upperChest, , , , leftUpperArm, , , , , , , leftUpperLeg] = joints;
+    const full = model.animationSet.createAnimation('full')!;
+    full.addSkeleton(rig.persistentId);
+    full.addTrack(
+      root,
+      new NodeTranslationTrack('linear', [
+        { time: 0, value: Vector3.zero() },
+        { time: 1, value: new Vector3(0, 0, 1) }
+      ])
+    );
+    for (const joint of [hips, spine, chest, upperChest, leftUpperArm, leftUpperLeg]) {
+      full.addTrack(
+        joint,
+        new NodeRotationTrack('linear', [
+          { time: 0, value: Quaternion.identity() },
+          { time: 1, value: Quaternion.fromAxisAngle(Vector3.axisPY(), Math.PI / 4) }
+        ])
+      );
+    }
+
+    const animationSet = getMaskedAnimationSet(model);
+    const upper = animationSet.createSkeletalMaskedAnimation('full', 'full_upper', {
+      type: 'humanoid',
+      preset: 'upperBody'
+    });
+    const lower = animationSet.createSkeletalMaskedAnimation('full', 'full_lower', {
+      type: 'humanoid',
+      preset: 'lowerBody'
+    });
+
+    expect(upper).toBeTruthy();
+    expect(lower).toBeTruthy();
+    expect(upper!.tracks.has(root)).toBe(false);
+    expect(upper!.tracks.has(hips)).toBe(false);
+    expect(upper!.tracks.has(spine)).toBe(true);
+    expect(upper!.tracks.has(leftUpperArm)).toBe(true);
+    expect(upper!.tracks.has(leftUpperLeg)).toBe(false);
+    expect(lower!.tracks.has(root)).toBe(true);
+    expect(lower!.tracks.has(hips)).toBe(true);
+    expect(lower!.tracks.has(spine)).toBe(false);
+    expect(lower!.tracks.has(leftUpperArm)).toBe(false);
+    expect(lower!.tracks.has(leftUpperLeg)).toBe(true);
+  });
+
+  test('plays complementary masked clips without blending unrelated body parts', () => {
+    const scene = new Scene();
+    const model = appendNode(scene.rootNode, 'model');
+    const root = appendNode(model, 'Root');
+    const joints = buildHumanoid(root, '');
+    const rig = new SkeletonRig(joints, bindPose(joints), { rootJoint: root });
+    model.animationSet.rigs.push(new DRef(rig));
+
+    const spine = joints[1];
+    const leftUpperLeg = joints[14];
+    const full = model.animationSet.createAnimation('full')!;
+    full.addSkeleton(rig.persistentId);
+    full.addTrack(
+      spine,
+      new NodeRotationTrack('linear', [
+        { time: 0, value: Quaternion.identity() },
+        { time: 1, value: Quaternion.fromAxisAngle(Vector3.axisPY(), Math.PI / 2) }
+      ])
+    );
+    full.addTrack(
+      leftUpperLeg,
+      new NodeRotationTrack('linear', [
+        { time: 0, value: Quaternion.identity() },
+        { time: 1, value: Quaternion.fromAxisAngle(Vector3.axisPX(), Math.PI / 2) }
+      ])
+    );
+
+    const animationSet = getMaskedAnimationSet(model);
+    animationSet.createSkeletalMaskedAnimation('full', 'upper', {
+      type: 'humanoid',
+      preset: 'upperBody'
+    });
+    animationSet.createSkeletalMaskedAnimation('full', 'lower', {
+      type: 'humanoid',
+      preset: 'lowerBody'
+    });
+    model.animationSet.playAnimation('upper');
+    model.animationSet.playAnimation('lower');
+    model.animationSet.update(0);
+    model.animationSet.update(0.5);
+
+    expect(spine.rotation.y).toBeCloseTo(Math.sin(Math.PI / 8));
+    expect(spine.rotation.x).toBeCloseTo(0);
+    expect(leftUpperLeg.rotation.x).toBeCloseTo(Math.sin(Math.PI / 8));
+    expect(leftUpperLeg.rotation.y).toBeCloseTo(0);
+  });
+
+  test('creates name based masked clips with descendants and exclusions', () => {
+    const scene = new Scene();
+    const model = appendNode(scene.rootNode, 'model');
+    const root = appendNode(model, 'Root');
+    const joints = buildHumanoid(root, '');
+    const rig = new SkeletonRig(joints, bindPose(joints), { rootJoint: root });
+    model.animationSet.rigs.push(new DRef(rig));
+
+    const spine = joints[1];
+    const chest = joints[2];
+    const leftHand = joints[9];
+    const rightHand = joints[13];
+    const full = model.animationSet.createAnimation('named')!;
+    full.addSkeleton(rig.persistentId);
+    for (const joint of [spine, chest, leftHand, rightHand]) {
+      full.addTrack(
+        joint,
+        new NodeScaleTrack('linear', [
+          { time: 0, value: Vector3.one() },
+          { time: 1, value: new Vector3(2, 2, 2) }
+        ])
+      );
+    }
+
+    const masked = getMaskedAnimationSet(model).createSkeletalMaskedAnimation(
+      'named',
+      'named_spine_no_left_hand',
+      {
+        type: 'joints',
+        include: ['Spine'],
+        exclude: ['LeftHand'],
+        includeDescendants: true
+      }
+    );
+
+    expect(masked).toBeTruthy();
+    expect(masked!.tracks.has(spine)).toBe(true);
+    expect(masked!.tracks.has(chest)).toBe(true);
+    expect(masked!.tracks.has(leftHand)).toBe(false);
+    expect(masked!.tracks.has(rightHand)).toBe(true);
+  });
+
+  test('supports humanoid semantic include and explicit root motion only masks', () => {
+    const scene = new Scene();
+    const model = appendNode(scene.rootNode, 'model');
+    const root = appendNode(model, 'Root');
+    const joints = buildHumanoid(root, '');
+    const rig = new SkeletonRig(joints, bindPose(joints), { rootJoint: root });
+    model.animationSet.rigs.push(new DRef(rig));
+
+    const leftHand = joints[9];
+    const rightHand = joints[13];
+    const full = model.animationSet.createAnimation('semantic')!;
+    full.addSkeleton(rig.persistentId);
+    full.addTrack(
+      root,
+      new NodeTranslationTrack('linear', [
+        { time: 0, value: Vector3.zero() },
+        { time: 1, value: new Vector3(0, 0, 1) }
+      ])
+    );
+    full.addTrack(
+      leftHand,
+      new NodeRotationTrack('linear', [
+        { time: 0, value: Quaternion.identity() },
+        { time: 1, value: Quaternion.fromAxisAngle(Vector3.axisPY(), Math.PI / 4) }
+      ])
+    );
+    full.addTrack(
+      rightHand,
+      new NodeRotationTrack('linear', [
+        { time: 0, value: Quaternion.identity() },
+        { time: 1, value: Quaternion.fromAxisAngle(Vector3.axisPY(), Math.PI / 4) }
+      ])
+    );
+
+    const animationSet = getMaskedAnimationSet(model);
+    const leftArm = animationSet.createSkeletalMaskedAnimation('semantic', 'semantic_left_arm', {
+      type: 'humanoid',
+      includeBody: [HumanoidBodyRig.LeftUpperArm],
+      includeDescendants: true
+    });
+    const motion = animationSet.createSkeletalMaskedAnimation('semantic', 'semantic_motion', {
+      type: 'humanoid',
+      preset: 'upperBody',
+      rootMotion: 'only'
+    });
+
+    expect(leftArm).toBeTruthy();
+    expect(leftArm!.tracks.has(root)).toBe(false);
+    expect(leftArm!.tracks.has(leftHand)).toBe(true);
+    expect(leftArm!.tracks.has(rightHand)).toBe(false);
+    expect(motion).toBeTruthy();
+    expect(motion!.tracks.has(root)).toBe(true);
+    expect(motion!.tracks.has(leftHand)).toBe(false);
   });
 });

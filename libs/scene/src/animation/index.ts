@@ -1,4 +1,14 @@
 export * from './animation';
+export type {
+  HumanoidSkeletalAnimationMaskOptions,
+  HumanoidSkeletalAnimationMaskPreset,
+  JointNameMatcher,
+  NamedJointsSkeletalAnimationMaskOptions,
+  SkeletalAnimationMaskCommonOptions,
+  SkeletalAnimationMaskOptions,
+  SkeletalAnimationMaskRootMotionMode,
+  SkeletalAnimationMaskUnsupportedTrackMode
+} from './animationmask';
 export * from './animationset';
 export * from './animationtrack';
 export * from './translationtrack';
