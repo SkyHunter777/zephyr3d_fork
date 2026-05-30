@@ -814,12 +814,14 @@ export class AnimationSet extends Disposable implements IDisposable {
         const timeAdvance = deltaInSeconds * v.speedRatio;
         v.currentTime += timeAdvance;
         v.animateTime += timeAdvance;
-        if (v.currentTime > k.timeDuration) {
-          v.repeatCounter++;
-          v.currentTime = 0;
-        } else if (v.currentTime < 0) {
-          v.repeatCounter++;
-          v.currentTime = k.timeDuration;
+        if (k.timeDuration > 0) {
+          if (v.currentTime > k.timeDuration) {
+            v.repeatCounter += Math.max(1, Math.floor(v.currentTime / k.timeDuration));
+            v.currentTime %= k.timeDuration;
+          } else if (v.currentTime < 0) {
+            v.repeatCounter += Math.max(1, Math.ceil(-v.currentTime / k.timeDuration));
+            v.currentTime = ((v.currentTime % k.timeDuration) + k.timeDuration) % k.timeDuration;
+          }
         }
         if (v.repeat !== 0 && v.repeatCounter >= v.repeat) {
           this.stopAnimation(k.name);

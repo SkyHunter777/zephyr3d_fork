@@ -167,6 +167,31 @@ describe('SkeletonRig and SkinBinding', () => {
     expect(bindingB.jointTexture).toBeTruthy();
   });
 
+  test('preserves wrapped playback overshoot when looping across frame zero', () => {
+    const scene = new Scene();
+    const model = appendNode(scene.rootNode, 'model');
+    const target = appendNode(model, 'target');
+    const clip = model.animationSet.createAnimation('move')!;
+    clip.addTrack(
+      target,
+      new NodeTranslationTrack('linear', [
+        { time: 0, value: Vector3.zero() },
+        { time: 1, value: new Vector3(10, 0, 0) }
+      ])
+    );
+
+    model.animationSet.playAnimation('move');
+    model.animationSet.update(0);
+    model.animationSet.update(1.25);
+    expect(target.position.x).toBeCloseTo(2.5);
+
+    model.animationSet.stopAnimation('move');
+    model.animationSet.playAnimation('move', { speedRatio: -1 });
+    model.animationSet.update(0);
+    model.animationSet.update(1.25);
+    expect(target.position.x).toBeCloseTo(7.5);
+  });
+
   test('retarget accepts legacy clips referencing multiple bindings for one rig', () => {
     const scene = new Scene();
     const srcModel = appendNode(scene.rootNode, 'srcModel');
