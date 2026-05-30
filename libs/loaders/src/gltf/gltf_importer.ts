@@ -1,5 +1,5 @@
 import type * as draco3d from 'draco3d';
-import type { InterpolationMode, Nullable, TypedArray, VFS } from '@zephyr3d/base';
+import type { DeepPartial, InterpolationMode, Nullable, TypedArray, VFS } from '@zephyr3d/base';
 import {
   Vector3,
   Vector4,
@@ -28,7 +28,8 @@ import type {
   AssetSpringBoneCollider,
   AssetSpringBoneColliderGroup,
   AssetSpringBoneJoint,
-  SharedModel
+  SharedModel,
+  ControllerConfig
 } from '@zephyr3d/scene';
 import { AssetSkeleton, AssetScene } from '@zephyr3d/scene';
 import {
@@ -72,7 +73,8 @@ const VRM_SPRING_BONE_SUBSTEPS = 3;
 const VRM_GRAVITY_ACCELERATION_SCALE = 3;
 const VRM_BASE_GRAVITY_ACCELERATION = 9.8 * VRM_GRAVITY_ACCELERATION_SCALE;
 const VRM_GRAVITY_POWER_TO_ACCELERATION = 9.8 * VRM_GRAVITY_ACCELERATION_SCALE;
-const VRM_STIFFNESS_TO_FRAME_HARDNESS = 0.12;
+const VRM_STIFFNESS_TO_FRAME_HARDNESS = 0.8;
+const VRM_DRAGFORCE_SCALE = 0.5;
 
 /** @internal */
 export interface GLTFContent extends GlTf {
@@ -571,7 +573,7 @@ export class GLTFImporter extends AbstractModelImporter {
     return current;
   }
 
-  private _mapSpringJointsToControllerConfig(joints: AssetSpringBoneJoint[]) {
+  private _mapSpringJointsToControllerConfig(joints: AssetSpringBoneJoint[]): DeepPartial<ControllerConfig> {
     let stiffness = 0;
     let dragForce = 0;
     let hitRadius = 0;
@@ -595,8 +597,10 @@ export class GLTFImporter extends AbstractModelImporter {
     Vector3.scale(gravityPower, invCount, gravityPower);
     Vector3.add(gravity, gravityPower, gravity);
     const frameHardness = Math.max(0, Math.min(1, stiffness * VRM_STIFFNESS_TO_FRAME_HARDNESS));
-    const frameResistance = Math.max(0, Math.min(1, 1 - dragForce));
+    const frameResistance = Math.max(0, Math.min(1, 1 - dragForce * VRM_DRAGFORCE_SCALE));
     return {
+      enableBroadPhase: true,
+      enableSurfaceCollision: true,
       subSteps: VRM_SPRING_BONE_SUBSTEPS,
       gravity,
       curves: {
@@ -610,7 +614,12 @@ export class GLTFImporter extends AbstractModelImporter {
       },
       constraintOptions: {
         structuralVertical: true,
-        bendingVertical: true
+        structuralHorizontal: true,
+        shear: true,
+        bendingVertical: true,
+        collideStructuralVertical: true,
+        collideStructuralHorizontal: true,
+        collideShear: true
       }
     };
   }

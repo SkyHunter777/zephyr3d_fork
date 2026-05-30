@@ -390,6 +390,28 @@ function createJointDynamicsCurveProp(
   return {
     name,
     description,
+    type: 'float',
+    options: {
+      ...jointDynamicsPropOptions,
+      label
+    },
+    isPersistent: isJointDynamicsEditorPropPersistent,
+    get(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'num'>>) {
+      value.num[0] = this.jointDynamicsSystem.controller.getConfig().curves[key].evaluate(0);
+    },
+    set(this: JointDynamicsModifier, value: Required<Pick<PropertyValue, 'num'>>) {
+      const val = value.num[0];
+      updateJointDynamicsConfig(this, {
+        curves: {
+          [key]: InterpolatorScalar.constant(val)
+        }
+      });
+    }
+  };
+  /*
+  return {
+    name,
+    description,
     type: 'object',
     readonly: true,
     options: {
@@ -419,6 +441,7 @@ function createJointDynamicsCurveProp(
       }
     }
   };
+  */
 }
 
 /** @internal */

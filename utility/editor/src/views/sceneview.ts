@@ -1,7 +1,7 @@
 import { ImGui } from '@zephyr3d/imgui';
 import type { SceneModel } from '../models/scenemodel';
 import { PostGizmoRenderer } from './gizmo/postgizmo';
-import type { LineGizmo, TransformSpace } from './gizmo/postgizmo';
+import type { LineGizmo, ShapeGizmo, TransformSpace } from './gizmo/postgizmo';
 import { PropertyEditor } from '../components/grid';
 import type {
   Camera,
@@ -10,7 +10,8 @@ import type {
   PropertyAccessor,
   PropertyTrack,
   MeshMaterial,
-  BoundingBox
+  BoundingBox,
+  Primitive
 } from '@zephyr3d/scene';
 import {
   Mesh,
@@ -29,7 +30,9 @@ import {
   TextSprite,
   MSDFTextSprite,
   MSDFText,
-  JointDynamicsModifier
+  JointDynamicsModifier,
+  SphereShape,
+  CapsuleShape
 } from '@zephyr3d/scene';
 import { SceneNode } from '@zephyr3d/scene';
 import { DirectionalLight } from '@zephyr3d/scene';
@@ -156,6 +159,8 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   private readonly _editToolContext: EditToolContext;
   private _activePluginContributionShortcuts: boolean;
   private _springBoneGizmo: LineGizmo;
+  private _springBoneColliderGizmo: ShapeGizmo;
+  private _springBone: JointDynamicsModifier;
   constructor(controller: SceneController) {
     super(controller);
     this._cmdManager = new CommandManager();
@@ -179,6 +184,8 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     this._clipBoardNodes = [];
     this._proxy = null;
     this._springBoneGizmo = null;
+    this._springBoneColliderGizmo = null;
+    this._springBone = null;
     this._currentEditTool = new DRef();
     this._cameraAnimationEyeFrom = new Vector3();
     this._cameraAnimationTargetFrom = new Vector3();
@@ -1877,28 +1884,93 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     }
     const inspectedObj = this._propGrid.currentObject;
     if (inspectedObj instanceof JointDynamicsModifier) {
-      const system = inspectedObj.jointDynamicsSystem;
-      const chainConfig = system.chainConfig;
-      if (!this._springBoneGizmo) {
-        this._springBoneGizmo = { lines: [], width: 2, color: new Vector4(1, 1, 0, 1) };
-      }
-      this._springBoneGizmo.lines = [];
-      const vpMatrix = this.controller.model.scene.mainCamera.viewProjectionMatrix;
-      for (const chain of chainConfig.chains) {
-        const line: Vector4[] = [];
-        for (let node = chain.end; ; node = node.parent) {
-          const p = vpMatrix.transformPoint(node.getWorldPosition());
-          line.push(p);
-          if (node === chain.start) {
-            break;
-          }
+      this.selectSpringBone(inspectedObj);
+      this.updateSpringBone(inspectedObj);
+    } else {
+      this.selectSpringBone(null);
+    }
+  }
+  private updateSpringBone(obj: JointDynamicsModifier) {
+    if (!obj) {
+      return;
+    }
+    const system = obj.jointDynamicsSystem;
+    const chainConfig = system.chainConfig;
+    const vpMatrix = this.controller.model.scene.mainCamera.viewProjectionMatrix;
+    for (let i = 0; i < chainConfig.chains.length; i++) {
+      const chain = chainConfig.chains[i];
+      const line: Vector4[] = this._springBoneGizmo.lines[i];
+      for (let node = chain.end, i = 0; ; node = node.parent, i++) {
+        vpMatrix.transformPoint(node.getWorldPosition(), line[i]);
+        if (node === chain.start) {
+          break;
         }
-        this._springBoneGizmo.lines.push(line);
       }
-      this._postGizmoRenderer.addLineGizmo(this._springBoneGizmo);
-    } else if (this._springBoneGizmo) {
-      this._postGizmoRenderer.removeLineGizmo(this._springBoneGizmo);
-      this._springBoneGizmo = null;
+    }
+    const colliders = system.getColliderSnapshots();
+    for (let i = 0; i < colliders.length; i++) {
+      const shape = this._springBoneColliderGizmo.shapes[i];
+      Matrix4x4.multiply(
+        vpMatrix,
+        colliders[i].transform?.worldMatrix ?? Matrix4x4.identity(),
+        shape.mvpMatrix
+      );
+    }
+  }
+  private selectSpringBone(obj: JointDynamicsModifier) {
+    if (obj !== this._springBone) {
+      this._springBone = obj;
+      if (this._springBoneGizmo) {
+        this._postGizmoRenderer.removeLineGizmo(this._springBoneGizmo);
+        this._springBoneGizmo = null;
+      }
+      if (this._springBoneColliderGizmo) {
+        this._postGizmoRenderer.removeShapeGizmo(this._springBoneColliderGizmo);
+        for (const shape of this._springBoneColliderGizmo.shapes) {
+          shape.primitive.dispose();
+        }
+        this._springBoneColliderGizmo = null;
+      }
+      if (obj) {
+        const system = obj.jointDynamicsSystem;
+        const chainConfig = system.chainConfig;
+        this._springBoneGizmo = {
+          lines: chainConfig.chains.map((chain) => {
+            const line: Vector4[] = [];
+            for (let node = chain.end, i = 0; ; node = node.parent, i++) {
+              line[i] = new Vector4();
+              if (node === chain.start) {
+                break;
+              }
+            }
+            return line;
+          }),
+          width: 2,
+          color: new Vector4(1, 1, 0, 1)
+        };
+        this._postGizmoRenderer.addLineGizmo(this._springBoneGizmo);
+
+        const colliders = system.getColliderSnapshots();
+        if (colliders.length > 0) {
+          this._springBoneColliderGizmo = {
+            shapes: colliders.map((collider) => {
+              let primitive: Primitive;
+              if (collider.r.height === 0) {
+                primitive = new SphereShape({ radius: collider.r.radius });
+              } else {
+                primitive = new CapsuleShape({ radius: collider.r.radius, height: collider.r.height });
+              }
+              return {
+                primitive,
+                mvpMatrix: Matrix4x4.identity(),
+                enabled: collider.enabled
+              };
+            }),
+            color: new Vector4(1, 0, 0, 1)
+          };
+          this._postGizmoRenderer.addShapeGizmo(this._springBoneColliderGizmo);
+        }
+      }
     }
   }
   private editCurve1f(curve: Interpolator, name: string, apply: (curve: Interpolator) => void) {

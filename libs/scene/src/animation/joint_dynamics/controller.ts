@@ -16,8 +16,9 @@ import {
 } from './types';
 import { buildConstraints, buildSurfaceFaces, type ConstraintBuildOptions } from './constraints';
 import { simulate, applyResult, applyAngleLimits, type SimulationParams } from './solver';
-import type { DeepPartial } from '@zephyr3d/base';
+import type { DeepPartial, Nullable } from '@zephyr3d/base';
 import { InterpolatorScalar, Vector3, Quaternion, Matrix4x4, clamp01 } from '@zephyr3d/base';
+import type { SceneNode } from '../../scene';
 
 /**
  * Depth-based physics parameter curves.
@@ -156,7 +157,7 @@ export interface JointDynamicsGrabberHandle {
  */
 export interface JointDynamicsColliderSnapshot {
   r: ColliderR;
-  transform: unknown;
+  transform: Nullable<SceneNode>;
   enabled: boolean;
 }
 
@@ -176,7 +177,7 @@ export interface JointDynamicsFlatPlaneSnapshot {
  */
 export interface JointDynamicsGrabberSnapshot {
   r: GrabberR;
-  transform: unknown;
+  transform: Nullable<SceneNode>;
   enabled: boolean;
 }
 
@@ -223,6 +224,10 @@ export class JointDynamicsSystemController {
   private _colliderHandleToIndex = new Map<number, number>();
   private _flatPlaneHandleToIndex = new Map<number, number>();
   private _grabberHandleToIndex = new Map<number, number>();
+  private _baseSystemScale = 1;
+  private _currentSystemScale = 1;
+  private _basePointParentLengths: number[] = [];
+  private _baseConstraintLengths: number[] = [];
   private _nextColliderHandleId = 1;
   private _nextFlatPlaneHandleId = 1;
   private _nextGrabberHandleId = 1;
@@ -258,6 +263,8 @@ export class JointDynamicsSystemController {
     flatPlanes: Array<{ up: Vector3; position: Vector3 }>
   ): void {
     this._rootTransform = rootTransform;
+    this._baseSystemScale = this._getSystemUniformScale();
+    this._currentSystemScale = this._baseSystemScale;
     this._rootPoints = [...rootPoints];
     this._pointTransforms = pointTransforms;
     this._colliderTransforms = colliders.map((c) => c.transform);
@@ -265,6 +272,7 @@ export class JointDynamicsSystemController {
 
     // Build constraints
     this._rebuildConstraints();
+    this._baseConstraintLengths = this._constraints.map((constraint) => constraint.length);
 
     // Flatten bone hierarchy to point list, build parent map
     const allPoints: BoneNode[] = [];
@@ -307,6 +315,7 @@ export class JointDynamicsSystemController {
 
     // Build PointR/RW arrays
     this._pointsR = allPoints.map((p) => this._createPointR(p));
+    this._basePointParentLengths = this._pointsR.map((point) => point.parentLength);
     this._pointsRW = allPoints.map(() => this._createPointRW());
     this._positionsToTransform = new Array(allPoints.length).fill(Vector3.zero());
 
@@ -377,6 +386,7 @@ export class JointDynamicsSystemController {
     }
 
     const blendRatio = this._computeBlendRatio();
+    this._updateScaleDependentParameters();
 
     // Capture current transforms
     const rootPos = this._rootTransform.getWorldPosition();
@@ -682,6 +692,8 @@ export class JointDynamicsSystemController {
 
     if (refreshConstraints) {
       this._rebuildConstraints();
+      this._baseConstraintLengths = this._constraints.map((constraint) => constraint.length);
+      this._updateScaleDependentParameters(true);
     }
     if (refreshPoints) {
       this._refreshPointParameters();
@@ -1170,6 +1182,41 @@ export class JointDynamicsSystemController {
     this._surfaceConstraints = buildSurfaceFaces(this._rootPoints, this._config.constraintOptions.isLoop);
   }
 
+  private _getSystemUniformScale(): number {
+    if (!this._rootTransform) {
+      return 1;
+    }
+    const scale = this._rootTransform.getWorldScale();
+    return Math.max((Math.abs(scale.x) + Math.abs(scale.y) + Math.abs(scale.z)) / 3, EPSILON);
+  }
+
+  private _updateScaleDependentParameters(force = false): void {
+    const systemScale = this._getSystemUniformScale();
+    const scaleChanged = Math.abs(systemScale - this._currentSystemScale) > EPSILON;
+    if (!force && !scaleChanged) {
+      return;
+    }
+    this._currentSystemScale = systemScale;
+    const ratio = this._baseSystemScale > EPSILON ? systemScale / this._baseSystemScale : 1;
+    for (let i = 0; i < this._pointsR.length; i++) {
+      this._pointsR[i].parentLength = (this._basePointParentLengths[i] ?? this._pointsR[i].parentLength) * ratio;
+    }
+    for (let i = 0; i < this._constraints.length; i++) {
+      this._constraints[i].length = (this._baseConstraintLengths[i] ?? this._constraints[i].length) * ratio;
+    }
+    this._refreshPointParameters();
+    if (scaleChanged) {
+      for (let i = 0; i < this._pointsRW.length; i++) {
+        const pos = this._pointTransforms[i].getWorldPosition();
+        this._pointsRW[i].positionCurrent = pos.clone();
+        this._pointsRW[i].positionPrevious = pos.clone();
+        this._pointsRW[i].positionCurrentTransform = pos.clone();
+        this._pointsRW[i].positionPreviousTransform = pos.clone();
+      }
+      this.warp();
+    }
+  }
+
   private _refreshPointParameters(): void {
     if (!this._initialized) {
       return;
@@ -1267,8 +1314,9 @@ export class JointDynamicsSystemController {
     point.windForceScale = c.windForceScale.evaluate(rate) * rate;
     point.fakeWavePower = c.fakeWavePower.evaluate(rate);
     point.fakeWaveFreq = c.fakeWaveFreq.evaluate(rate);
-    point.pointRadius = Math.max(0, c.pointRadius.evaluate(rate));
-    point.gravity = Vector3.scale(this._config.gravity, c.gravityScale.evaluate(rate));
+    const systemScale = this._currentSystemScale;
+    point.pointRadius = Math.max(0, c.pointRadius.evaluate(rate) * systemScale);
+    point.gravity = Vector3.scale(this._config.gravity, c.gravityScale.evaluate(rate) * systemScale);
   }
 
   private _createPointRW(): PointRW {
@@ -1304,6 +1352,7 @@ export class JointDynamicsSystemController {
       localBoundsMin: Vector3.zero(),
       localBoundsMax: Vector3.zero(),
       radius: 0,
+      height: 0,
       enabled: 1
     };
   }

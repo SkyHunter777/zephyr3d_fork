@@ -47,6 +47,10 @@ const selectLineColor2D = new Vector4(0, 1, 1, 1);
 const selectLineWidth2D = 2;
 
 export type LineGizmo = { lines: Vector4[][]; width?: number; color?: Vector4 };
+export type ShapeGizmo = {
+  shapes: { primitive: Primitive; mvpMatrix: Matrix4x4; enabled: boolean }[];
+  color?: Vector4;
+};
 export type HitType =
   | 'move_axis'
   | 'move_plane'
@@ -131,6 +135,7 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
   static _blendBlitter: CopyBlitter = new CopyBlitter();
   static _gizmoProgram: Nullable<GPUProgram> = null;
   static _gizmoSelectProgram: Nullable<GPUProgram> = null;
+  static _shapeGizmoProgram: Nullable<GPUProgram> = null;
   static _gridProgram: Nullable<GPUProgram> = null;
   static _aalineProgram: Nullable<GPUProgram> = null;
   static _aalineBindGroup: Nullable<BindGroup> = null;
@@ -141,6 +146,7 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
   static _gridPrimitive: Nullable<Primitive> = null;
   static _gridPrimitiveOrtho: Nullable<Primitive> = null;
   static _bindGroup: Nullable<BindGroup> = null;
+  static _shapeGizmoBindGroup: Nullable<BindGroup> = null;
   static _gridBindGroup: Nullable<BindGroup> = null;
   static _rotation: Nullable<Primitive> = null;
   static _mvpMatrix: Matrix4x4 = new Matrix4x4();
@@ -178,6 +184,7 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
   private _hitInfo: Nullable<GizmoHitInfo>;
   private _transformSpace: TransformSpace;
   private _lineGizmos: LineGizmo[];
+  private _shapeGizmos: ShapeGizmo[];
   private readonly _screenSize: number;
   private _drawGrid: boolean;
   private readonly _scaleBox: AABB;
@@ -219,6 +226,7 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
     this._rectInfo = null;
     this._hitInfo = null;
     this._lineGizmos = [];
+    this._shapeGizmos = [];
     this._transformSpace = 'world';
     this._screenSize = 0.4;
     this._gridParams = new Vector4(10000, 500, 0, 0);
@@ -370,10 +378,21 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
       this._lineGizmos.push(lineGizmo);
     }
   }
+  addShapeGizmo(shapeGizmo: ShapeGizmo) {
+    if (!this._shapeGizmos.includes(shapeGizmo)) {
+      this._shapeGizmos.push(shapeGizmo);
+    }
+  }
   removeLineGizmo(lineGizmo: LineGizmo) {
     const index = this._lineGizmos.indexOf(lineGizmo);
     if (index >= 0) {
       this._lineGizmos.splice(index, 1);
+    }
+  }
+  removeShapeGizmo(shapeGizmo: ShapeGizmo) {
+    const index = this._shapeGizmos.indexOf(shapeGizmo);
+    if (index >= 0) {
+      this._shapeGizmos.splice(index, 1);
     }
   }
   endEditAABB(aabb?: AABB) {
@@ -466,6 +485,7 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
     }
     this.renderSelectionOutlines(ctx, destFramebuffer!.getDepthAttachment()!);
     this.renderLineGizmos(ctx, destFramebuffer!.getDepthAttachment()!);
+    this.renderShapeGizmos(ctx, destFramebuffer!.getDepthAttachment()!);
     PostGizmoRenderer._blendBlitter.renderStates = PostGizmoRenderer._blendRenderState;
     PostGizmoRenderer._blendBlitter.srgbOut = srgbOutput;
     PostGizmoRenderer._blendBlitter.blit(
@@ -1709,6 +1729,37 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
       }
     });
   }
+  private _createShapeGizmoProgram() {
+    return getDevice().buildRenderProgram({
+      vertex(pb) {
+        this.$inputs.pos = pb.vec3().attrib('position');
+        this.mvpMatrix = pb.mat4().uniform(0);
+        this.flip = pb.float().uniform(0);
+        pb.main(function () {
+          this.$builtins.position = pb.mul(this.mvpMatrix, pb.vec4(this.$inputs.pos, 1));
+          this.$builtins.position = pb.mul(this.$builtins.position, pb.vec4(1, this.flip, 1, 1));
+        });
+      },
+      fragment(pb) {
+        this.$outputs.color = pb.vec4();
+        this.color = pb.vec4().uniform(0);
+        this.depthTex = pb.tex2D().sampleType('unfilterable-float').uniform(0);
+        this.texSize = pb.vec2().uniform(0);
+        pb.main(function () {
+          this.$l.screenUV = pb.div(pb.vec2(this.$builtins.fragCoord.xy), this.texSize);
+          this.$l.depth = this.$builtins.fragCoord.z;
+          this.$l.sceneDepthSample = pb.textureSampleLevel(this.depthTex, this.screenUV, 0);
+          this.$l.sceneDepth = this.sceneDepthSample.r;
+          this.$l.alpha = this.$choice(
+            pb.greaterThan(this.depth, this.sceneDepth),
+            pb.float(0.5),
+            pb.float(1)
+          );
+          this.$outputs.color = pb.vec4(pb.mul(this.color.rgb, this.alpha), this.alpha);
+        });
+      }
+    });
+  }
   private _createAxisProgram(selectMode: boolean) {
     return getDevice().buildRenderProgram({
       vertex(pb) {
@@ -1844,6 +1895,12 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
       PostGizmoRenderer._aabbRenderState = this._createAABBRenderStates(flip);
       PostGizmoRenderer._bindGroup = getDevice().createBindGroup(
         PostGizmoRenderer._gizmoProgram.bindGroupLayouts[0]
+      );
+    }
+    if (!PostGizmoRenderer._shapeGizmoProgram) {
+      PostGizmoRenderer._shapeGizmoProgram = this._createShapeGizmoProgram();
+      PostGizmoRenderer._shapeGizmoBindGroup = getDevice().createBindGroup(
+        PostGizmoRenderer._shapeGizmoProgram.bindGroupLayouts[0]
       );
     }
     if (!PostGizmoRenderer._primitives) {
@@ -1997,6 +2054,27 @@ export class PostGizmoRenderer extends makeObservable(AbstractPostEffect)<{
         .multiplyLeft(this._camera.viewProjectionMatrix);
       PostGizmoRenderer._bindGroup!.setValue('mvpMatrix', PostGizmoRenderer._mvpMatrix);
       PostGizmoRenderer._primitives!['edit-rect'][0]!.draw();
+    }
+  }
+  private renderShapeGizmos(ctx: DrawContext, depthTex: BaseTexture) {
+    ctx.device.setRenderStates(PostGizmoRenderer._gizmoRenderState);
+    PostGizmoRenderer._shapeGizmoBindGroup!.setValue('flip', this.needFlip(ctx.device) ? -1 : 1);
+    PostGizmoRenderer._shapeGizmoBindGroup!.setValue('texSize', PostGizmoRenderer._texSize);
+    PostGizmoRenderer._shapeGizmoBindGroup!.setTexture(
+      'depthTex',
+      depthTex,
+      fetchSampler('clamp_nearest_nomip')
+    );
+    ctx.device.setProgram(PostGizmoRenderer._shapeGizmoProgram);
+    ctx.device.setBindGroup(0, PostGizmoRenderer._shapeGizmoBindGroup!);
+    for (const gizmo of this._shapeGizmos) {
+      PostGizmoRenderer._shapeGizmoBindGroup!.setValue('color', gizmo.color ?? Vector4.one());
+      for (const shape of gizmo.shapes) {
+        if (shape.enabled) {
+          PostGizmoRenderer._shapeGizmoBindGroup!.setValue('mvpMatrix', shape.mvpMatrix);
+          shape.primitive.draw();
+        }
+      }
     }
   }
   private renderTransformGizmo(ctx: DrawContext, depthTex: BaseTexture) {

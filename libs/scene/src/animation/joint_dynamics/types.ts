@@ -1,6 +1,7 @@
 // Data structure definitions — direct port of C# structs from SPCRJointDynamicsJob.cs
 
 import type { Matrix4x4, Quaternion, Vector3 } from '@zephyr3d/base';
+import type { SceneNode } from '../../scene';
 
 /**
  * Numerical tolerance used by the joint dynamics solver.
@@ -227,6 +228,8 @@ export interface ColliderRW {
   localBoundsMax: Vector3;
   /** Scaled radius for current frame (base radius × world scale) */
   radius: number;
+  /** Scaled capsule height for current frame (base height times world scale) */
+  height: number;
   /** Whether this collider is active (0 = disabled, 1 = enabled) */
   enabled: number;
 }
@@ -388,7 +391,7 @@ export interface TransformAccess {
   /** Write local scale */
   setLocalScale(s: Vector3): void;
   /** Original scene object backing this adapter, when available for serialization. */
-  readonly node?: unknown;
+  readonly node?: SceneNode;
 }
 
 /**

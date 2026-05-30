@@ -268,12 +268,13 @@ function colliderUpdate(collidersR: readonly ColliderR[], collidersRW: ColliderR
     const ws = colRW.worldScale;
     const worldScaleUniform = (ws.x + ws.y + ws.z) / 3;
     colRW.radius = colR.radius * worldScaleUniform;
+    colRW.height = colR.height * worldScaleUniform;
 
     Vector3.lerp(colRW.positionPreviousTransform, colRW.positionCurrentTransform, stepDelta, curPos);
     Quaternion.slerp(colRW.directionPreviousTransform, colRW.directionCurrentTransform, stepDelta, curDir);
 
-    computeCapsule(curPos, curDir, colR.height, colRW.positionCurrent, colRW.directionCurrent);
-    if (colR.height > EPSILON) {
+    computeCapsule(curPos, curDir, colRW.height, colRW.positionCurrent, colRW.directionCurrent);
+    if (colRW.height > EPSILON) {
       Vector3.scale(colRW.directionCurrent, 0.5, _computeCapsuleHalfDir);
       Vector3.add(colRW.positionCurrent, _computeCapsuleHalfDir, colRW.boundsCenter);
       colRW.boundsRadius =
@@ -290,7 +291,7 @@ function colliderUpdate(collidersR: readonly ColliderR[], collidersRW: ColliderR
     Vector3.sub(center, corner, colRW.localBoundsMin);
     Vector3.add(center, corner, colRW.localBoundsMax);
 
-    if (colR.height > EPSILON) {
+    if (colRW.height > EPSILON) {
       Vector3.scale(VEC3_ONE, colR.radius * colR.radiusTailScale, tailCorner);
       Vector3.add(colRW.positionCurrent, colRW.directionCurrent, tailCenter);
       colRW.worldToLocal.transformPointAffine(tailCenter, tailCenter);

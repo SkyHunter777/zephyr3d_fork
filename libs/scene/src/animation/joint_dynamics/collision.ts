@@ -283,6 +283,7 @@ export function pushoutFromCapsule(
   out?: CollisionResult
 ): CollisionResult {
   const capsuleVec = colRW.directionCurrent;
+  const capsuleHeight = colRW.height > EPSILON ? colRW.height : capsuleVec.magnitude;
   const capsuleVecN = Vector3.normalize(capsuleVec, _pushoutCapsuleVecN);
   const capsulePos = colRW.positionCurrent;
   const targetVec = Vector3.sub(point, capsulePos, _pushoutCapsuleTargetVec);
@@ -291,7 +292,7 @@ export function pushoutFromCapsule(
   if (distOnVec <= EPSILON) {
     return pushoutFromSphere(capsulePos, colRW.radius, ptR.pointRadius, point, out);
   }
-  if (distOnVec >= colR.height) {
+  if (distOnVec >= capsuleHeight) {
     const tail = Vector3.add(capsulePos, capsuleVec, _pushoutCapsuleTail);
     return pushoutFromSphere(tail, colRW.radius * colR.radiusTailScale, ptR.pointRadius, point, out);
   }
@@ -302,7 +303,7 @@ export function pushoutFromCapsule(
   const sqrPushDist = pushVec.magnitudeSq;
   if (sqrPushDist > EPSILON) {
     const pushDist = Math.sqrt(sqrPushDist) - ptR.pointRadius;
-    const r = colRW.radius * lerp(1.0, colR.radiusTailScale, distOnVec / colR.height);
+    const r = colRW.radius * lerp(1.0, colR.radiusTailScale, distOnVec / capsuleHeight);
     if (pushDist < r) {
       const scaled = Vector3.scale(pushVec, r / pushDist, _pushoutCapsuleScaled);
       Vector3.add(posOnVec, scaled, scaled);
@@ -366,6 +367,7 @@ export function pushInFromCapsule(
   out?: CollisionResult
 ): CollisionResult {
   const capsuleVec = colRW.directionCurrent;
+  const capsuleHeight = colRW.height > EPSILON ? colRW.height : capsuleVec.magnitude;
   const capsuleVecN = Vector3.normalize(capsuleVec, _pushInCapsuleVecN);
   const capsulePos = colRW.positionCurrent;
   const targetVec = Vector3.sub(point, capsulePos, _pushInCapsuleTargetVec);
@@ -374,7 +376,7 @@ export function pushInFromCapsule(
   if (distOnVec <= EPSILON) {
     return pushInFromSphere(capsulePos, colRW.radius, point, out);
   }
-  if (distOnVec >= colR.height) {
+  if (distOnVec >= capsuleHeight) {
     const tail = Vector3.add(capsulePos, capsuleVec, _pushInCapsuleTail);
     return pushInFromSphere(tail, colRW.radius * colR.radiusTailScale, point, out);
   }
@@ -384,7 +386,7 @@ export function pushInFromCapsule(
   const pullVec = Vector3.sub(posOnVec, point, _pushInCapsulePullVec);
   const sqrPullDist = pullVec.magnitudeSq;
   if (sqrPullDist > EPSILON) {
-    const r = colRW.radius * lerp(1.0, colR.radiusTailScale, colR.height / distOnVec);
+    const r = colRW.radius * lerp(1.0, colR.radiusTailScale, distOnVec / capsuleHeight);
     if (sqrPullDist > r * r) {
       const pullDist = Math.sqrt(sqrPullDist);
       const pullVecN = Vector3.normalize(pullVec, _pushInCapsulePullVecN);
