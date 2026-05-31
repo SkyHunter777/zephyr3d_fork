@@ -19,17 +19,14 @@ export class EnvMaps {
   private readonly _shProjector: CubemapSHProjector;
   constructor() {
     this._envMaps = {
-      tower: {
-        path: 'https://cdn.zephyr3d.org/doc/assets/images/environments/tower.hdr'
+      forest: {
+        path: 'https://cdn.zephyr3d.org/doc/assets/images/environments/forest.hdr'
       },
       doge2: {
         path: 'https://cdn.zephyr3d.org/doc/assets/images/environments/doge2.hdr'
       },
       'Street night': {
         path: 'https://cdn.zephyr3d.org/doc/assets/images/environments/street_night.hdr'
-      },
-      forest: {
-        path: 'https://cdn.zephyr3d.org/doc/assets/images/environments/forest.hdr'
       }
     };
     this._assetManager = new AssetManager();

@@ -618,18 +618,28 @@ export class AssetManager {
    * @internal
    */
   async fetchModel(scene: Scene, url: string, options?: ModelFetchOptions) {
-    const sharedModel = await this.fetchModelData(url, options);
-    const node = await sharedModel.createSceneNode(
-      getEngine().resourceManager,
-      scene,
-      options?.enableInstancing ?? false,
-      options?.loadMeshes ?? true,
-      options?.loadSkeletons ?? true,
-      options?.loadAnimations ?? true,
-      options?.loadJointDynamics ?? true,
-      options?.overrideVFS ?? getEngine().resourceManager.VFS
-    );
-    return node;
+    const sharedModel = new DRef<SharedModel>();
+    try {
+      sharedModel.set(await this.fetchModelData(url, options));
+      const node = await sharedModel
+        .get()!
+        .createSceneNode(
+          getEngine().resourceManager,
+          scene,
+          options?.enableInstancing ?? false,
+          options?.loadMeshes ?? true,
+          options?.loadSkeletons ?? true,
+          options?.loadAnimations ?? true,
+          options?.loadJointDynamics ?? true,
+          options?.overrideVFS ?? getEngine().resourceManager.VFS
+        );
+      node.sharedModel = sharedModel.get();
+      return node;
+    } catch (err) {
+      console.error(`Load model failed: ${url}: ${err}`);
+    } finally {
+      sharedModel.dispose();
+    }
   }
   /**
    * Load a text resource via VFS and optionally post-process it.

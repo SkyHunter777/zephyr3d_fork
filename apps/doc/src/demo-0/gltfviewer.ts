@@ -1,7 +1,6 @@
-import * as zip from '@zip.js/zip.js';
 import { Vector4, Vector3, DRef, DataTransferVFS } from '@zephyr3d/base';
 import type { SceneNode, Scene, AnimationSet, OIT } from '@zephyr3d/scene';
-import { Mesh, PlaneShape, LambertMaterial, getDevice, getInput, getEngine } from '@zephyr3d/scene';
+import { LambertMaterial, getInput, getEngine } from '@zephyr3d/scene';
 import { BatchGroup, WeightedBlendedOIT, ABufferOIT, OrbitCameraController } from '@zephyr3d/scene';
 import type { AABB, VFS } from '@zephyr3d/base';
 import { BoundingBox, DirectionalLight, PerspectiveCamera } from '@zephyr3d/scene';
@@ -20,12 +19,7 @@ export class GLTFViewer {
   private readonly _nearPlane: number;
   private readonly _envMaps: EnvMaps;
   private readonly _batchGroup: BatchGroup;
-  private readonly _floor: Mesh;
   private readonly _ui: Panel;
-  private _showGUI: boolean;
-  private _showFloor: boolean;
-  private _useScatter: boolean;
-  private _autoRotate: boolean;
   private _bboxNoScale: AABB;
   constructor(scene: Scene) {
     this._currentAnimation = null;
@@ -37,9 +31,6 @@ export class GLTFViewer {
     this._batchGroup = new BatchGroup(scene);
     const floorMaterial = new LambertMaterial();
     floorMaterial.albedoColor = new Vector4(0.8, 0.8, 0.8, 1);
-    this._floor = new Mesh(scene, new PlaneShape({ size: 1, anchor: 0 }), floorMaterial);
-    this._floor.castShadow = false;
-    this._autoRotate = false;
     this._oit = new WeightedBlendedOIT();
     this._fov = Math.PI / 3;
     this._nearPlane = 1;
@@ -48,20 +39,10 @@ export class GLTFViewer {
     this._camera.oit = this._oit;
     this._camera.position.setXYZ(0, 0, 15);
     this._camera.controller = new OrbitCameraController();
-    this._light = new DirectionalLight(this._scene)
-      .setColor(new Vector4(1, 1, 1, 1))
-      .setIntensity(8)
-      .setCastShadow(true);
-    this._light.shadow.shadowMapSize = 1024;
-    this._light.shadow.depthBias = 0.1;
-    this._light.shadow.mode = 'pcf-opt';
-    this._light.shadow.pcfKernelSize = 7;
+    this._light = new DirectionalLight(this._scene).setColor(new Vector4(1, 1, 1, 1)).setIntensity(8);
     this._light.lookAt(new Vector3(0, 0, 0), new Vector3(1, -1, 1), Vector3.axisPY());
     this._envMaps.selectById(this._envMaps.getIdList()[0], this.scene);
     this._ui = new Panel(this);
-    this._showGUI = true;
-    this._showFloor = false;
-    this._useScatter = false;
     getInput().use(this._camera.handleEvent, this._camera);
   }
   get envMaps(): EnvMaps {
@@ -79,26 +60,11 @@ export class GLTFViewer {
   get animations(): string[] {
     return this._animationSet.get()?.getAnimationNames() || [];
   }
-  async readZip(url: string): Promise<Map<string, string>> {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    const reader = new zip.ZipReader(new zip.BlobReader(blob));
-    const entries = await reader.getEntries();
-    const fileMap = new Map();
-    for (const entry of entries) {
-      if (!entry.directory) {
-        const blob = await (entry as zip.FileEntry).getData(new zip.BlobWriter());
-        const fileURL = URL.createObjectURL(blob);
-        fileMap.set(`/${entry.filename}`, fileURL);
-      }
-    }
-    await reader.close();
-    return fileMap;
-  }
   async loadModel(url: string, vfs?: VFS) {
+    this._modelNode.get()?.remove();
+    this._modelNode.dispose();
     const node = await getEngine().resourceManager.fetchModel(url, this._scene, { overrideVFS: vfs });
     this._camera.clearHistoryData();
-    this._modelNode.get()?.remove();
     this._modelNode.set(node);
     this._modelNode.get().parent = this._batchGroup;
     this._animationSet.set(node.animationSet);
@@ -112,15 +78,6 @@ export class GLTFViewer {
     }
     this._ui.update();
     this._bboxNoScale = this.getBoundingBox();
-    const scaleFactor =
-      Math.max(this._bboxNoScale.maxPoint.x, this._bboxNoScale.maxPoint.y, this._bboxNoScale.maxPoint.z) * 8;
-    this._floor.scale.setXYZ(scaleFactor, 1, scaleFactor);
-    this._floor.position.setXYZ(
-      -0.5 * scaleFactor,
-      this._bboxNoScale.minPoint.y - this._bboxNoScale.extents.y * 0.01,
-      -0.5 * scaleFactor
-    );
-    this._floor.parent = this._showFloor ? this._modelNode.get() : null;
     this.lookAt();
     this._light.shadow.shadowRegion = this.getBoundingBox();
     this._camera.clearHistoryData();
@@ -136,27 +93,8 @@ export class GLTFViewer {
     } finally {
       dtVFS.wipe();
     }
-    /*
-    this.resolveDraggedItems(data).then(async (fileMap) => {
-      if (fileMap) {
-        if (fileMap.size === 1 && /\.zip$/i.test(Array.from(fileMap.keys())[0])) {
-          fileMap = await this.readZip(fileMap.get(Array.from(fileMap.keys())[0]));
-        }
-        if (fileMap.size === 1 && /\.hdr$/i.test(Array.from(fileMap.keys())[0])) {
-          const hdrFile = Array.from(fileMap.keys())[0];
-          this._envMaps.selectByPath(hdrFile, this.scene, (url) => fileMap.get(url) || url);
-        } else {
-          const modelFile = Array.from(fileMap.keys()).find((val) => /(\.gltf|\.glb)$/i.test(val));
-          if (!modelFile) {
-            console.error('GLTF model not found');
-          } else {
-            await this.loadModel(modelFile);
-          }
-        }
-      }
-    });
-*/
   }
+
   playAnimation(name: string) {
     if (this._currentAnimation !== name) {
       this.stopAnimation();
@@ -171,17 +109,6 @@ export class GLTFViewer {
       this._currentAnimation = null;
       this.lookAt();
     }
-  }
-  enableRotate(enable: boolean) {
-    if (this._autoRotate !== enable) {
-      this._autoRotate = enable;
-      if (this._modelNode.get() && !this._autoRotate) {
-        this._modelNode.get().rotation.identity();
-      }
-    }
-  }
-  rotateEnabled(): boolean {
-    return this._autoRotate;
   }
   enableShadow(enable: boolean) {
     this._light.setCastShadow(enable);
@@ -223,27 +150,17 @@ export class GLTFViewer {
   set punctualLightEnabled(enable: boolean) {
     this._light.showState = enable ? 'visible' : 'hidden';
   }
-  enableBloom(enable: boolean) {
-    this._camera.bloom = !!enable;
-  }
   enableTonemap(enable: boolean) {
     this._camera.toneMap = !!enable;
   }
   enableFXAA(enable: boolean) {
     this._camera.FXAA = !!enable;
   }
-  enableSAO(enable: boolean) {
-    this._camera.SSAO = !!enable;
-  }
   enableTAA(enable: boolean) {
     this._camera.TAA = !!enable;
   }
   render() {
     if (this._modelNode.get()) {
-      if (this._autoRotate) {
-        const angle = getDevice().frameInfo.elapsedOverall * 0.001;
-        this._modelNode.get().rotation.fromAxisAngle(Vector3.axisPY(), angle);
-      }
       if (this._animationSet) {
         this._light.shadow.shadowRegion = this.getBoundingBox();
       }
@@ -279,21 +196,11 @@ export class GLTFViewer {
       }
     }
   }
-
-  nextBackground() {
-    const idList = this._envMaps.getIdList();
-    if (idList?.length > 0) {
-      const currentId = this._envMaps.getCurrentId();
-      const index = idList.indexOf(currentId);
-      const newIndex = (index + 1) % idList.length;
-      this._envMaps.selectById(idList[newIndex], this._scene);
-    }
-  }
   private getBoundingBox(): AABB {
     const bbox = new BoundingBox();
     bbox.beginExtend();
     this.traverseModel((node) => {
-      if (node.isGraphNode() && node !== this._floor) {
+      if (node.isGraphNode()) {
         const aabb = node.getWorldBoundingVolume()?.toAABB();
         if (aabb && aabb.isValid()) {
           bbox.extend(aabb.minPoint);
@@ -314,32 +221,5 @@ export class GLTFViewer {
         }
       }
     }
-  }
-  toggleScatter() {
-    this._useScatter = !this._useScatter;
-    if (this._useScatter) {
-      this._scene.env.sky.skyType = 'scatter';
-      this._scene.env.light.radianceMap = this._scene.env.sky.radianceMap;
-    } else {
-      this._envMaps.selectById(this._envMaps.getCurrentId(), this._scene);
-    }
-  }
-  toggleFloor() {
-    this._showFloor = !this._showFloor;
-    this._floor.parent = this._showFloor ? this._modelNode.get() : null;
-  }
-  toggleGUI() {
-    this._showGUI = !this._showGUI;
-    this._ui.show(this._showGUI);
-  }
-  randomLightDir() {
-    this._light.lookAt(
-      new Vector3(0, 0, 0),
-      new Vector3(Math.random() * 2 - 1, -1, Math.random() * 2 - 1),
-      Vector3.axisPY()
-    );
-  }
-  toggleShadow() {
-    this._light.castShadow = !this._light.castShadow;
   }
 }

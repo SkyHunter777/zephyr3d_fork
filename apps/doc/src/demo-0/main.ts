@@ -55,24 +55,6 @@ gltfApp.ready().then(async () => {
   gltfApp.on('resize', (width, height) => {
     gltfViewer.camera.aspect = width / height;
   });
-  gltfApp.on('keyup', (ev) => {
-    console.log(ev.code);
-    if (ev.code === 'KeyB') {
-      gltfViewer.nextBackground();
-    } else if (ev.code === 'KeyN') {
-      gltfViewer.toggleScatter();
-    } else if (ev.code === 'KeyF') {
-      gltfViewer.toggleFloor();
-    } else if (ev.code === 'KeyT') {
-      gltfViewer.toggleGUI();
-    } else if (ev.code === 'KeyR') {
-      gltfViewer.enableRotate(!gltfViewer.rotateEnabled());
-    } else if (ev.code === 'KeyL') {
-      gltfViewer.randomLightDir();
-    } else if (ev.code === 'KeyP') {
-      gltfViewer.toggleShadow();
-    }
-  });
   gltfApp.on('tick', () => {
     gltfViewer.camera.updateController();
     gltfViewer.render();

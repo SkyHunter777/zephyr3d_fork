@@ -106,7 +106,6 @@ export interface AssetPrimitiveInfo {
   boxMin: Vector3;
   boxMax: Vector3;
   path?: string;
-  primitive?: Primitive;
 }
 
 /**
@@ -160,7 +159,7 @@ export interface AssetMaterial {
   type: string;
   common: AssetMaterialCommon;
   path?: string;
-  material?: MeshMaterial;
+  material?: DRef<MeshMaterial>;
 }
 
 /**
@@ -265,7 +264,6 @@ export interface AssetPBRMaterialSG extends AssetPBRMaterialCommon {
 export interface AssetSubMeshData {
   primitive: Nullable<AssetPrimitiveInfo>;
   material: Nullable<AssetMaterial>;
-  mesh?: Mesh;
   rawPositions: Nullable<Float32Array>;
   rawBlendIndices: Nullable<TypedArray>;
   rawJointWeights: Nullable<TypedArray>;
@@ -778,6 +776,11 @@ export class SharedModel extends Disposable {
   private _jointDynamicsColliders: AssetJointDynamicsCollider[];
   /** @internal */
   private _jointDynamicsSpringBones: AssetJointDynamicsSpringBone[];
+  /** @internal */
+  private _textureMap: Map<AssetTextureInfo, DRef<Texture2D>>;
+  /** @internal */
+  private _primitiveMap: Map<AssetPrimitiveInfo, DRef<Primitive>>;
+
   /**
    * Creates an instance of SharedModel
    */
@@ -796,6 +799,8 @@ export class SharedModel extends Disposable {
     this._jointDynamicsColliders = [];
     this._jointDynamicsSpringBones = [];
     this._activeScene = -1;
+    this._textureMap = new Map();
+    this._primitiveMap = new Map();
   }
   /** All scenes that the model contains */
   get scenes(): AssetScene[] {
@@ -1070,6 +1075,7 @@ export class SharedModel extends Disposable {
   ): Promise<SceneNode> {
     const group = new SceneNode(scene);
     const nodeMap: Map<AssetHierarchyNode, SceneNode> = new Map();
+    const meshMap: Map<AssetSubMeshData, Mesh> = new Map();
     for (let i = 0; i < this.scenes.length; i++) {
       const assetScene = this.scenes[i];
       const skeletonMeshMap: Map<
@@ -1084,6 +1090,7 @@ export class SharedModel extends Disposable {
           assetScene.rootNodes[k],
           skeletonMeshMap,
           nodeMap,
+          meshMap,
           instancing,
           saveMeshes,
           saveSkeletons,
@@ -1173,6 +1180,7 @@ export class SharedModel extends Disposable {
               target.jointTypeR = 'animated';
             } else if (track.type === 'weights') {
               for (const m of track.node.mesh!.subMeshes) {
+                const mesh = meshMap.get(m)!;
                 if (track.interpolator.stride > MAX_MORPH_TARGETS) {
                   console.error(
                     `Morph target too large: ${track.interpolator.stride}, the maximum is ${MAX_MORPH_TARGETS}`
@@ -1182,23 +1190,24 @@ export class SharedModel extends Disposable {
                     track.interpolator,
                     track.defaultMorphWeights,
                     m.targetBox,
-                    m.mesh!.getBoundingVolume()!.toAABB(),
+                    mesh.getBoundingVolume()!.toAABB(),
                     true
                   );
-                  animation.addTrack(m.mesh!, morphTrack);
+                  animation.addTrack(mesh, morphTrack);
                 }
               }
             } else if (track.type === 'geometry-cache') {
               const subMesh = track.node.mesh?.subMeshes[track.subMeshIndex];
-              if (!subMesh?.mesh) {
+              const mesh = subMesh ? meshMap.get(subMesh) : null;
+              if (!subMesh || !mesh) {
                 console.error(`Invalid geometry cache sub mesh: ${track.subMeshIndex}`);
               } else {
                 if (track.codec === 'pca') {
                   const pcaData = this.remapPCAGeometryCacheData(subMesh, track);
-                  animation.addTrack(subMesh.mesh, new PCAGeometryCacheTrack(pcaData, true));
+                  animation.addTrack(mesh, new PCAGeometryCacheTrack(pcaData, true));
                 } else {
                   const frames = this.remapGeometryCacheFrames(subMesh, track.frames);
-                  animation.addTrack(subMesh.mesh, new FixedGeometryCacheTrack(track.times, frames, true));
+                  animation.addTrack(mesh, new FixedGeometryCacheTrack(track.times, frames, true));
                 }
               }
             } else {
@@ -1432,6 +1441,12 @@ export class SharedModel extends Disposable {
 
   protected onDispose() {
     super.onDispose();
+    for (const prim of this._primitiveMap.values()) {
+      prim.dispose();
+    }
+    for (const tex of this._textureMap.values()) {
+      tex.dispose();
+    }
     this._skeletons = [];
     this._scenes = [];
     this._animations = [];
@@ -1443,6 +1458,7 @@ export class SharedModel extends Disposable {
     assetNode: AssetHierarchyNode,
     skeletonMeshMap: Map<AssetSkeleton, { mesh: Mesh[]; bounding: AssetSubMeshData[] }>,
     nodeMap: Map<AssetHierarchyNode, SceneNode>,
+    meshMap: Map<AssetSubMeshData, Mesh>,
     instancing: boolean,
     saveMeshes: boolean,
     saveSkeletons: boolean,
@@ -1470,22 +1486,25 @@ export class SharedModel extends Disposable {
           meshNode.name = subMesh.name;
           meshNode.clipTestEnabled = true;
           meshNode.showState = 'inherit';
-          if (!subMesh.primitive!.primitive) {
-            subMesh.primitive!.primitive =
-              (await this.createPrimitive(manager, subMesh.primitive!, srcVFS)) ?? undefined;
+          if (!this._primitiveMap.get(subMesh.primitive!)) {
+            this._primitiveMap.set(
+              subMesh.primitive!,
+              new DRef((await this.createPrimitive(manager, subMesh.primitive!, srcVFS)) ?? undefined)
+            );
           }
-          meshNode.primitive = subMesh.primitive!.primitive ?? null;
+          meshNode.primitive = this._primitiveMap.get(subMesh.primitive!)!.get()!;
           if (!subMesh.material!.material) {
-            subMesh.material!.material =
-              (await this.createMaterial(manager, subMesh.material!, srcVFS)) ?? undefined;
+            subMesh.material!.material = new DRef(
+              (await this.createMaterial(manager, subMesh.material!, srcVFS)) ?? undefined
+            );
           }
-          meshNode.material = subMesh.material!.material ?? null;
+          meshNode.material = subMesh.material!.material?.get() ?? null;
           if (instancing) {
             meshNode.material = meshNode.material!.createInstance();
           }
           meshNode.parent = node;
-          subMesh.mesh = meshNode;
-          processMorphData(subMesh, meshData.morphWeights!, meshData.morphNames);
+          meshMap.set(subMesh, meshNode);
+          processMorphData(subMesh, meshNode, meshData.morphWeights!, meshData.morphNames);
           if (skeleton) {
             if (!skeletonMeshMap.has(skeleton)) {
               skeletonMeshMap.set(skeleton, { mesh: [meshNode], bounding: [subMesh] });
@@ -1506,6 +1525,7 @@ export class SharedModel extends Disposable {
         child,
         skeletonMeshMap,
         nodeMap,
+        meshMap,
         instancing,
         saveMeshes,
         saveSkeletons,
@@ -1543,7 +1563,11 @@ export class SharedModel extends Disposable {
     srcVFS: VFS
   ): Promise<Nullable<MaterialTextureInfo>> {
     try {
-      const texture = (await this.image2Texture(manager, info, srcVFS))!;
+      let textureRef = this._textureMap.get(info);
+      if (!textureRef) {
+        textureRef = new DRef(await this.image2Texture(manager, info, srcVFS));
+        this._textureMap.set(info, textureRef);
+      }
       const sampler = getDevice().createSampler({
         addressU: info.sampler!.wrapS,
         addressV: info.sampler!.wrapT,
@@ -1554,7 +1578,7 @@ export class SharedModel extends Disposable {
       const transform = info.transform!;
       const texCoord = info.texCoord;
       return {
-        texture,
+        texture: textureRef.get()!,
         sampler,
         texCoord,
         transform
@@ -1903,6 +1927,7 @@ export class SharedModel extends Disposable {
 /** @internal */
 function processMorphData(
   subMesh: AssetSubMeshData,
+  mesh: Mesh,
   morphWeights: number[],
   morphNames?: Nullable<string[]>
 ) {
@@ -1959,7 +1984,7 @@ function processMorphData(
     weightsAndOffsets.subarray(4, 4 + MAX_MORPH_TARGETS),
     numTargets
   );
-  const meshAABB = subMesh.mesh!.getBoundingVolume()!.toAABB();
+  const meshAABB = mesh.getBoundingVolume()!.toAABB();
   morphBoundingBox.minPoint.addBy(meshAABB.minPoint);
   morphBoundingBox.maxPoint.addBy(meshAABB.maxPoint);
 
@@ -1968,9 +1993,9 @@ function processMorphData(
     const name = morphNames?.[i] ?? `Target${i}`;
     names[name] = i;
   }
-  subMesh.mesh!.setMorphData({ width: textureSize, height: textureSize, data: textureData });
-  subMesh.mesh!.setMorphInfo({ data: weightsAndOffsets, names });
-  subMesh.mesh!.setAnimatedBoundingBox(morphBoundingBox);
+  mesh.setMorphData({ width: textureSize, height: textureSize, data: textureData });
+  mesh.setMorphInfo({ data: weightsAndOffsets, names });
+  mesh.setAnimatedBoundingBox(morphBoundingBox);
 }
 
 /** @internal */
