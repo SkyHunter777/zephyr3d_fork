@@ -1199,7 +1199,8 @@ export class JointDynamicsSystemController {
     this._currentSystemScale = systemScale;
     const ratio = this._baseSystemScale > EPSILON ? systemScale / this._baseSystemScale : 1;
     for (let i = 0; i < this._pointsR.length; i++) {
-      this._pointsR[i].parentLength = (this._basePointParentLengths[i] ?? this._pointsR[i].parentLength) * ratio;
+      this._pointsR[i].parentLength =
+        (this._basePointParentLengths[i] ?? this._pointsR[i].parentLength) * ratio;
     }
     for (let i = 0; i < this._constraints.length; i++) {
       this._constraints[i].length = (this._baseConstraintLengths[i] ?? this._constraints[i].length) * ratio;

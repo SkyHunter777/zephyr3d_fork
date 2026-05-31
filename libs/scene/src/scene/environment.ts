@@ -63,9 +63,7 @@ export class EnvLightWrapper extends Disposable {
     return !ctx || ctx.drawEnvLight
       ? `${this.type}:${this._envLight!.hasRadiance() ? '1' : '0'}:${
           this._envLight!.hasSheenRadiance() ? '1' : '0'
-        }:${
-          this._envLight!.hasIrradiance() ? '1' : '0'
-        }:${irradianceSource}`
+        }:${this._envLight!.hasIrradiance() ? '1' : '0'}:${irradianceSource}`
       : 'none';
   }
   /** @internal */

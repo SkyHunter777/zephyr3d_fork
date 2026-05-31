@@ -239,7 +239,9 @@ function createPMREMProgram(type: DistributionType, numSamples: number) {
           this.$l.invR = pb.div(1, pb.max(this.roughness, 0.000001));
           this.$l.cos2h = pb.mul(this.NoH, this.NoH);
           this.$l.sin2h = pb.max(pb.sub(1, this.cos2h), 0.0078125);
-          this.$return(pb.div(pb.mul(pb.add(this.invR, 2), pb.pow(this.sin2h, pb.mul(this.invR, 0.5))), 2 * Math.PI));
+          this.$return(
+            pb.div(pb.mul(pb.add(this.invR, 2), pb.pow(this.sin2h, pb.mul(this.invR, 0.5))), 2 * Math.PI)
+          );
         });
         pb.func(
           'radiance',

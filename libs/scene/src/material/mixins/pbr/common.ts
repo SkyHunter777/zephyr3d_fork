@@ -12,7 +12,7 @@ import { Vector3 } from '@zephyr3d/base';
 import { Vector4 } from '@zephyr3d/base';
 import type { DrawContext } from '../../../render';
 import { getGGXLUT } from '../../../utility/textures/ggxlut';
-import { getCharlieLUT, getSheenELUT } from '../../../utility/textures/sheenlut';
+import { getSheenLUT } from '../../../utility/textures/sheenlut';
 import type { TextureMixinInstanceTypes } from '../texture';
 import { mixinTextureProps } from '../texture';
 import { ShaderHelper } from '../../shader/helper';
@@ -407,10 +407,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
         }
         if (this.sheen) {
           scope.zSheenFactor = pb.vec4().uniform(2);
-          scope.zSheenELut = pb.tex2D().uniform(2);
-          if (this.drawContext.drawEnvLight) {
-            scope.zCharlieLut = pb.tex2D().uniform(2);
-          }
+          scope.zSheenLut = pb.tex2D().uniform(2);
         }
         if (this.clearcoat) {
           scope.zClearcoatFactor = pb.vec4().uniform(2);
@@ -445,10 +442,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
         }
         if (this.sheen) {
           bindGroup.setValue('zSheenFactor', this._sheenFactor);
-          bindGroup.setTexture('zSheenELut', getSheenELUT(64));
-          if (ctx.drawEnvLight) {
-            bindGroup.setTexture('zCharlieLut', getCharlieLUT(64));
-          }
+          bindGroup.setTexture('zSheenLut', getSheenLUT(64));
         }
         if (this.clearcoat) {
           bindGroup.setValue('zClearcoatFactor', this._clearcoatFactor);
@@ -634,7 +628,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
     ): PBShaderExp {
       const pb = scope.$builder;
       const sheenE = pb.textureSampleLevel(
-        scope.zSheenELut,
+        scope.zSheenLut,
         pb.clamp(pb.vec2(Ndot, sheenRoughness), pb.vec2(0), pb.vec2(1)),
         0
       ).r;
@@ -667,7 +661,12 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
       });
       return scope.$g[funcNameDCharlie](NdotH, sheenRoughness) as PBShaderExp;
     }
-    V_Sheen(scope: PBInsideFunctionScope, NdotL: PBShaderExp, NdotV: PBShaderExp, sheenRoughness: PBShaderExp) {
+    V_Sheen(
+      scope: PBInsideFunctionScope,
+      NdotL: PBShaderExp,
+      NdotV: PBShaderExp,
+      sheenRoughness: PBShaderExp
+    ) {
       const funcNameVSheen = 'Z_VSheen';
       const pb = scope.$builder;
       pb.func('Z_lambdaSheenNumericHelper', [pb.float('x'), pb.float('alphaG')], function () {
@@ -677,7 +676,13 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
         this.$l.c = pb.mix(0.19823, 0.16801, this.oneMinusAlphaSq);
         this.$l.d = pb.mix(-1.9776, -1.27393, this.oneMinusAlphaSq);
         this.$l.e = pb.mix(-4.32054, -4.85967, this.oneMinusAlphaSq);
-        this.$return(pb.add(pb.div(this.a, pb.add(1, pb.mul(this.b, pb.pow(this.x, this.c)))), pb.mul(this.d, this.x), this.e));
+        this.$return(
+          pb.add(
+            pb.div(this.a, pb.add(1, pb.mul(this.b, pb.pow(this.x, this.c)))),
+            pb.mul(this.d, this.x),
+            this.e
+          )
+        );
       });
       pb.func('Z_lambdaSheen', [pb.float('cosTheta'), pb.float('alphaG')], function () {
         this.$if(pb.lessThan(pb.abs(this.cosTheta), 0.5), function () {
@@ -692,24 +697,35 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
           )
         );
       });
-      pb.func(funcNameVSheen, [pb.float('NdotL'), pb.float('NdotV'), pb.float('sheenRoughness')], function () {
-        this.$l.alphaG = pb.mul(pb.max(this.sheenRoughness, 0.000001), pb.max(this.sheenRoughness, 0.000001));
-        this.$return(
-          pb.clamp(
-            pb.div(
-              1,
-              pb.mul(
-                pb.add(1, this.Z_lambdaSheen(this.NdotV, this.alphaG), this.Z_lambdaSheen(this.NdotL, this.alphaG)),
-                4,
-                this.NdotV,
-                this.NdotL
-              )
-            ),
-            0,
-            1
-          )
-        );
-      });
+      pb.func(
+        funcNameVSheen,
+        [pb.float('NdotL'), pb.float('NdotV'), pb.float('sheenRoughness')],
+        function () {
+          this.$l.alphaG = pb.mul(
+            pb.max(this.sheenRoughness, 0.000001),
+            pb.max(this.sheenRoughness, 0.000001)
+          );
+          this.$return(
+            pb.clamp(
+              pb.div(
+                1,
+                pb.mul(
+                  pb.add(
+                    1,
+                    this.Z_lambdaSheen(this.NdotV, this.alphaG),
+                    this.Z_lambdaSheen(this.NdotL, this.alphaG)
+                  ),
+                  4,
+                  this.NdotV,
+                  this.NdotL
+                )
+              ),
+              0,
+              1
+            )
+          );
+        }
+      );
       return scope.$g[funcNameVSheen](NdotL, NdotV, sheenRoughness) as PBShaderExp;
     }
     V_Ashikhmin(scope: PBInsideFunctionScope, NdotL: PBShaderExp, NdotV: PBShaderExp) {
@@ -1411,11 +1427,21 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
           }
           this.$l.NoV = pb.clamp(pb.dot(this.normal, this.viewVec), 0.0001, 1);
           if (that.sheen) {
-            this.$l.sheenAlbedoScaling = that.getSheenAlbedoScaling(
-              this,
-              this.NoV,
-              this.data.sheenColor,
-              this.data.sheenRoughness
+            this.$l.sheenLutSample = pb.clamp(
+              pb.textureSampleLevel(
+                this.zSheenLut,
+                pb.clamp(pb.vec2(this.NoV, this.data.sheenRoughness), pb.vec2(0), pb.vec2(1)),
+                0
+              ),
+              pb.vec4(0),
+              pb.vec4(1)
+            );
+            this.$l.sheenAlbedoScaling = pb.sub(
+              1,
+              pb.mul(
+                pb.max(pb.max(this.data.sheenColor.r, this.data.sheenColor.g), this.data.sheenColor.b),
+                this.sheenLutSample.r
+              )
             );
           }
           this.$l.ggxLutSample = pb.clamp(
@@ -1479,11 +1505,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
               pb.sub(pb.vec3(1), pb.mul(this.F_avg, this.Ems))
             );
             this.$l.k_D = pb.mul(this.data.diffuse.rgb, pb.add(pb.sub(pb.vec3(1), this.FssEss), this.FmsEms));
-            this.$l.iblDiffuse = pb.mul(
-              pb.add(this.FmsEms, this.k_D),
-              this.irradiance,
-              this.occlusion
-            );
+            this.$l.iblDiffuse = pb.mul(pb.add(this.FmsEms, this.k_D), this.irradiance, this.occlusion);
             if (that.sheen) {
               this.iblDiffuse = pb.mul(this.iblDiffuse, this.sheenAlbedoScaling);
             }
@@ -1511,15 +1533,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
             that.sheen &&
             (ctx.env!.light.envLight.hasSheenRadiance() || ctx.env!.light.envLight.hasIrradiance())
           ) {
-            this.$l.sheenBRDF = pb.clamp(
-              pb.textureSampleLevel(
-                this.zCharlieLut,
-                pb.clamp(pb.vec2(this.NoV, this.data.sheenRoughness), pb.vec2(0), pb.vec2(1)),
-                0
-              ),
-              pb.vec4(0),
-              pb.vec4(1)
-            ).b;
+            this.$l.sheenBRDF = this.sheenLutSample.b;
             if (ctx.env!.light.envLight.hasSheenRadiance()) {
               this.$l.sheenRadiance = ctx.env!.light.envLight.getSheenRadiance(
                 this,

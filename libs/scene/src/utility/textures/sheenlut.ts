@@ -2,52 +2,29 @@ import type { Texture2D } from '@zephyr3d/device';
 import { float2half } from '@zephyr3d/base';
 import { getDevice } from '../../app/api';
 
-const charlieLuts: Map<number, Texture2D> = new Map();
-const sheenELuts: Map<number, Texture2D> = new Map();
+const sheenLuts: Map<number, Texture2D> = new Map();
 const SAMPLE_COUNT = 512;
 const TWO_PI = Math.PI * 2;
 const SHEEN_E_MIN_ALPHA_G = 0.07;
 
-export function getCharlieLUT(size: number): Texture2D {
-  let lut = charlieLuts.get(size);
+export function getSheenLUT(size: number): Texture2D {
+  let lut = sheenLuts.get(size);
   if (!lut) {
-    lut = createCharlieLUT(size);
-    charlieLuts.set(size, lut);
+    lut = createSheenLUT(size);
+    sheenLuts.set(size, lut);
   }
   return lut;
+}
+
+export function getCharlieLUT(size: number): Texture2D {
+  return getSheenLUT(size);
 }
 
 export function getSheenELUT(size: number): Texture2D {
-  let lut = sheenELuts.get(size);
-  if (!lut) {
-    lut = createSheenELUT(size);
-    sheenELuts.set(size, lut);
-  }
-  return lut;
+  return getSheenLUT(size);
 }
 
-function createCharlieLUT(size: number) {
-  const tex = getDevice().createTexture2D('rgba16f', size, size, { mipmapping: false })!;
-  const image = new Uint16Array(size * size * 4);
-  const one = float2half(1);
-  let p = 0;
-  for (let y = size - 1; y >= 0; y--) {
-    const roughness = clamp01((y + 0.5) / size);
-    for (let x = 0; x < size; x++) {
-      const NoV = clamp01((x + 0.5) / size);
-      const brdf = integrateCharlieBRDF(NoV, roughness);
-      image[p++] = 0;
-      image[p++] = 0;
-      image[p++] = toHalf(brdf);
-      image[p++] = one;
-    }
-  }
-  tex.update(image, 0, 0, size, size);
-  tex.name = 'CharlieLUT';
-  return tex;
-}
-
-function createSheenELUT(size: number) {
+function createSheenLUT(size: number) {
   const tex = getDevice().createTexture2D('rgba16f', size, size, { mipmapping: false })!;
   const image = new Uint16Array(size * size * 4);
   const one = float2half(1);
@@ -58,14 +35,15 @@ function createSheenELUT(size: number) {
     for (let x = 0; x < size; x++) {
       const NoV = clamp01((x + 0.5) / size);
       const e = integrateSheenAlbedo(NoV, alphaG);
+      const brdf = integrateCharlieBRDF(NoV, roughness);
       image[p++] = toHalf(e);
       image[p++] = 0;
-      image[p++] = 0;
+      image[p++] = toHalf(brdf);
       image[p++] = one;
     }
   }
   tex.update(image, 0, 0, size, size);
-  tex.name = 'SheenELUT';
+  tex.name = 'SheenLUT';
   return tex;
 }
 

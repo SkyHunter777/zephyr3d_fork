@@ -279,6 +279,7 @@ export class GLTFViewer {
       }
     }
   }
+
   nextBackground() {
     const idList = this._envMaps.getIdList();
     if (idList?.length > 0) {
