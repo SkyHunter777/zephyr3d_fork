@@ -17,6 +17,7 @@ export class EnvLightWrapper extends Disposable {
   private readonly _ambientDown: ObservableVector4;
   private readonly _ambientUp: ObservableVector4;
   private readonly _radianceMap: DRef<TextureCube>;
+  private readonly _sheenRadianceMap: DRef<TextureCube>;
   private readonly _irradianceMap: DRef<TextureCube>;
   private readonly _irradianceSH: DRef<GPUDataBuffer>;
   private readonly _irradianceSHFB: DRef<FrameBuffer>;
@@ -42,6 +43,7 @@ export class EnvLightWrapper extends Disposable {
       }
     });
     this._radianceMap = new DRef();
+    this._sheenRadianceMap = new DRef();
     this._irradianceMap = new DRef();
     this._irradianceSH = new DRef();
     this._irradianceSHFB = new DRef();
@@ -60,6 +62,8 @@ export class EnvLightWrapper extends Disposable {
         : 'na';
     return !ctx || ctx.drawEnvLight
       ? `${this.type}:${this._envLight!.hasRadiance() ? '1' : '0'}:${
+          this._envLight!.hasSheenRadiance() ? '1' : '0'
+        }:${
           this._envLight!.hasIrradiance() ? '1' : '0'
         }:${irradianceSource}`
       : 'none';
@@ -106,6 +110,16 @@ export class EnvLightWrapper extends Disposable {
       (this._envLight as EnvShIBL).radianceMap = this.radianceMap;
     }
   }
+  /** Charlie-filtered sheen radiance map for environment light type ibl */
+  get sheenRadianceMap() {
+    return this._sheenRadianceMap.get();
+  }
+  set sheenRadianceMap(tex) {
+    this._sheenRadianceMap.set(tex);
+    if (this.type === 'ibl') {
+      (this._envLight as EnvShIBL).sheenRadianceMap = this.sheenRadianceMap;
+    }
+  }
   /** Irradiance SH buffer for environment light type ibl */
   get irradianceSH() {
     return this._irradianceSH.get();
@@ -147,9 +161,15 @@ export class EnvLightWrapper extends Disposable {
         break;
       case 'ibl':
         if (this._envLight?.getType() !== val) {
-          this._envLight = new EnvShIBL(this.radianceMap!, this.irradianceSH!, this.irradianceSHFB!);
+          this._envLight = new EnvShIBL(
+            this.radianceMap!,
+            this.irradianceSH!,
+            this.irradianceSHFB!,
+            this.sheenRadianceMap!
+          );
         }
         (this._envLight as EnvShIBL).radianceMap = this.radianceMap;
+        (this._envLight as EnvShIBL).sheenRadianceMap = this.sheenRadianceMap;
         (this._envLight as EnvShIBL).irradianceSH = this.irradianceSH;
         (this._envLight as EnvShIBL).irradianceSHFB = this.irradianceSHFB;
         (this._envLight as EnvShIBL).irradianceWindow = this.irradianceWindow;
@@ -173,6 +193,7 @@ export class EnvLightWrapper extends Disposable {
     super.onDispose();
     this._envLight?.dispose();
     this._radianceMap.dispose();
+    this._sheenRadianceMap.dispose();
     this._irradianceMap.dispose();
     this._irradianceSHFB.dispose();
     this._irradianceSH.dispose();

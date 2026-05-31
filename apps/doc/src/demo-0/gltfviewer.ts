@@ -1,9 +1,9 @@
 import * as zip from '@zip.js/zip.js';
-import { Vector4, Vector3, DRef } from '@zephyr3d/base';
+import { Vector4, Vector3, DRef, DataTransferVFS } from '@zephyr3d/base';
 import type { SceneNode, Scene, AnimationSet, OIT } from '@zephyr3d/scene';
 import { Mesh, PlaneShape, LambertMaterial, getDevice, getInput, getEngine } from '@zephyr3d/scene';
 import { BatchGroup, WeightedBlendedOIT, ABufferOIT, OrbitCameraController } from '@zephyr3d/scene';
-import type { AABB } from '@zephyr3d/base';
+import type { AABB, VFS } from '@zephyr3d/base';
 import { BoundingBox, DirectionalLight, PerspectiveCamera } from '@zephyr3d/scene';
 import { EnvMaps } from './envmap';
 import { Panel } from './ui';
@@ -15,8 +15,7 @@ export class GLTFViewer {
   private readonly _scene: Scene;
   private _oit: OIT;
   private readonly _camera: PerspectiveCamera;
-  private readonly _light0: DirectionalLight;
-  private readonly _light1: DirectionalLight;
+  private readonly _light: DirectionalLight;
   private readonly _fov: number;
   private readonly _nearPlane: number;
   private readonly _envMaps: EnvMaps;
@@ -49,21 +48,15 @@ export class GLTFViewer {
     this._camera.oit = this._oit;
     this._camera.position.setXYZ(0, 0, 15);
     this._camera.controller = new OrbitCameraController();
-    this._light0 = new DirectionalLight(this._scene)
+    this._light = new DirectionalLight(this._scene)
       .setColor(new Vector4(1, 1, 1, 1))
-      .setIntensity(18)
+      .setIntensity(8)
       .setCastShadow(true);
-    this._light0.shadow.shadowMapSize = 1024;
-    this._light0.shadow.depthBias = 0.1;
-    this._light0.shadow.mode = 'pcf-opt';
-    this._light0.shadow.pcfKernelSize = 7;
-    this._light0.lookAt(new Vector3(0, 0, 0), new Vector3(1, -1, 1), Vector3.axisPY());
-    this._light1 = new DirectionalLight(this._scene)
-      .setColor(new Vector4(1, 1, 1, 1))
-      .setIntensity(10)
-      .setCastShadow(false);
-    this._light1.shadow.shadowMapSize = 1024;
-    this._light1.lookAt(new Vector3(0, 0, 0), new Vector3(-0.5, 0.707, 0.5), Vector3.axisPY());
+    this._light.shadow.shadowMapSize = 1024;
+    this._light.shadow.depthBias = 0.1;
+    this._light.shadow.mode = 'pcf-opt';
+    this._light.shadow.pcfKernelSize = 7;
+    this._light.lookAt(new Vector3(0, 0, 0), new Vector3(1, -1, 1), Vector3.axisPY());
     this._envMaps.selectById(this._envMaps.getIdList()[0], this.scene);
     this._ui = new Panel(this);
     this._showGUI = true;
@@ -73,12 +66,6 @@ export class GLTFViewer {
   }
   get envMaps(): EnvMaps {
     return this._envMaps;
-  }
-  get light0(): DirectionalLight {
-    return this._light0;
-  }
-  get light1(): DirectionalLight {
-    return this._light1;
   }
   get camera(): PerspectiveCamera {
     return this._camera;
@@ -108,8 +95,8 @@ export class GLTFViewer {
     await reader.close();
     return fileMap;
   }
-  async loadModel(url: string) {
-    const node = await getEngine().resourceManager.fetchModel(url, this._scene);
+  async loadModel(url: string, vfs?: VFS) {
+    const node = await getEngine().resourceManager.fetchModel(url, this._scene, { overrideVFS: vfs });
     this._camera.clearHistoryData();
     this._modelNode.get()?.remove();
     this._modelNode.set(node);
@@ -135,10 +122,21 @@ export class GLTFViewer {
     );
     this._floor.parent = this._showFloor ? this._modelNode.get() : null;
     this.lookAt();
-    this._light0.shadow.shadowRegion = this.getBoundingBox();
+    this._light.shadow.shadowRegion = this.getBoundingBox();
     this._camera.clearHistoryData();
   }
   async handleDrop(data: DataTransfer) {
+    const dtVFS = new DataTransferVFS(data);
+    try {
+      const result = await dtVFS.glob('/**/*.{gltf,glb,vrm}', { recursive: true, includeDirs: false });
+      if (result.length > 0) {
+        const gltf = result[0].path;
+        await this.loadModel(gltf, dtVFS);
+      }
+    } finally {
+      dtVFS.wipe();
+    }
+    /*
     this.resolveDraggedItems(data).then(async (fileMap) => {
       if (fileMap) {
         if (fileMap.size === 1 && /\.zip$/i.test(Array.from(fileMap.keys())[0])) {
@@ -152,11 +150,12 @@ export class GLTFViewer {
           if (!modelFile) {
             console.error('GLTF model not found');
           } else {
-            await this.loadModel(modelFile /*, new HttpRequest((url) => fileMap.get(url) ?? url)*/);
+            await this.loadModel(modelFile);
           }
         }
       }
     });
+*/
   }
   playAnimation(name: string) {
     if (this._currentAnimation !== name) {
@@ -185,7 +184,7 @@ export class GLTFViewer {
     return this._autoRotate;
   }
   enableShadow(enable: boolean) {
-    this._light0.setCastShadow(enable);
+    this._light.setCastShadow(enable);
   }
   bloomEnabled(): boolean {
     return this._camera.bloom;
@@ -219,11 +218,10 @@ export class GLTFViewer {
     }
   }
   get punctualLightEnabled(): boolean {
-    return this._light0.showState !== 'hidden';
+    return this._light.showState !== 'hidden';
   }
   set punctualLightEnabled(enable: boolean) {
-    this._light0.showState = enable ? 'visible' : 'hidden';
-    this._light1.showState = enable ? 'visible' : 'hidden';
+    this._light.showState = enable ? 'visible' : 'hidden';
   }
   enableBloom(enable: boolean) {
     this._camera.bloom = !!enable;
@@ -247,7 +245,7 @@ export class GLTFViewer {
         this._modelNode.get().rotation.fromAxisAngle(Vector3.axisPY(), angle);
       }
       if (this._animationSet) {
-        this._light0.shadow.shadowRegion = this.getBoundingBox();
+        this._light.shadow.shadowRegion = this.getBoundingBox();
       }
     }
     this._camera.render(this._scene);
@@ -316,67 +314,6 @@ export class GLTFViewer {
       }
     }
   }
-  private async readDirectoryEntry(entry: FileSystemDirectoryEntry): Promise<FileSystemEntry[]> {
-    return new Promise((resolve, reject) => {
-      entry.createReader().readEntries(
-        (fileEntries) => resolve(fileEntries),
-        (err) => reject(err)
-      );
-    });
-  }
-  private async resolveDirectoryEntries(
-    files: File[],
-    entries: FileSystemEntry[]
-  ): Promise<Map<string, { entry: FileSystemEntry; file: File }>> {
-    const map: Map<string, { entry: FileSystemEntry; file: File }> = new Map();
-    let i = 0;
-    while (i < entries.length) {
-      const entry = entries[i];
-      if (entry.isDirectory) {
-        entries.splice(i, 1);
-        if (i < files.length) {
-          files.splice(i, 1);
-        }
-        entries.push(...(await this.readDirectoryEntry(entry as FileSystemDirectoryEntry)));
-      } else {
-        map.set(entry.fullPath, {
-          entry,
-          file: i < files.length ? files[i] : null
-        });
-        i++;
-      }
-    }
-    return map;
-  }
-  private async resolveFileEntries(
-    map: Map<string, { entry: FileSystemEntry; file: File }>
-  ): Promise<Map<string, string>> {
-    const result: Map<string, string> = new Map();
-    const promises = Array.from(map.entries()).map(
-      (entry) =>
-        new Promise<File>((resolve, reject) => {
-          const key = `/${entry[0]
-            .slice(1)
-            .split('/')
-            .map((val) => encodeURIComponent(val))
-            .join('/')}`;
-          if (entry[1].file) {
-            result.set(key, URL.createObjectURL(entry[1].file));
-            resolve(null);
-          } else {
-            (entry[1].entry as FileSystemFileEntry).file(
-              (f) => {
-                result.set(key, URL.createObjectURL(f));
-                resolve(null);
-              },
-              (err) => reject(err)
-            );
-          }
-        })
-    );
-    await Promise.all(promises);
-    return result;
-  }
   toggleScatter() {
     this._useScatter = !this._useScatter;
     if (this._useScatter) {
@@ -395,20 +332,13 @@ export class GLTFViewer {
     this._ui.show(this._showGUI);
   }
   randomLightDir() {
-    this._light0.lookAt(
+    this._light.lookAt(
       new Vector3(0, 0, 0),
       new Vector3(Math.random() * 2 - 1, -1, Math.random() * 2 - 1),
       Vector3.axisPY()
     );
   }
   toggleShadow() {
-    this._light0.castShadow = !this._light0.castShadow;
-  }
-  private async resolveDraggedItems(data: DataTransfer): Promise<Map<string, string>> {
-    const files = Array.from(data.files);
-    const entries = Array.from(data.items).map((item) => item.webkitGetAsEntry());
-    const map = await this.resolveDirectoryEntries(files, entries);
-    const result = await this.resolveFileEntries(map);
-    return result;
+    this._light.castShadow = !this._light.castShadow;
   }
 }

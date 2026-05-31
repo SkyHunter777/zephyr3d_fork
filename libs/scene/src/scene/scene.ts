@@ -395,6 +395,7 @@ export class Scene
   private updateEnvLight() {
     if (this.env.light.type === 'ibl') {
       this.env.light.radianceMap = this.env.sky.radianceMap;
+      this.env.light.sheenRadianceMap = this.env.sky.sheenRadianceMap;
       this.env.light.irradianceWindow = this.env.sky.shWindowWeights;
       this.env.light.irradianceSHFB = this.env.sky.irradianceSHFB;
       this.env.light.irradianceSH = null;

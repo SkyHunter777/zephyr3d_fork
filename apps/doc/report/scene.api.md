@@ -186,6 +186,7 @@ export class AnimationSet extends Disposable implements IDisposable {
     // (undocumented)
     copyHumanoidAnimationFrom(sourceSet: AnimationSet, animationName: string, targetName?: string, options?: CopyHumanoidAnimationOptions): AnimationClip | null;
     createAnimation(name: string, embedded?: boolean): AnimationClip | null;
+    createSkeletalMaskedAnimation(sourceName: string, targetName: string, options: SkeletalAnimationMaskOptions): AnimationClip | null;
     deleteAnimation(name: string): void;
     get(name: string): AnimationClip | null;
     getAnimationClip(name: string): AnimationClip | null;
@@ -210,6 +211,7 @@ export abstract class AnimationTrack<StateType = unknown> {
     set animation(ani: Nullable<AnimationClip>);
     abstract applyState(target: object, state: StateType): unknown;
     abstract calculateState(target: object, currentTime: number): StateType;
+    abstract clone(): this;
     get embedded(): boolean;
     abstract getBlendId(): unknown;
     abstract getDuration(): number;
@@ -1276,7 +1278,7 @@ export class BoundingBox extends AABB implements BoundingVolume {
     constructor(box: AABB);
     constructor(minPoint: Vector3, maxPoint: Vector3);
     behindPlane(plane: Plane): boolean;
-    clone(): BoundingBox;
+    clone(): this;
     outsideFrustum(frustum: Frustum | Matrix4x4): boolean;
     toAABB(): this;
     transform(matrix: Matrix4x4): BoundingBox;
@@ -1824,6 +1826,7 @@ export interface ColliderRW {
     directionCurrentTransform: Quaternion;
     directionPreviousTransform: Quaternion;
     enabled: number;
+    height: number;
     localBoundsMax: Vector3;
     localBoundsMin: Vector3;
     positionCurrent: Vector3;
@@ -3143,6 +3146,8 @@ export class FixedGeometryCacheTrack extends AnimationTrack<FixedGeometryCacheSt
     // (undocumented)
     calculateState(_target: object, currentTime: number): GeometryCacheState;
     // (undocumented)
+    clone(): this;
+    // (undocumented)
     get frames(): FixedGeometryCacheFrame[];
     set frames(value: FixedGeometryCacheFrame[]);
     // (undocumented)
@@ -3946,6 +3951,23 @@ export type HumanoidRootMotionMode = 'scaled' | 'copy' | 'locked' | 'none';
 // @public (undocumented)
 export type HumanoidRootMotionScaleMode = 'legLength' | 'none' | number;
 
+// @public (undocumented)
+export type HumanoidSkeletalAnimationMaskOptions = SkeletalAnimationMaskCommonOptions & {
+    type: 'humanoid';
+    preset?: HumanoidSkeletalAnimationMaskPreset;
+    boundary?: HumanoidBodyRig;
+    includeBody?: HumanoidBodyRig[];
+    excludeBody?: HumanoidBodyRig[];
+    includeLeftHand?: HumanoidHandRig[];
+    includeRightHand?: HumanoidHandRig[];
+    excludeLeftHand?: HumanoidHandRig[];
+    excludeRightHand?: HumanoidHandRig[];
+    includeDescendants?: boolean;
+};
+
+// @public (undocumented)
+export type HumanoidSkeletalAnimationMaskPreset = 'fullBody' | 'upperBody' | 'lowerBody' | 'head' | 'arms' | 'leftArm' | 'rightArm' | 'legs' | 'leftLeg' | 'rightLeg';
+
 // @public
 export interface IAttachedScript {
     id: string;
@@ -4424,7 +4446,7 @@ export interface JointDynamicsColliderSnapshot {
     // (undocumented)
     r: ColliderR;
     // (undocumented)
-    transform: unknown;
+    transform: Nullable<SceneNode>;
 }
 
 // @public
@@ -4460,7 +4482,7 @@ export interface JointDynamicsGrabberSnapshot {
     // (undocumented)
     r: GrabberR;
     // (undocumented)
-    transform: unknown;
+    transform: Nullable<SceneNode>;
 }
 
 // @public
@@ -4575,6 +4597,9 @@ export type JointDynamicSystemConfig = {
     chainConfig: JointChainConfig;
     controllerConfig?: DeepPartial<ControllerConfig, 2>;
 };
+
+// @public (undocumented)
+export type JointNameMatcher = string | RegExp | ((joint: SceneNode) => boolean);
 
 // Warning: (ae-forgotten-export) The symbol "LambertMaterial_base" needs to be exported by the entry point index.d.ts
 //
@@ -5061,6 +5086,8 @@ export class MorphTargetTrack extends AnimationTrack<MorphState> {
     set boundingBox(box: Nullable<BoundingBox[]>);
     calculateState(target: object, currentTime: number): MorphState;
     // (undocumented)
+    clone(): this;
+    // (undocumented)
     get defaultWeights(): Nullable<number[]>;
     set defaultWeights(value: Nullable<number[]>);
     getBlendId(): string;
@@ -5315,6 +5342,14 @@ export interface MultiChainSpringSystemOptions {
     wind?: Vector3;
 }
 
+// @public (undocumented)
+export type NamedJointsSkeletalAnimationMaskOptions = SkeletalAnimationMaskCommonOptions & {
+    type: 'joints';
+    include?: JointNameMatcher[];
+    exclude?: JointNameMatcher[];
+    includeDescendants?: boolean;
+};
+
 // @public
 export class NamedObject {
     constructor(name: string);
@@ -5356,6 +5391,7 @@ export class NodeEulerRotationTrack extends AnimationTrack<Quaternion> {
     }[], embedded?: boolean);
     applyState(node: SceneNode, state: Quaternion): void;
     calculateState(target: object, currentTime: number): Quaternion;
+    clone(): this;
     getBlendId(): string;
     getDuration(): number;
     // (undocumented)
@@ -5377,6 +5413,7 @@ export class NodeRotationTrack extends AnimationTrack<Quaternion> {
     }[], embedded?: boolean);
     applyState(node: SceneNode, state: Quaternion): void;
     calculateState(target: object, currentTime: number): Quaternion;
+    clone(): this;
     getBlendId(): string;
     getDuration(): number;
     // (undocumented)
@@ -5395,6 +5432,7 @@ export class NodeScaleTrack extends AnimationTrack<Vector3> {
     }[], embedded?: boolean);
     applyState(node: SceneNode, state: Vector3): void;
     calculateState(target: object, currentTime: number): Vector3;
+    clone(): this;
     getBlendId(): string;
     getDuration(): number;
     // (undocumented)
@@ -5413,6 +5451,7 @@ export class NodeTranslationTrack extends AnimationTrack<Vector3> {
     }[], embedded?: boolean);
     applyState(node: SceneNode, state: Vector3): void;
     calculateState(target: object, currentTime: number): Vector3;
+    clone(): this;
     getBlendId(): string;
     getDuration(): number;
     // (undocumented)
@@ -5899,6 +5938,8 @@ export class PCAGeometryCacheTrack extends AnimationTrack<PCAGeometryCacheState>
     // (undocumented)
     calculateState(_target: object, currentTime: number): GeometryCacheState;
     // (undocumented)
+    clone(): this;
+    // (undocumented)
     getBlendId(): string;
     // (undocumented)
     getDuration(): number;
@@ -6349,6 +6390,7 @@ export class PropertyTrack extends AnimationTrack<number[]> {
     constructor(prop: PropertyAccessor, value?: number[], embedded?: boolean);
     applyState(target: object, state: number[]): void;
     calculateState(target: unknown, currentTime: number): number[];
+    clone(): this;
     getBlendId(): PropertyAccessor;
     getDuration(): number;
     getProp(): PropertyAccessor;
@@ -7636,6 +7678,21 @@ export class SinNode extends GenericMathNode {
     };
 }
 
+// @public (undocumented)
+export type SkeletalAnimationMaskCommonOptions = {
+    rootMotion?: SkeletalAnimationMaskRootMotionMode;
+    unsupportedTracks?: SkeletalAnimationMaskUnsupportedTrackMode;
+};
+
+// @public (undocumented)
+export type SkeletalAnimationMaskOptions = HumanoidSkeletalAnimationMaskOptions | NamedJointsSkeletalAnimationMaskOptions;
+
+// @public (undocumented)
+export type SkeletalAnimationMaskRootMotionMode = 'include' | 'exclude' | 'only';
+
+// @public (undocumented)
+export type SkeletalAnimationMaskUnsupportedTrackMode = 'skip' | 'error';
+
 // @public
 export class Skeleton extends SkinBinding {
     constructor(joints: SceneNode[], inverseBindMatrices: Matrix4x4[], bindPose: SkeletonBindPose[]);
@@ -8437,7 +8494,7 @@ export interface TransformAccess {
     getWorldPosition(): Vector3;
     getWorldRotation(): Quaternion;
     getWorldScale(): Vector3;
-    readonly node?: unknown;
+    readonly node?: SceneNode;
     setLocalPosition(p: Vector3): void;
     setLocalRotation(q: Quaternion): void;
     setLocalScale(s: Vector3): void;

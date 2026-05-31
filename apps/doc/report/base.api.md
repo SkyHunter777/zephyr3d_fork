@@ -18,6 +18,7 @@ export class AABB {
     static readonly ClipLeft: number;
     static readonly ClipRight: number;
     static readonly ClipTop: number;
+    clone(): this;
     computePoints(): Vector3[];
     containsBox(other: AABB): boolean;
     containsPoint(pt: Vector3): boolean;
@@ -634,6 +635,8 @@ export type InterpolationTarget = 'number' | 'vec2' | 'vec3' | 'vec4' | 'quat';
 // @public
 export class Interpolator {
     constructor(mode: InterpolationMode, target: Nullable<InterpolationTarget>, inputs: InterpolateData, outputs: InterpolateData);
+    // (undocumented)
+    clone(): Interpolator;
     static getTargetStride(target: InterpolationTarget): number;
     get inputs(): InterpolateData;
     set inputs(val: InterpolateData);
@@ -652,6 +655,8 @@ export class Interpolator {
 // @public
 export class InterpolatorScalar extends Interpolator {
     constructor(mode: InterpolationMode, inputs: InterpolateData, outputs: InterpolateData);
+    // (undocumented)
+    clone(): InterpolatorScalar;
     // (undocumented)
     static constant(value: number): InterpolatorScalar;
     // (undocumented)

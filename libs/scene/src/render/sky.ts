@@ -483,6 +483,15 @@ export class SkyRenderer extends Disposable {
     }
     return this._radianceMap.get()!;
   }
+  /**
+   * Radiance map of the sky reused for sheen.
+   *
+   * @remarks
+   * Dynamic sky is smooth enough that the GGX-prefiltered radiance map is a practical approximation for sheen.
+   */
+  get sheenRadianceMap() {
+    return this.radianceMap;
+  }
   /** @internal */
   get atmosphereParams() {
     return this._atmosphereParams;
@@ -648,6 +657,7 @@ export class SkyRenderer extends Disposable {
           this.radianceFramebuffer!,
           this._radianceConvSamples
         );
+        ctx.scene.env.light.sheenRadianceMap = this.radianceMap;
         this._shProjector.projectCubemapToTexture(this._bakedSkyboxTexture.get()!, this.irradianceSHFB);
         ctx.scene.env.light.irradianceSHFB = this.irradianceSHFB;
         ctx.scene.env.light.irradianceSH = null;

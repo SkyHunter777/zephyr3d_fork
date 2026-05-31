@@ -53,6 +53,20 @@ export abstract class EnvironmentLighting extends Disposable {
     roughness: PBShaderExp
   ): Nullable<PBShaderExp>;
   /**
+   * Get Charlie-filtered sheen radiance for a fragment
+   *
+   * @param scope - The shader scope
+   * @param refl - Reflection vector
+   * @param roughness - Sheen roughness
+   *
+   * @returns The sheen radiance for the fragment
+   */
+  abstract getSheenRadiance(
+    scope: PBInsideFunctionScope,
+    refl: PBShaderExp,
+    roughness: PBShaderExp
+  ): Nullable<PBShaderExp>;
+  /**
    * Get irradiance for a fragment
    *
    * @param scope - The shader scope
@@ -65,6 +79,10 @@ export abstract class EnvironmentLighting extends Disposable {
    * Returns whether this environment lighting supports reflective light
    */
   abstract hasRadiance(): boolean;
+  /**
+   * Returns whether this environment lighting supports sheen reflective light
+   */
+  abstract hasSheenRadiance(): boolean;
   /**
    * Returns whether this environment lighting supports diffuse light
    */
@@ -79,6 +97,8 @@ export class EnvShIBL extends EnvironmentLighting {
   /** @internal */
   public static readonly UNIFORM_NAME_IBL_RADIANCE_MAP = 'zIBLRadianceMap';
   /** @internal */
+  public static readonly UNIFORM_NAME_IBL_SHEEN_RADIANCE_MAP = 'zIBLSheenRadianceMap';
+  /** @internal */
   public static readonly UNIFORM_NAME_IBL_RADIANCE_MAP_MAX_LOD = 'zIBLRadianceMapMaxLOD';
   /** @internal */
   public static readonly UNIFORM_NAME_IBL_IRRADIANCE_SH = 'zIBLIrradianceSH';
@@ -86,6 +106,8 @@ export class EnvShIBL extends EnvironmentLighting {
   public static readonly UNIFORM_NAME_IBL_IRRADIANCE_WINDOW = 'zIBLIrradianceWindow';
   /** @internal */
   private readonly _radianceMap: DRef<TextureCube>;
+  /** @internal */
+  private readonly _sheenRadianceMap: DRef<TextureCube>;
   /** @internal */
   private readonly _irradianceSH: DRef<GPUDataBuffer>;
   /** @internal */
@@ -97,9 +119,15 @@ export class EnvShIBL extends EnvironmentLighting {
    * @param radianceMap - The radiance map
    * @param irradianceSH - The irradiance SH
    */
-  constructor(radianceMap?: TextureCube, irradianceSH?: GPUDataBuffer, irradianceSHFB?: FrameBuffer) {
+  constructor(
+    radianceMap?: TextureCube,
+    irradianceSH?: GPUDataBuffer,
+    irradianceSHFB?: FrameBuffer,
+    sheenRadianceMap?: TextureCube
+  ) {
     super();
     this._radianceMap = new DRef(radianceMap || null);
+    this._sheenRadianceMap = new DRef(sheenRadianceMap || null);
     this._irradianceSH = new DRef(irradianceSH || null);
     this._irradianceSHFB = new DRef(irradianceSHFB || null);
     this._irraidanceWindow = new Vector3();
@@ -117,6 +145,13 @@ export class EnvShIBL extends EnvironmentLighting {
   }
   set radianceMap(tex) {
     this._radianceMap.set(tex);
+  }
+  /** The Charlie-filtered sheen radiance map */
+  get sheenRadianceMap() {
+    return this._sheenRadianceMap.get();
+  }
+  set sheenRadianceMap(tex) {
+    this._sheenRadianceMap.set(tex);
   }
   /** The irradiance sh coeffecients */
   get irradianceSH() {
@@ -149,6 +184,9 @@ export class EnvShIBL extends EnvironmentLighting {
         pb.getGlobalScope()[EnvShIBL.UNIFORM_NAME_IBL_RADIANCE_MAP] = pb.texCube().uniform(0);
         pb.getGlobalScope()[EnvShIBL.UNIFORM_NAME_IBL_RADIANCE_MAP_MAX_LOD] = pb.float().uniform(0);
       }
+      if (this.sheenRadianceMap) {
+        pb.getGlobalScope()[EnvShIBL.UNIFORM_NAME_IBL_SHEEN_RADIANCE_MAP] = pb.texCube().uniform(0);
+      }
       if (this.irradianceSHFB) {
         const tex = pb.tex2D();
         const formatInfo = getDevice()
@@ -173,6 +211,9 @@ export class EnvShIBL extends EnvironmentLighting {
     if (this.radianceMap) {
       bg.setValue(EnvShIBL.UNIFORM_NAME_IBL_RADIANCE_MAP_MAX_LOD, this.radianceMap.mipLevelCount - 1);
       bg.setTexture(EnvShIBL.UNIFORM_NAME_IBL_RADIANCE_MAP, this.radianceMap);
+    }
+    if (this.sheenRadianceMap) {
+      bg.setTexture(EnvShIBL.UNIFORM_NAME_IBL_SHEEN_RADIANCE_MAP, this.sheenRadianceMap);
     }
     if (this.irradianceSHFB) {
       bg.setTexture(
@@ -199,6 +240,20 @@ export class EnvShIBL extends EnvironmentLighting {
           pb.mul(roughness, scope[EnvShIBL.UNIFORM_NAME_IBL_RADIANCE_MAP_MAX_LOD])
         ).rgb as PBShaderExp)
       : (pb.textureSample(scope[EnvShIBL.UNIFORM_NAME_IBL_RADIANCE_MAP], refl).rgb as PBShaderExp);
+  }
+  /**
+   * {@inheritDoc EnvironmentLighting.getSheenRadiance}
+   * @override
+   */
+  getSheenRadiance(scope: PBInsideFunctionScope, refl: PBShaderExp, roughness: PBShaderExp) {
+    const pb = scope.$builder;
+    return getDevice().getDeviceCaps().shaderCaps.supportShaderTextureLod
+      ? (pb.textureSampleLevel(
+          scope[EnvShIBL.UNIFORM_NAME_IBL_SHEEN_RADIANCE_MAP],
+          refl,
+          pb.mul(roughness, scope[EnvShIBL.UNIFORM_NAME_IBL_RADIANCE_MAP_MAX_LOD])
+        ).rgb as PBShaderExp)
+      : (pb.textureSample(scope[EnvShIBL.UNIFORM_NAME_IBL_SHEEN_RADIANCE_MAP], refl).rgb as PBShaderExp);
   }
   /**
    * {@inheritDoc EnvironmentLighting.getIrradiance}
@@ -366,6 +421,13 @@ export class EnvShIBL extends EnvironmentLighting {
     return !!this._radianceMap.get();
   }
   /**
+   * {@inheritDoc EnvironmentLighting.hasSheenRadiance}
+   * @override
+   */
+  hasSheenRadiance() {
+    return !!this._sheenRadianceMap.get();
+  }
+  /**
    * {@inheritDoc EnvironmentLighting.hasIrradiance}
    * @override
    */
@@ -379,6 +441,7 @@ export class EnvShIBL extends EnvironmentLighting {
   protected onDispose() {
     super.onDispose();
     this._radianceMap.dispose();
+    this._sheenRadianceMap.dispose();
     this._irradianceSH.dispose();
     this._irradianceSHFB.dispose();
   }
@@ -441,6 +504,13 @@ export class EnvConstantAmbient extends EnvironmentLighting {
     return null;
   }
   /**
+   * {@inheritDoc EnvironmentLighting.getSheenRadiance}
+   * @override
+   */
+  getSheenRadiance(_scope: PBInsideFunctionScope, _refl: PBShaderExp, _roughness: PBShaderExp) {
+    return null;
+  }
+  /**
    * {@inheritDoc EnvironmentLighting.getIrradiance}
    * @override
    */
@@ -452,6 +522,13 @@ export class EnvConstantAmbient extends EnvironmentLighting {
    * @override
    */
   hasRadiance() {
+    return false;
+  }
+  /**
+   * {@inheritDoc EnvironmentLighting.hasSheenRadiance}
+   * @override
+   */
+  hasSheenRadiance() {
     return false;
   }
   /**
@@ -543,6 +620,13 @@ export class EnvHemisphericAmbient extends EnvironmentLighting {
     ).rgb as PBShaderExp;
   }
   /**
+   * {@inheritDoc EnvironmentLighting.getSheenRadiance}
+   * @override
+   */
+  getSheenRadiance(scope: PBInsideFunctionScope, refl: PBShaderExp, roughness: PBShaderExp) {
+    return this.getRadiance(scope, refl, roughness);
+  }
+  /**
    * {@inheritDoc EnvironmentLighting.getIrradiance}
    * @override
    */
@@ -560,6 +644,13 @@ export class EnvHemisphericAmbient extends EnvironmentLighting {
    * @override
    */
   hasRadiance() {
+    return true;
+  }
+  /**
+   * {@inheritDoc EnvironmentLighting.hasSheenRadiance}
+   * @override
+   */
+  hasSheenRadiance() {
     return true;
   }
   /**

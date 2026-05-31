@@ -202,6 +202,15 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
             } else {
               this.$l.F = this.schlickFresnel;
             }
+            if (that.sheen) {
+              this.$l.sheenAlbedoScaling = that.getSheenAlbedoScalingForDirect(
+                this,
+                this.NoV,
+                this.NoL,
+                this.data.sheenColor,
+                this.data.sheenRoughness
+              );
+            }
             this.$l.specularRoughness = pb.clamp(pb.add(this.data.roughness, this.sourceRadiusFactor), 0, 1);
             this.$l.alphaRoughness = pb.mul(this.specularRoughness, this.specularRoughness);
             this.$l.Dggx = that.distributionGGX(this, this.NoH, this.alphaRoughness);
@@ -267,7 +276,7 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
               this.specularScale
             );
             if (that.sheen) {
-              this.specular = pb.mul(this.specular, this.data.sheenAlbedoScaling);
+              this.specular = pb.mul(this.specular, this.sheenAlbedoScaling);
             }
             this.$if(pb.equal(this.reflectionMode, PBR_REFLECTION_MODE.none), function () {
               this.specular = pb.vec3(0);
@@ -324,12 +333,12 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
               this.diffuse = pb.mix(this.diffuse, this.transmittedLight, this.data.transmissionFactor);
             }
             if (that.sheen) {
-              this.diffuse = pb.mul(this.diffuse, this.data.sheenAlbedoScaling);
+              this.diffuse = pb.mul(this.diffuse, this.sheenAlbedoScaling);
             }
             this.outColor = pb.add(this.outColor, this.diffuse);
             if (that.sheen) {
               this.$l.sheenD = that.D_Charlie(this, this.NoH, this.data.sheenRoughness);
-              this.$l.sheenV = that.V_Ashikhmin(this, this.NoL, this.NoV);
+              this.$l.sheenV = that.V_Sheen(this, this.NoL, this.NoV, this.data.sheenRoughness);
               this.outColor = pb.add(
                 this.outColor,
                 pb.mul(this.lightColor, this.data.sheenColor, this.sheenD, this.sheenV)

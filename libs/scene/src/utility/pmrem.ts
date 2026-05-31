@@ -14,7 +14,7 @@ import { fetchSampler } from './misc';
 
 // reference: https://placeholderart.wordpress.com/2015/07/28/implementation-notes-runtime-environment-map-filtering-for-image-based-lighting/
 
-type DistributionType = 'lambertian' | 'ggx';
+type DistributionType = 'lambertian' | 'ggx' | 'charlie';
 
 let vertexLayout: Nullable<VertexLayout> = null;
 let renderStates: Nullable<RenderStateSet> = null;
@@ -85,7 +85,7 @@ function createPMREMProgram(type: DistributionType, numSamples: number) {
       });
     },
     fragment(pb) {
-      if (type === 'ggx') {
+      if (type === 'ggx' || type === 'charlie') {
         this.alphaG = pb.float().uniform(0);
       }
       this.vFilteringInfo = pb.vec3().uniform(0);
@@ -197,7 +197,7 @@ function createPMREMProgram(type: DistributionType, numSamples: number) {
           this.$return(this.result);
         });
       }
-      if (type === 'ggx') {
+      if (type === 'ggx' || type === 'charlie') {
         pb.func('hemisphereImportanceSampleDggx', [pb.vec2('u'), pb.float('a')], function () {
           this.$l.phi = pb.mul(this.u.x, 2 * Math.PI);
           this.$l.cosTheta2 = pb.div(
@@ -206,6 +206,18 @@ function createPMREMProgram(type: DistributionType, numSamples: number) {
           );
           this.$l.cosTheta = pb.sqrt(this.cosTheta2);
           this.$l.sinTheta = pb.sqrt(pb.sub(1, this.cosTheta2));
+          this.$return(
+            pb.vec3(
+              pb.mul(pb.cos(this.phi), this.sinTheta),
+              pb.mul(pb.sin(this.phi), this.sinTheta),
+              this.cosTheta
+            )
+          );
+        });
+        pb.func('hemisphereImportanceSampleCharlie', [pb.vec2('u'), pb.float('a')], function () {
+          this.$l.phi = pb.mul(this.u.x, 2 * Math.PI);
+          this.$l.sinTheta = pb.pow(this.u.y, pb.div(this.a, pb.add(pb.mul(2, this.a), 1)));
+          this.$l.cosTheta = pb.sqrt(pb.sub(1, pb.mul(this.sinTheta, this.sinTheta)));
           this.$return(
             pb.vec3(
               pb.mul(pb.cos(this.phi), this.sinTheta),
@@ -223,6 +235,12 @@ function createPMREMProgram(type: DistributionType, numSamples: number) {
             this.$return(pb.div(this.a2, pb.mul(this.d, this.d, Math.PI)));
           }
         );
+        pb.func('normalDistributionFunction_Charlie', [pb.float('NoH'), pb.float('roughness')], function () {
+          this.$l.invR = pb.div(1, pb.max(this.roughness, 0.000001));
+          this.$l.cos2h = pb.mul(this.NoH, this.NoH);
+          this.$l.sin2h = pb.max(pb.sub(1, this.cos2h), 0.0078125);
+          this.$return(pb.div(pb.mul(pb.add(this.invR, 2), pb.pow(this.sin2h, pb.mul(this.invR, 0.5))), 2 * Math.PI));
+        });
         pb.func(
           'radiance',
           [pb.float('alphaG'), pb.vec3('direction'), pb.vec3('vFilteringInfo')],
@@ -248,7 +266,11 @@ function createPMREMProgram(type: DistributionType, numSamples: number) {
               this.$l.weight = pb.float(0);
               this.$for(pb.int('i'), 0, numSamples, function () {
                 this.$l.Xi = this.hammersley2d(this.i, numSamples);
-                this.$l.H = this.hemisphereImportanceSampleDggx(this.Xi, this.alphaG);
+                if (type === 'ggx') {
+                  this.$l.H = this.hemisphereImportanceSampleDggx(this.Xi, this.alphaG);
+                } else {
+                  this.$l.H = this.hemisphereImportanceSampleCharlie(this.Xi, this.alphaG);
+                }
                 this.$l.NoV = pb.float(1);
                 this.$l.NoH = this.H.z;
                 this.$l.NoH2 = pb.mul(this.H.z, this.H.z);
@@ -257,10 +279,17 @@ function createPMREMProgram(type: DistributionType, numSamples: number) {
                   pb.vec3(pb.mul(this.NoH, this.H.x, 2), pb.mul(this.NoH, this.H.y, 2), this.NoL)
                 );
                 this.$if(pb.greaterThan(this.NoL, 0), function () {
-                  this.$l.pdf_inversed = pb.div(
-                    4,
-                    this.normalDistributionFunction_TrowbridgeReitzGGX(this.NoH, this.alphaG)
-                  );
+                  if (type === 'ggx') {
+                    this.$l.pdf_inversed = pb.div(
+                      4,
+                      this.normalDistributionFunction_TrowbridgeReitzGGX(this.NoH, this.alphaG)
+                    );
+                  } else {
+                    this.$l.pdf_inversed = pb.div(
+                      4,
+                      this.normalDistributionFunction_Charlie(this.NoH, this.alphaG)
+                    );
+                  }
                   this.$l.omegaS = pb.mul(this.pdf_inversed, this.NUM_SAMPLES_FLOAT_INVERSED);
                   this.$l.l = pb.add(
                     pb.sub(this.log4(this.omegaS), this.log4(this.omegaP)),
@@ -283,7 +312,7 @@ function createPMREMProgram(type: DistributionType, numSamples: number) {
         );
       }
       pb.main(function () {
-        if (type === 'ggx') {
+        if (type === 'ggx' || type === 'charlie') {
           this.$l.color = this.radiance(this.alphaG, this.$inputs.direction, this.vFilteringInfo);
         }
         if (type === 'lambertian') {
@@ -312,7 +341,7 @@ function doPrefilterCubemap(
   bindgroup.setValue('vFilteringInfo', filteringInfo);
   bindgroup.setValue('hdrScale', 1);
   bindgroup.setTexture('inputTexture', srcTexture);
-  if (type === 'ggx') {
+  if (type === 'ggx' || type === 'charlie') {
     bindgroup.setValue('alphaG', roughness);
   }
   device.setProgram(program);
@@ -364,7 +393,7 @@ export function prefilterCubemap(
   const attachMiplevel = fb.getColorAttachmentMipLevel(0);
   const generateMipmap = fb.getColorAttachmentGenerateMipmaps(0);
   const destTex = fb.getColorAttachments()[0];
-  const mips = type === 'ggx' ? destTex.mipLevelCount : 1;
+  const mips = type === 'ggx' || type === 'charlie' ? destTex.mipLevelCount : 1;
   for (let i = 0; i < mips; i++) {
     const alpha = i === 0 ? 0 : Math.pow(2, i) / width;
     doPrefilterCubemap(
@@ -372,7 +401,7 @@ export function prefilterCubemap(
       alpha,
       i,
       srcTex,
-      fetchSampler(type === 'ggx' ? 'clamp_nearest_nomip' : 'clamp_linear')!,
+      fetchSampler(type === 'ggx' || type === 'charlie' ? 'clamp_nearest_nomip' : 'clamp_linear')!,
       fb,
       filteringInfo,
       numSamples ?? 64
