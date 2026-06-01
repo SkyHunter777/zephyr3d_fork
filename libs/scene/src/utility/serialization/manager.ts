@@ -993,6 +993,7 @@ export class ResourceManager {
       node.prefabId = tmpNode.get()!.prefabId;
       node.parent = parent;
       node.persistentId = randomUUID();
+      node.animationSet.resetSkeletonModifiers();
       tmpNode.dispose();
       return node;
     } catch (err) {

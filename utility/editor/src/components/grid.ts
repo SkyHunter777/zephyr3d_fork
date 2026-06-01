@@ -348,6 +348,8 @@ export class PropertyEditor extends Observable<{
   private _navigationBackStack: string[];
   private _navigationForwardStack: string[];
   private _scrollToTopRequested: boolean;
+  private _restoreScrollY: Nullable<number>;
+  private _restoreScrollFrames: number;
   private readonly _extraPropertiesProviders: Map<
     string,
     (object: any) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>
@@ -375,6 +377,8 @@ export class PropertyEditor extends Observable<{
     this._navigationBackStack = [];
     this._navigationForwardStack = [];
     this._scrollToTopRequested = false;
+    this._restoreScrollY = null;
+    this._restoreScrollFrames = 0;
     this._extraPropertiesProviders = new Map();
     this._extraPropertiesVersion = 0;
   }
@@ -546,34 +550,43 @@ export class PropertyEditor extends Observable<{
     const object = this.object;
     const rawProps = this._rootGroup.rawProperties;
     const currentGroupStatePath = this._currentGroup.statePath;
-    this._rootGroup = new PropertyGroup('Root', this);
-    this._currentGroup = this._rootGroup;
-    this.invalidateRows();
     const version = ++this._extraPropertiesVersion;
-    this._rootGroup.setObject(object);
-    this._rootGroup.rawProperties = rawProps;
-    await this.appendExtraProperties(object, version);
+    const rootGroup = new PropertyGroup('Root', this);
+    rootGroup.setObject(object);
+    rootGroup.rawProperties = rawProps;
+    if (!(await this.appendExtraProperties(object, version, rootGroup))) {
+      return;
+    }
+    this._rootGroup = rootGroup;
+    this._currentGroup = this._rootGroup;
     this.restoreCurrentGroup(currentGroupStatePath);
   }
-  private async appendExtraProperties(object: any, version: number) {
+  private async appendExtraProperties(object: any, version: number, targetGroup = this._rootGroup) {
     if (!object || this._extraPropertiesProviders.size === 0) {
-      return;
+      return true;
     }
     const results = await Promise.all(
       [...this._extraPropertiesProviders.values()].map((provider) => Promise.resolve(provider(object)))
     );
     if (version !== this._extraPropertiesVersion || object !== this.object) {
-      return;
+      return false;
     }
     for (const extraProps of results) {
       for (const prop of extraProps ?? []) {
-        this._rootGroup.addProperty(object, prop);
+        targetGroup.addProperty(object, prop);
       }
     }
-    this.invalidateRows();
+    if (targetGroup === this._rootGroup) {
+      this.invalidateRows();
+    }
+    return true;
   }
   render() {
     if (this._dirty) {
+      if (!this._scrollToTopRequested) {
+        this._restoreScrollY = ImGui.GetScrollY();
+        this._restoreScrollFrames = 2;
+      }
       this._dirty = false;
       void this.rebuild();
     }
@@ -581,6 +594,14 @@ export class PropertyEditor extends Observable<{
     if (this._scrollToTopRequested) {
       ImGui.SetScrollY(0);
       this._scrollToTopRequested = false;
+      this._restoreScrollY = null;
+      this._restoreScrollFrames = 0;
+    } else if (this._restoreScrollY !== null) {
+      ImGui.SetScrollY(Math.min(this._restoreScrollY, ImGui.GetScrollMaxY()));
+      this._restoreScrollFrames--;
+      if (this._restoreScrollFrames <= 0) {
+        this._restoreScrollY = null;
+      }
     }
     const availableWidth = ImGui.GetContentRegionAvail().x;
     const animateLabelWidth = this._showLeadingColumn ? ImGui.GetFrameHeight() : 0;
@@ -1290,7 +1311,7 @@ export class PropertyEditor extends Observable<{
       if (ImGui.Button(`${FontGlyph.glyphs['cancel']}##clear`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))) {
         tmpProperty.str[0] = '';
         Promise.resolve(value.set!.call(object, tmpProperty)).then(() => {
-          this.refresh();
+          this.invalidateRows();
           this.dispatchEvent('object_property_changed', object, value);
         });
       }
@@ -1329,7 +1350,7 @@ export class PropertyEditor extends Observable<{
     }
     if (changed && value.set) {
       value.set.call(object, tmpProperty);
-      this.refresh();
+      this.invalidateRows();
       this.dispatchEvent('object_property_changed', object, value);
     }
     return true;
@@ -1513,7 +1534,7 @@ export class PropertyEditor extends Observable<{
     ImGui.PopID();
     if (changed && value.set) {
       value.set(tmpProperty);
-      this.refresh();
+      this.invalidateRows();
       this.dispatchEvent('object_property_changed', null, value);
     }
   }
@@ -1713,7 +1734,6 @@ export class PropertyEditor extends Observable<{
               );
               if (clicked && canInlineEdit) {
                 this.activateStringEditor(editSessionKey);
-                this.refresh();
               }
             }
             if (ImGui.IsItemClicked(ImGui.MouseButton.Left)) {
@@ -1767,7 +1787,7 @@ export class PropertyEditor extends Observable<{
               ) {
                 tmpProperty.str[0] = '';
                 Promise.resolve(value.set.call(object, tmpProperty)).then(() => {
-                  this.refresh();
+                  this.invalidateRows();
                   this.dispatchEvent('object_property_changed', object, value);
                 });
               }
@@ -1991,9 +2011,7 @@ export class PropertyEditor extends Observable<{
       */
       if (changed && value.set) {
         value.set.call(object, tmpProperty);
-        if (value.type !== 'rgb' && value.type !== 'rgba') {
-          this.refresh();
-        }
+        this.invalidateRows();
         this.dispatchEvent('object_property_changed', object, value);
       }
       if (value.set && ImGui.IsItemActivated() && !this._editSessions.has(editSessionKey)) {
@@ -2112,7 +2130,7 @@ export class PropertyEditor extends Observable<{
               if (dropped instanceof SceneNode) {
                 value.str[0] = dropped?.persistentId ?? '';
                 Promise.resolve(prop.set.call(obj, value as RequireOptionals<PropertyValue>)).then(() => {
-                  this.refresh();
+                  this.invalidateRows();
                   this.dispatchEvent('object_property_changed', obj, prop);
                 });
               }
@@ -2132,7 +2150,7 @@ export class PropertyEditor extends Observable<{
               if (payload) {
                 value.str[0] = data[0].path;
                 Promise.resolve(prop.set.call(obj, value as RequireOptionals<PropertyValue>)).then(() => {
-                  this.refresh();
+                  this.invalidateRows();
                   this.dispatchEvent('object_property_changed', obj, prop);
                 });
               }

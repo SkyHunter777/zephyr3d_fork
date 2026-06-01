@@ -13,6 +13,7 @@ import type {
 } from './controller';
 import { JointDynamicsSystemController } from './controller';
 import { ColliderForce, type BoneNode, type ColliderR, type GrabberR, type TransformAccess } from './types';
+import type { SkeletonBindPose } from '../skeleton';
 
 const _quat = new Quaternion();
 
@@ -118,6 +119,7 @@ export type JointDynamicSystemConfig = {
 export class JointDynamicsSystem {
   private _controller: JointDynamicsSystemController;
   private _chainConfig: JointChainConfig;
+  private _bindPose: WeakMap<SceneNode, SkeletonBindPose>;
   /**
    * Create a joint dynamics system for one or more bone chains.
    *
@@ -140,6 +142,7 @@ export class JointDynamicsSystem {
       systemRoot: config.chainConfig.systemRoot,
       chains: config.chainConfig.chains.map((chain) => ({ start: chain.start, end: chain.end }))
     };
+    this._bindPose = new WeakMap();
     const rootPoints: BoneNode[] = [];
     const boneNodes: BoneNode[] = [];
     const pointTransforms: TransformAccess[] = [];
@@ -148,6 +151,11 @@ export class JointDynamicsSystem {
       const chainNodes = this.collectChainNodes(chain.start, chain.end);
       for (let i = 0; i < chainNodes.length; i++) {
         const node = chainNodes[i];
+        this._bindPose.set(node, {
+          position: node.position.clone(),
+          rotation: node.rotation.clone(),
+          scale: node.scale.clone()
+        });
         const boneNode = {
           index: index++,
           position: node.getWorldPosition(),
@@ -224,9 +232,25 @@ export class JointDynamicsSystem {
   }
 
   /**
+   * Reset chain nodes to bind pose
+   */
+  resetChains() {
+    for (const chain of this._chainConfig.chains) {
+      const chainNodes = this.collectChainNodes(chain.start, chain.end);
+      for (const node of chainNodes) {
+        const bindPose = this._bindPose.get(node);
+        if (bindPose) {
+          node.position = bindPose.position;
+          node.rotation = bindPose.rotation;
+          node.scale = bindPose.scale;
+        }
+      }
+    }
+  }
+  /**
    * Add a fully configured collider at runtime.
    *
-   * The collider transform is read from the supplied scene node every simulation step.
+   * The collider transform is read from the supplied scene node every simula ; ion step.
    * If no transform is supplied, the collider is created at the identity transform.
    *
    * @param r - Read-only collider parameters.

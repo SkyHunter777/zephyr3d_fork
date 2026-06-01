@@ -73,7 +73,7 @@ const VRM_SPRING_BONE_SUBSTEPS = 3;
 const VRM_GRAVITY_ACCELERATION_SCALE = 3;
 const VRM_BASE_GRAVITY_ACCELERATION = 9.8 * VRM_GRAVITY_ACCELERATION_SCALE;
 const VRM_GRAVITY_POWER_TO_ACCELERATION = 9.8 * VRM_GRAVITY_ACCELERATION_SCALE;
-const VRM_STIFFNESS_TO_FRAME_HARDNESS = 0.8;
+const VRM_STIFFNESS_TO_FRAME_HARDNESS = 0.2;
 const VRM_DRAGFORCE_SCALE = 0.5;
 
 /** @internal */
@@ -510,7 +510,7 @@ export class GLTFImporter extends AbstractModelImporter {
         chains,
         colliders,
         flatPlanes,
-        controllerConfig: this._mapSpringJointsToControllerConfig(spring.joints)
+        controllerConfig: this._mapSpringJointsToControllerConfig(spring.joints, chains.length > 1)
       });
     }
   }
@@ -573,7 +573,10 @@ export class GLTFImporter extends AbstractModelImporter {
     return current;
   }
 
-  private _mapSpringJointsToControllerConfig(joints: AssetSpringBoneJoint[]): DeepPartial<ControllerConfig> {
+  private _mapSpringJointsToControllerConfig(
+    joints: AssetSpringBoneJoint[],
+    loop: boolean
+  ): DeepPartial<ControllerConfig> {
     let stiffness = 0;
     let dragForce = 0;
     let hitRadius = 0;
@@ -599,8 +602,8 @@ export class GLTFImporter extends AbstractModelImporter {
     const frameHardness = Math.max(0, Math.min(1, stiffness * VRM_STIFFNESS_TO_FRAME_HARDNESS));
     const frameResistance = Math.max(0, Math.min(1, 1 - dragForce * VRM_DRAGFORCE_SCALE));
     return {
-      enableBroadPhase: true,
-      enableSurfaceCollision: true,
+      enableBroadPhase: false,
+      enableSurfaceCollision: false,
       subSteps: VRM_SPRING_BONE_SUBSTEPS,
       gravity,
       curves: {
@@ -610,16 +613,30 @@ export class GLTFImporter extends AbstractModelImporter {
         resistance: InterpolatorScalar.constant(
           this._frameRateToSubstepRate(frameResistance, VRM_SPRING_BONE_SUBSTEPS)
         ),
-        pointRadius: InterpolatorScalar.constant(Math.max(0, hitRadius))
+        pointRadius: InterpolatorScalar.constant(Math.max(0, hitRadius)),
+        // ── KEY: stiff structural = inextensible fabric ──
+        structuralShrinkVertical: InterpolatorScalar.constant(0.95),
+        structuralStretchVertical: InterpolatorScalar.constant(0.95),
+        structuralShrinkHorizontal: InterpolatorScalar.constant(0.7),
+        structuralStretchHorizontal: InterpolatorScalar.constant(0.7),
+        // Moderate shear keeps the grid from collapsing diagonally
+        shearShrink: InterpolatorScalar.constant(0.025),
+        shearStretch: InterpolatorScalar.constant(0.025),
+        // ── KEY: very soft bending = cloth folds/drapes freely ──
+        bendingShrinkVertical: InterpolatorScalar.constant(0),
+        bendingStretchVertical: InterpolatorScalar.constant(0),
+        bendingShrinkHorizontal: InterpolatorScalar.constant(0),
+        bendingStretchHorizontal: InterpolatorScalar.constant(0)
       },
       constraintOptions: {
         structuralVertical: true,
         structuralHorizontal: true,
-        shear: true,
+        shear: false,
         bendingVertical: true,
         collideStructuralVertical: true,
         collideStructuralHorizontal: true,
-        collideShear: true
+        collideShear: true,
+        isLoop: loop
       }
     };
   }

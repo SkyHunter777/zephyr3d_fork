@@ -634,6 +634,7 @@ export class AssetManager {
           options?.overrideVFS ?? getEngine().resourceManager.VFS
         );
       node.sharedModel = sharedModel.get();
+      node.animationSet.resetSkeletonModifiers();
       return node;
     } catch (err) {
       console.error(`Load model failed: ${url}: ${err}`);

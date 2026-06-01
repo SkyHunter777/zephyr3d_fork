@@ -46,7 +46,9 @@ export class JointDynamicsModifier extends SkeletonModifier {
    * Reset the spring system to initial state.
    */
   reset(): void {
+    this._jointDynamicsSystem.resetChains();
     this._jointDynamicsSystem.controller.reset();
+    this._jointDynamicsSystem.controller.warp();
   }
 
   warp(): void {

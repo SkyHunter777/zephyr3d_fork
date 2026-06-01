@@ -1562,6 +1562,17 @@ export class AnimationSet extends Disposable implements IDisposable {
   }
 
   /**
+   * Reset all skeleton modifiers
+   */
+  resetSkeletonModifiers() {
+    for (const sk of this._skeletons) {
+      for (const modifier of sk.get()!.modifiers) {
+        modifier.reset();
+      }
+    }
+  }
+
+  /**
    * Dispose the animation set and release owned resources.
    *
    * - Disposes the weak reference to the model.

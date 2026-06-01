@@ -562,6 +562,18 @@ export function getJointDynamicsModifierClass(): SerializableClass {
     getProps() {
       return defineProps([
         {
+          name: 'Commands',
+          description: 'Reset joint dynamics modifier state',
+          type: 'command',
+          command(this: JointDynamicsModifier) {
+            this.reset();
+            return false;
+          },
+          get(value) {
+            value.str[0] = 'Reset';
+          }
+        },
+        {
           name: 'Enabled',
           description: 'Whether this joint dynamics modifier is active',
           type: 'bool',
