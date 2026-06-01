@@ -623,6 +623,39 @@ export function getMeshMaterialClass(): SerializableClass[] {
             }
           },
           {
+            name: 'TransparentShadowCaster',
+            type: 'bool',
+            default: false,
+            get(this: MeshMaterial, value) {
+              value.bool[0] = this.transparentShadowCaster;
+            },
+            set(this: MeshMaterial, value) {
+              this.transparentShadowCaster = value.bool[0];
+            },
+            isValid(this: MeshMaterial) {
+              return !this.$isInstance && this.blendMode !== 'none';
+            }
+          },
+          {
+            name: 'ShadowAlphaCutoff',
+            type: 'float',
+            default: 0.5,
+            options: {
+              animatable: true,
+              minValue: 0,
+              maxValue: 1
+            },
+            get(this: MeshMaterial, value) {
+              value.num[0] = this.shadowAlphaCutoff;
+            },
+            set(this: MeshMaterial, value) {
+              this.shadowAlphaCutoff = value.num[0];
+            },
+            isValid(this: MeshMaterial) {
+              return !this.$isInstance && this.blendMode !== 'none' && this.transparentShadowCaster;
+            }
+          },
+          {
             name: 'CullMode',
             description: 'Cull mode for this material',
             type: 'string',

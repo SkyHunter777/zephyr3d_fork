@@ -4,7 +4,7 @@ import type { Camera } from '../camera/camera';
 import type { BatchDrawable, Drawable } from './drawable';
 import type { DirectionalLight, PunctualLight } from '../scene/light';
 import type { RenderPass } from '.';
-import { QUEUE_TRANSPARENT } from '../values';
+import { QUEUE_TRANSPARENT, RENDER_PASS_TYPE_SHADOWMAP } from '../values';
 import type { BindGroup, BindGroupLayout } from '@zephyr3d/device';
 import { ProgramBuilder } from '@zephyr3d/device';
 import type { Material } from '../material';
@@ -321,7 +321,11 @@ export class RenderQueue extends Disposable {
       if (!this._itemList) {
         this._itemList = this.newRenderItemList();
       }
-      const trans = drawable.getQueueType() === QUEUE_TRANSPARENT;
+      const material = drawable.getMaterial();
+      const trans =
+        this._renderPass.type === RENDER_PASS_TYPE_SHADOWMAP && material?.useTransparentShadowCasterForPass?.(this._renderPass.type)
+          ? false
+          : drawable.getQueueType() === QUEUE_TRANSPARENT;
       const unlit = drawable.isUnlit();
       const needDepth = !!drawable.needSceneDepth();
       const transmission = !!drawable.needSceneColor() || needDepth;
@@ -330,7 +334,7 @@ export class RenderQueue extends Disposable {
       this._needSceneColorWithDepth ||= transmission && needDepth;
       this._drawTransparent ||= trans;
       if (camera.getPickResultResolveFunc()) {
-        drawable.getMaterial()!.objectColor = drawable.getObjectColor();
+        material!.objectColor = drawable.getObjectColor();
         this._objectColorMaps[0].set(drawable.getDrawableId(), drawable);
       }
       if (drawable.isBatchable()) {
@@ -389,9 +393,8 @@ export class RenderQueue extends Disposable {
           sortDistance: drawable.getSortDistance(camera),
           instanceData: null
         });
-        const mat = drawable.getMaterial();
-        if (mat) {
-          list.materialList.add(mat.coreMaterial);
+        if (material) {
+          list.materialList.add(material.coreMaterial);
         }
         drawable.applyTransformUniforms(this);
       }

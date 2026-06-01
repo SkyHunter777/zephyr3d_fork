@@ -155,6 +155,10 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
   private _alphaDither: boolean;
   /** @internal Blending mode. */
   private _blendMode: BlendMode;
+  /** @internal Whether transparent materials cast shadow through a masked shadow-only path. */
+  private _transparentShadowCaster: boolean;
+  /** @internal Alpha cutoff used by the shadow-only masked caster path. */
+  private _shadowAlphaCutoff: number;
   /** @internal Face culling mode. */
   private _cullMode: FaceMode;
   /** @internal Opacity in [0, 1]. */
@@ -186,6 +190,8 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
     this._alphaCutoff = 0;
     this._alphaDither = false;
     this._blendMode = 'none';
+    this._transparentShadowCaster = false;
+    this._shadowAlphaCutoff = 0.5;
     this._cullMode = 'back';
     this._opacity = 1;
     this._taaStrength = 1 - 1 / 16;
@@ -216,6 +222,8 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
     this.alphaCutoff = other.alphaCutoff;
     this.alphaDither = other.alphaDither;
     this.blendMode = other.blendMode;
+    this.transparentShadowCaster = other.transparentShadowCaster;
+    this.shadowAlphaCutoff = other.shadowAlphaCutoff;
     this.cullMode = other.cullMode;
     this.opacity = other.opacity;
     this.objectColor = other.objectColor;
@@ -576,6 +584,32 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
     }
   }
   /**
+   * Whether transparent visible materials cast shadow through a masked shadow-only path.
+   * Visible rendering stays blended while shadow-map rendering becomes cutout.
+   */
+  get transparentShadowCaster() {
+    return this._transparentShadowCaster;
+  }
+  set transparentShadowCaster(val) {
+    if (this._transparentShadowCaster !== !!val) {
+      this._transparentShadowCaster = !!val;
+      this.optionChanged(true);
+    }
+  }
+  /**
+   * Alpha cutoff used by the shadow-only masked caster path.
+   */
+  get shadowAlphaCutoff() {
+    return this._shadowAlphaCutoff;
+  }
+  set shadowAlphaCutoff(val) {
+    val = val > 1 ? 1 : val < 0 ? 0 : val;
+    if (this._shadowAlphaCutoff !== val) {
+      this._shadowAlphaCutoff = val;
+      this.uniformChanged();
+    }
+  }
+  /**
    * Face culling mode: 'none' | 'front' | 'back'.
    * - Does not force shader rebuild; affects rasterizer state.
    */
@@ -625,6 +659,54 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
     return false;
   }
   /**
+   * Returns the effective blend mode for the current pass.
+   */
+  protected getEffectiveBlendMode(pass: number, ctx?: DrawContext): BlendMode {
+    if (
+      ctx &&
+      this.useTransparentShadowCasterForPass(ctx.renderPass?.type) &&
+      this.featureUsed<BlendMode>(FEATURE_ALPHABLEND) !== 'none'
+    ) {
+      return 'none';
+    }
+    return this.featureUsed<BlendMode>(FEATURE_ALPHABLEND);
+  }
+  /**
+   * Returns the alpha cutoff that should be used for the current pass.
+   */
+  protected getActiveAlphaCutoff(ctx?: DrawContext, pass = this.pass) {
+    return ctx && this.useTransparentShadowCaster(ctx, pass) ? this._shadowAlphaCutoff : this._alphaCutoff;
+  }
+  /**
+   * Whether the current pass should use the shadow-only masked caster path.
+   */
+  useTransparentShadowCaster(ctx?: DrawContext, _pass = this.pass) {
+    return !!ctx && this.useTransparentShadowCasterForPass(ctx.renderPass?.type);
+  }
+  /**
+   * Whether the specified render pass type should reinterpret this transparent material as a masked shadow caster.
+   */
+  useTransparentShadowCasterForPass(renderPassType?: number) {
+    return (
+      !!this._transparentShadowCaster &&
+      renderPassType === RENDER_PASS_TYPE_SHADOWMAP &&
+      this.featureUsed<BlendMode>(FEATURE_ALPHABLEND) !== 'none'
+    );
+  }
+  /**
+   * Whether this pass needs an alpha-cutoff uniform bound.
+   */
+  protected usesAlphaCutoff(ctx?: DrawContext, pass = this.pass) {
+    return this._alphaCutoff > 0 || (!!ctx && this.useTransparentShadowCaster(ctx, pass));
+  }
+  /**
+   * Whether this pass needs fragment color inputs.
+   */
+  needFragmentColorInput(ctx?: DrawContext) {
+    const drawContext = ctx ?? this.drawContext;
+    return this.needFragmentColor(drawContext) || this.useTransparentShadowCaster(drawContext, this.pass);
+  }
+  /**
    * Update render states per pass and draw context.
    * Sets blending, alpha-to-coverage, depth test/write, cull mode, color mask, and cooperates with OIT.
    *
@@ -635,9 +717,12 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
    */
   protected updateRenderStates(pass: number, stateSet: RenderStateSet, ctx: DrawContext) {
     const isObjectColorPass = ctx.renderPass!.type === RENDER_PASS_TYPE_OBJECT_COLOR;
-    const blending =
-      !isObjectColorPass && (this.featureUsed<BlendMode>(FEATURE_ALPHABLEND) !== 'none' || ctx.lightBlending);
-    const a2c = !isObjectColorPass && this.featureUsed<boolean>(FEATURE_ALPHATOCOVERAGE);
+    const blendMode = this.getEffectiveBlendMode(pass, ctx);
+    const blending = !isObjectColorPass && (blendMode !== 'none' || ctx.lightBlending);
+    const a2c =
+      !isObjectColorPass &&
+      this.featureUsed<boolean>(FEATURE_ALPHATOCOVERAGE) &&
+      !this.useTransparentShadowCaster(ctx, pass);
     const ztestEq = ctx.queue === QUEUE_OPAQUE && !!ctx.depthTexture && !ctx.sceneColorTexture;
     if (blending || a2c) {
       const blendingState = stateSet.useBlendingState();
@@ -645,7 +730,7 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
         blendingState.enable(true);
         blendingState.setBlendFuncAlpha('zero', 'one');
         blendingState.setBlendEquation('add', 'add');
-        if (this._blendMode === 'additive' || ctx.lightBlending) {
+        if (blendMode === 'additive' || ctx.lightBlending) {
           blendingState.setBlendFuncRGB('one', 'one');
         } else {
           blendingState.setBlendFuncRGB('one', 'inv-src-alpha');
@@ -696,11 +781,11 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
    * @returns void
    */
   applyUniformValues(bindGroup: BindGroup, ctx: DrawContext, pass: number) {
-    if (this.featureUsed(FEATURE_ALPHATEST)) {
-      bindGroup.setValue('zAlphaCutoff', this._alphaCutoff);
+    if (this.usesAlphaCutoff(ctx, pass)) {
+      bindGroup.setValue('zAlphaCutoff', this.getActiveAlphaCutoff(ctx, pass));
     }
     if (
-      this.isTransparentPass(pass) &&
+      this.isTransparentPass(pass, ctx) &&
       ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT &&
       !(ctx.materialFlags & MaterialVaryingFlags.INSTANCING)
     ) {
@@ -729,8 +814,8 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
    * @param pass - Material pass index.
    * @returns True if the pass is transparent; otherwise false.
    */
-  isTransparentPass(_pass: number) {
-    return this.featureUsed<BlendMode>(FEATURE_ALPHABLEND) !== 'none';
+  isTransparentPass(pass: number, ctx?: DrawContext) {
+    return this.getEffectiveBlendMode(pass, ctx) !== 'none';
   }
   /**
    * Create the GPU program for a given pass and draw context.
@@ -783,7 +868,7 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
   protected _createHash() {
     return `${MeshMaterial.SHADER_VERSION}|${this._featureStates
       .map((val) => (val === undefined ? '' : val))
-      .join('|')}`;
+      .join('|')}|${Number(this._transparentShadowCaster)}`;
   }
   /**
    * Apply material uniforms to the bind group (set 2).
@@ -807,8 +892,9 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
    * @returns True if fragment color computation is needed; otherwise false.
    */
   needFragmentColor(ctx?: DrawContext) {
+    const drawContext = ctx ?? this.drawContext;
     return (
-      (ctx ?? this.drawContext).renderPass!.type === RENDER_PASS_TYPE_LIGHT ||
+      drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT ||
       this._alphaCutoff > 0 ||
       this.alphaToCoverage
     );
@@ -839,7 +925,7 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
       if (this.drawContext.renderPass!.type === RENDER_PASS_TYPE_OBJECT_COLOR) {
         scope.$outputs.zObjectColor = this.getInstancedUniform(scope, MeshMaterial.OBJECT_COLOR_UNIFORM);
       }
-      if (this.isTransparentPass(this.pass)) {
+      if (this.isTransparentPass(this.pass, this.drawContext)) {
         scope.$outputs.zOpacity = this.getInstancedUniform(scope, MeshMaterial.OPACITY_UNIFORM);
       }
     } else {
@@ -859,12 +945,12 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
   fragmentShader(scope: PBFunctionScope) {
     const pb = scope.$builder;
     ShaderHelper.prepareFragmentShader(pb, this.drawContext);
-    if (this._alphaCutoff > 0) {
+    if (this.usesAlphaCutoff(this.drawContext, this.pass)) {
       scope.zAlphaCutoff = pb.float().uniform(2);
     }
     if (this.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
       if (
-        this.isTransparentPass(this.pass) &&
+        this.isTransparentPass(this.pass, this.drawContext) &&
         !(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING)
       ) {
         scope.zOpacity = pb.float().uniform(2);
@@ -945,8 +1031,10 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
     const funcName = 'Z_outputFragmentColor';
     const alphaClipFuncName = 'Z_shouldDiscardAlpha';
     pb.func(alphaClipFuncName, [pb.float('alpha'), pb.float('cutoff')], function () {
+      const shadowMaskedCaster = that.useTransparentShadowCaster(that.drawContext, that.pass);
       const shadowAlphaClip =
-        that.drawContext.renderPass!.type === RENDER_PASS_TYPE_SHADOWMAP && !that.isTransparentPass(that.pass);
+        that.drawContext.renderPass!.type === RENDER_PASS_TYPE_SHADOWMAP &&
+        (shadowMaskedCaster || !that.isTransparentPass(that.pass, that.drawContext));
       if (shadowAlphaClip) {
         if (!pb.getGlobalScope().Z_shadowDither4x4) {
           pb.getGlobalScope().Z_shadowDither4x4 = [
@@ -985,7 +1073,10 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
         );
         this.$l.noise = this.Z_shadowDither4x4.at(pb.uint(this.ditherIndex));
         this.$return(pb.lessThan(this.coverage, this.noise));
-      } else if (that.featureUsed<boolean>(FEATURE_ALPHADITHER) && !that.isTransparentPass(that.pass)) {
+      } else if (
+        that.featureUsed<boolean>(FEATURE_ALPHADITHER) &&
+        !that.isTransparentPass(that.pass, that.drawContext)
+      ) {
         this.$l.frame = pb.float(ShaderHelper.getFramestamp(this));
         this.$l.phase = pb.add(
           this.$builtins.fragCoord.xy,
@@ -1006,16 +1097,16 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
       this.$l.outColor = color ? this.color : pb.vec4();
       if (that.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
         let output = true;
-        if (!that.isTransparentPass(that.pass) && !that.alphaToCoverage) {
+        if (!that.isTransparentPass(that.pass, that.drawContext) && !that.alphaToCoverage) {
           this.outColor.a = 1;
-        } else if (that.isTransparentPass(that.pass)) {
+        } else if (that.isTransparentPass(that.pass, that.drawContext)) {
           const opacity =
             that.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING
               ? this.$inputs.zOpacity
               : this.zOpacity;
           this.outColor.a = pb.mul(this.outColor.a, opacity);
         }
-        if (that.isTransparentPass(that.pass)) {
+        if (that.isTransparentPass(that.pass, that.drawContext)) {
           if (this.zAlphaCutoff) {
             this.$if(pb.getGlobalScope()[alphaClipFuncName](this.outColor.a, this.zAlphaCutoff), function () {
               pb.discard();
@@ -1119,7 +1210,8 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
       // Transparent/blended passes (and materials that depend on scene color like transmission)
       // do not have a stable depth match for SSR, so force-disable SSR contribution on those pixels.
       const disableSSR =
-        that.isTransparentPass(that.pass) && that.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT;
+        that.isTransparentPass(that.pass, that.drawContext) &&
+        that.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT;
       const disableSceneColorSSR =
         that.needSceneColor() && that.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT;
       if (disableSSR || disableSceneColorSSR) {

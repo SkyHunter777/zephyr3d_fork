@@ -34,7 +34,7 @@ export class UnlitMaterial
   }
   fragmentShader(scope: PBFunctionScope) {
     super.fragmentShader(scope);
-    if (this.needFragmentColor()) {
+    if (this.needFragmentColorInput()) {
       let color = this.calculateAlbedoColor(scope);
       if (this.vertexColor) {
         color = scope.$builder.mul(color, this.getVertexColor(scope));

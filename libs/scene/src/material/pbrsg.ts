@@ -84,7 +84,7 @@ export class PBRSpecularGlossinessMaterial
   fragmentShader(scope: PBFunctionScope) {
     super.fragmentShader(scope);
     const pb = scope.$builder;
-    if (this.needFragmentColor()) {
+    if (this.needFragmentColorInput()) {
       scope.$l.albedo = this.calculateAlbedoColor(scope);
       if (this.vertexColor) {
         scope.albedo = pb.mul(scope.albedo, this.getVertexColor(scope));

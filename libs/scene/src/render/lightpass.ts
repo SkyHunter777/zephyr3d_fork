@@ -43,6 +43,25 @@ export class LightPass extends RenderPass {
     return framebuffer.getColorAttachments()[0];
   }
   /** @internal */
+  protected selectTransparentOITShadowLight(ctx: DrawContext, renderQueue: RenderQueue) {
+    const shadowMapInfo = ctx.shadowMapInfo;
+    if (!shadowMapInfo || shadowMapInfo.size === 0) {
+      return null;
+    }
+    if (renderQueue.primaryDirectionalLight && shadowMapInfo.has(renderQueue.primaryDirectionalLight)) {
+      return renderQueue.primaryDirectionalLight;
+    }
+    if (renderQueue.primaryTransmissionLight && shadowMapInfo.has(renderQueue.primaryTransmissionLight)) {
+      return renderQueue.primaryTransmissionLight;
+    }
+    for (const light of renderQueue.shadowedLights) {
+      if (shadowMapInfo.has(light)) {
+        return light;
+      }
+    }
+    return shadowMapInfo.keys().next().value ?? null;
+  }
+  /** @internal */
   protected _getGlobalBindGroupHash(ctx: DrawContext, camera: Camera) {
     return `${this._shadowMapHash}:${ctx.currentShadowLight?.runtimeId ?? 0}:${ctx.lightBlending ? 1 : 0}:${
       camera.oit?.calculateHash() ?? ''
@@ -145,6 +164,7 @@ export class LightPass extends RenderPass {
       if (lists[i]) {
         ctx.queue = i === 0 ? QUEUE_OPAQUE : QUEUE_TRANSPARENT;
         ctx.oit = i === 0 || !items ? null : oit;
+        const singleTransparentOITPass = !!ctx.oit && ctx.queue === QUEUE_TRANSPARENT;
         if ((ctx.queue === QUEUE_TRANSPARENT || this._transmission) && ctx.scene.env.sky.fogPresents) {
           ctx.materialFlags |= MaterialVaryingFlags.APPLY_FOG;
         }
@@ -156,27 +176,43 @@ export class LightPass extends RenderPass {
             }
           }
           let lightIndex = 0;
+          let renderedTransparentOITShadow = false;
           if (ctx.shadowMapInfo) {
-            for (const k of ctx.shadowMapInfo.keys()) {
-              ctx.currentShadowLight = k;
-              ctx.lightBlending = lightIndex > 0;
-              this._shadowMapHash = ctx.shadowMapInfo.get(k)!.shaderHash;
-              this.renderLightPass(ctx, camera, lists[i]!, [k], flags);
-              lightIndex++;
+            if (singleTransparentOITPass) {
+              const shadowLight = this.selectTransparentOITShadowLight(ctx, renderQueue);
+              if (shadowLight) {
+                ctx.currentShadowLight = shadowLight;
+                ctx.lightBlending = false;
+                this._shadowMapHash = ctx.shadowMapInfo.get(shadowLight)!.shaderHash;
+                this.renderLightPass(ctx, camera, lists[i]!, [shadowLight], flags);
+                lightIndex = 1;
+                renderedTransparentOITShadow = true;
+              }
+            } else {
+              for (const k of ctx.shadowMapInfo.keys()) {
+                ctx.currentShadowLight = k;
+                ctx.lightBlending = lightIndex > 0;
+                this._shadowMapHash = ctx.shadowMapInfo.get(k)!.shaderHash;
+                this.renderLightPass(ctx, camera, lists[i]!, [k], flags);
+                lightIndex++;
+              }
             }
           }
-          if (lightIndex === 0 || renderQueue.unshadowedLights.length > 0) {
+          if (
+            (!singleTransparentOITPass && (lightIndex === 0 || renderQueue.unshadowedLights.length > 0)) ||
+            (singleTransparentOITPass && !renderedTransparentOITShadow)
+          ) {
             ctx.currentShadowLight = null;
             ctx.lightBlending = lightIndex > 0;
             this._shadowMapHash = '';
             const hasUnshadowedLights = renderQueue.unshadowedLights.length > 0;
-            if (ctx.lightBlending && hasUnshadowedLights && tmpFramebuffer) {
+            if (!singleTransparentOITPass && ctx.lightBlending && hasUnshadowedLights && tmpFramebuffer) {
               ctx.materialFlags &= ~MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
               ctx.device.pushDeviceStates();
               ctx.device.setFramebuffer(tmpFramebuffer);
             }
             this.renderLightPass(ctx, camera, lists[i]!, renderQueue.unshadowedLights, flags);
-            if (ctx.lightBlending && hasUnshadowedLights && tmpFramebuffer) {
+            if (!singleTransparentOITPass && ctx.lightBlending && hasUnshadowedLights && tmpFramebuffer) {
               ctx.materialFlags |= MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
               ctx.device.popDeviceStates();
             }

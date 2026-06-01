@@ -42,7 +42,7 @@ function mixinVertexColor<T extends typeof MeshMaterial>(BaseCls: T) {
     }
     vertexShader(scope: PBFunctionScope) {
       super.vertexShader(scope);
-      if (this.needFragmentColor()) {
+      if (this.needFragmentColorInput()) {
         if (this.vertexColor) {
           if (scope.$getVertexAttrib('diffuse')) {
             throw new Error('mixinVertexColor.vertexShader(): diffuse vertex stream already defined');
@@ -53,7 +53,7 @@ function mixinVertexColor<T extends typeof MeshMaterial>(BaseCls: T) {
       }
     }
     getVertexColor(scope: PBInsideFunctionScope) {
-      if (!this.needFragmentColor()) {
+      if (!this.needFragmentColorInput()) {
         throw new Error(
           'mixinVertexColor.getVertexColor(): No need to calculate albedo color, make sure needFragmentColor() returns true'
         );

@@ -58,7 +58,7 @@ function mixinAlbedoColor<T extends typeof MeshMaterial>(BaseCls: T) {
     }
     calculateAlbedoColor(scope: PBInsideFunctionScope, uv?: PBShaderExp) {
       const pb = scope.$builder;
-      if (!this.needFragmentColor()) {
+      if (!this.needFragmentColorInput()) {
         console.warn(
           'mixinAlbedoColor.calculateAlbedoColor(): No need to calculate albedo color, make sure needFragmentColor() returns true'
         );
@@ -72,7 +72,7 @@ function mixinAlbedoColor<T extends typeof MeshMaterial>(BaseCls: T) {
     }
     vertexShader(scope: PBFunctionScope) {
       super.vertexShader(scope);
-      if (this.needFragmentColor()) {
+      if (this.needFragmentColorInput()) {
         if (this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING) {
           scope.$outputs.zAlbedo = this.getInstancedUniform(scope, ALBEDO_COLOR_UNIFORM);
         }
@@ -80,14 +80,14 @@ function mixinAlbedoColor<T extends typeof MeshMaterial>(BaseCls: T) {
     }
     fragmentShader(scope: PBFunctionScope) {
       super.fragmentShader(scope);
-      if (this.needFragmentColor() && !(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING)) {
+      if (this.needFragmentColorInput() && !(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING)) {
         const pb = scope.$builder;
         scope.zAlbedo = pb.vec4().uniform(2);
       }
     }
     applyUniformValues(bindGroup: BindGroup, ctx: DrawContext, pass: number) {
       super.applyUniformValues(bindGroup, ctx, pass);
-      if (this.needFragmentColor(ctx) && !(ctx.materialFlags & MaterialVaryingFlags.INSTANCING)) {
+      if (this.needFragmentColorInput(ctx) && !(ctx.materialFlags & MaterialVaryingFlags.INSTANCING)) {
         bindGroup.setValue('zAlbedo', this._albedoColor);
       }
     }

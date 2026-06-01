@@ -180,7 +180,7 @@ export class ABufferOIT extends Disposable implements OIT {
       readBuffer.getBufferSubData(data).then(() => {
         const uint = new Uint32Array(data.buffer);
         for (let i = 0; i < uint.length; i++) {
-          if (uint[i] !== 0) {
+          if (uint[i] !== 0xffffffff) {
             console.error('Clear head buffer failed');
             break;
           }

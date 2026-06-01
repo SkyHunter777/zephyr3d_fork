@@ -176,22 +176,23 @@ export class PBRMetallicRoughnessMaterial
   fragmentShader(scope: PBFunctionScope) {
     super.fragmentShader(scope);
     const pb = scope.$builder;
+    const renderPassType = this.drawContext.renderPass!.type;
     if (
       this.subsurfaceScattering &&
       this.needFragmentColor() &&
-      this.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT
+      renderPassType === RENDER_PASS_TYPE_LIGHT
     ) {
       scope.zSubsurfaceColor = pb.vec3().uniform(2);
       scope.zSubsurfaceScale = pb.float().uniform(2);
       scope.zSubsurfacePower = pb.float().uniform(2);
       scope.zSubsurfaceIntensity = pb.float().uniform(2);
     }
-    if (this.needFragmentColor()) {
+    if (this.needFragmentColorInput()) {
       scope.$l.albedo = this.calculateAlbedoColor(scope);
       if (this.vertexColor) {
         scope.albedo = pb.mul(scope.albedo, this.getVertexColor(scope));
       }
-      if (this.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
+      if (renderPassType === RENDER_PASS_TYPE_LIGHT) {
         scope.$l.normalInfo = this.calculateNormalAndTBN(
           scope,
           scope.$inputs.worldPos,
