@@ -832,22 +832,7 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
       const shadowMapParams = ctx.shadowMapInfo!.get((ctx.renderPass as ShadowMapPass).light!)!;
       pb.emulateDepthClamp = !!shadowMapParams.depthClampEnabled;
     }
-    try {
-      return this._createProgram(pb, ctx, pass);
-    } catch (err) {
-      console.error('[MeshMaterial.createProgram] unexpected error', {
-        material: this.constructor.name,
-        pass,
-        renderPassType: ctx.renderPass?.type ?? null,
-        materialFlags: ctx.materialFlags,
-        queue: ctx.queue,
-        hasOIT: !!ctx.oit,
-        lightBlending: ctx.lightBlending,
-        hasShadowLight: !!ctx.currentShadowLight,
-        error: err instanceof Error ? err.stack ?? err.message : String(err)
-      });
-      throw err;
-    }
+    return this._createProgram(pb, ctx, pass);
   }
   /**
    * Query a feature flag’s current value.
@@ -1127,7 +1112,11 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
               pb.discard();
             });
           }
-          if (that.drawContext.oit && that.drawContext.lightBlending) {
+          if (
+            that.drawContext.oit &&
+            that.drawContext.lightBlending &&
+            that.drawContext.oit.getType() !== 'ab'
+          ) {
             // For OIT with multi-light decomposition, keep additive light passes
             // color-only to avoid duplicating per-fragment transmittance.
             this.outColor = pb.vec4(this.outColor.rgb, 0);
@@ -1221,7 +1210,7 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
     } else {
       pb.getGlobalScope()[funcName](worldPos);
     }
-    if (!that.drawContext.oit && that.drawContext.materialFlags & MaterialVaryingFlags.SSR_STORE_ROUGHNESS) {
+    if (that.drawContext.materialFlags & MaterialVaryingFlags.SSR_STORE_ROUGHNESS) {
       // Transparent/blended passes (and materials that depend on scene color like transmission)
       // do not have a stable depth match for SSR, so force-disable SSR contribution on those pixels.
       const disableSSR =
@@ -1240,41 +1229,6 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
             ? pb.vec4(pb.add(pb.mul(pb.normalize(scope.$inputs.wNorm), 0.5), pb.vec3(0.5)), 1)
             : pb.vec4(0.5, 0.5, 1, 1);
       }
-    } else if (!that.drawContext.oit && that.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_NORMAL) {
-      const disableNormal =
-        that.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT &&
-        ((that.isTransparentPass(that.pass, that.drawContext) && !that.alphaToCoverage) ||
-          that.needSceneColor());
-      scope.$outputs.zSSRNormal = disableNormal
-        ? pb.vec4(0)
-        : ssrNormal
-          ? ssrNormal
-          : scope.$inputs.wNorm
-            ? pb.vec4(pb.add(pb.mul(pb.normalize(scope.$inputs.wNorm), 0.5), pb.vec3(0.5)), 1)
-            : pb.vec4(0.5, 0.5, 1, 1);
-    }
-    if (!that.drawContext.oit && that.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE) {
-      const disableSSS =
-        that.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT &&
-        ((that.isTransparentPass(that.pass, that.drawContext) && !that.alphaToCoverage) ||
-          that.needSceneColor());
-      const writeSSSProfile = sssProfileEnabled && !disableSSS;
-      scope.$outputs.zSSSProfile = writeSSSProfile ? sssProfile ?? pb.vec4(0) : pb.vec4(0);
-      scope.$outputs.zSSSParams = writeSSSProfile ? sssParams ?? pb.vec4(0) : pb.vec4(0);
-    }
-    if (!that.drawContext.oit && that.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_DIFFUSE) {
-      const disableSSS =
-        that.drawContext.renderPass!.type !== RENDER_PASS_TYPE_LIGHT ||
-        (that.isTransparentPass(that.pass, that.drawContext) && !that.alphaToCoverage) ||
-        that.needSceneColor();
-      scope.$outputs.zSSSDiffuse = disableSSS ? pb.vec4(0) : sssDiffuse ?? pb.vec4(0);
-    }
-    if (!that.drawContext.oit && that.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_TRANSMISSION) {
-      const disableSSS =
-        that.drawContext.renderPass!.type !== RENDER_PASS_TYPE_LIGHT ||
-        (that.isTransparentPass(that.pass, that.drawContext) && !that.alphaToCoverage) ||
-        that.needSceneColor();
-      scope.$outputs.zSSSTransmission = disableSSS ? pb.vec4(0) : sssTransmission ?? pb.vec4(0);
     }
   }
 }

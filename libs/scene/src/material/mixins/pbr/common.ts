@@ -643,15 +643,6 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
       const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
       return (instancing ? scope.$inputs.zRectSpecularScale : scope.zRectSpecularScale) as PBShaderExp;
     }
-    private needsSSSTransmissionData() {
-      return (
-        !!(this as { subsurfaceProfile?: unknown }).subsurfaceProfile &&
-        this.drawContext.renderPass?.type === RENDER_PASS_TYPE_LIGHT
-      );
-    }
-    private needsTransmissionData() {
-      return this.transmission || this.needsSSSTransmissionData();
-    }
     calculateEmissiveColor(scope: PBInsideFunctionScope) {
       const pb = scope.$builder;
       if (this.emissiveTexture) {
@@ -1399,9 +1390,8 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
             this.$if(pb.greaterThan(this.NoL_light, 1e-5), function () {
               this.$l.falloff = pb.float(1);
               this.$if(pb.greaterThan(this.range, 0), function () {
-                this.$if(pb.greaterThan(this.dist, this.range), function () {
-                  this.falloff = pb.float(0);
-                });
+                this.$l.fadeStart = pb.mul(this.range, 0.9);
+                this.falloff = pb.sub(1, pb.smoothStep(this.fadeStart, this.range, this.dist));
               });
               this.$l.uv = pb.clamp(
                 pb.add(

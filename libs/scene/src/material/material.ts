@@ -9,7 +9,7 @@ import type { Clonable, IDisposable, Nullable } from '@zephyr3d/base';
 import { getEngine } from '../app/api';
 
 type MaterialState = {
-  program: GPUProgram;
+  program: Nullable<GPUProgram>;
   bindGroup: Nullable<BindGroup>;
   bindGroupTag: string;
   renderStateSet: RenderStateSet;
