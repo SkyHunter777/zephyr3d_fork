@@ -1,4 +1,4 @@
-import { DRef, InterpolatorScalar, MemoryFS, Vector3 } from '@zephyr3d/base';
+import { DRef, MemoryFS, Vector3 } from '@zephyr3d/base';
 import {
   ColliderForce,
   JointDynamicsModifier,
@@ -125,10 +125,10 @@ describe('JointDynamics serialization', () => {
     preserveTwistProp.set!.call(modifier, { num: [0], bool: [false], str: [''], object: [null] });
     gravityProp.set!.call(modifier, { num: [0, -4, 0], bool: [false], str: [''], object: [null] });
     massScaleProp.set!.call(modifier, {
-      num: [0],
+      num: [2],
       bool: [false],
       str: [''],
-      object: [InterpolatorScalar.constant(2)]
+      object: []
     });
 
     const serialized = await manager.serializeObject(model);
