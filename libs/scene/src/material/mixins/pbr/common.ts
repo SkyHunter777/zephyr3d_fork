@@ -981,11 +981,29 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
           pb.vec3('outColor').inout()
         ],
         function () {
-          this.$l.H = pb.normalize(pb.add(this.viewVec, this.L));
-          this.$l.NoH = pb.clamp(pb.dot(this.normal, this.H), 0, 1);
           this.$l.NoL = pb.clamp(pb.dot(this.normal, this.L), 0, 1);
           this.$l.NoV = pb.clamp(pb.dot(this.normal, this.viewVec), 0, 1);
           this.$if(pb.greaterThan(this.NoL, 0), function () {
+            this.$l.specularLightDir = this.L;
+            this.$if(pb.greaterThan(this.sourceRadiusFactor, 0), function () {
+              this.$l.reflectionVec = pb.reflect(pb.neg(this.viewVec), this.normal);
+              this.$l.centerToRay = pb.sub(
+                pb.mul(this.reflectionVec, pb.dot(this.L, this.reflectionVec)),
+                this.L
+              );
+              this.$l.centerToRayLength = pb.length(this.centerToRay);
+              this.$l.sphereLightBlend = pb.clamp(
+                pb.div(this.sourceRadiusFactor, pb.max(this.centerToRayLength, 0.0001)),
+                0,
+                1
+              );
+              this.specularLightDir = pb.normalize(
+                pb.add(this.L, pb.mul(this.centerToRay, this.sphereLightBlend))
+              );
+            });
+            this.$l.H = pb.normalize(pb.add(this.viewVec, this.specularLightDir));
+            this.$l.NoH = pb.clamp(pb.dot(this.normal, this.H), 0, 1);
+            this.$l.specularNoL = pb.clamp(pb.dot(this.normal, this.specularLightDir), 0, 1);
             this.$l.VoH = pb.clamp(pb.dot(this.viewVec, this.H), 0, 1);
             this.$l.schlickFresnel = that.fresnelSchlick(
               this,
@@ -1011,11 +1029,17 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
                 this.data.sheenRoughness
               );
             }
-            this.$l.specularRoughness = pb.clamp(pb.add(this.data.roughness, this.sourceRadiusFactor), 0, 1);
-            this.$l.alphaRoughness = pb.mul(this.specularRoughness, this.specularRoughness);
+            this.$l.alphaRoughness = pb.mul(this.data.roughness, this.data.roughness);
+            this.$l.specularRoughness = pb.sqrt(this.alphaRoughness);
             this.$l.D = that.distributionGGX(this, this.NoH, this.alphaRoughness);
-            this.$l.V = that.visGGX(this, this.NoV, this.NoL, this.alphaRoughness);
-            this.$l.specular = pb.mul(this.lightColor, this.D, this.V, this.F, this.specularScale);
+            this.$l.V = that.visGGX(this, this.NoV, this.specularNoL, this.alphaRoughness);
+            this.$l.specular = pb.mul(
+              this.lightColor,
+              this.D,
+              this.V,
+              this.F,
+              this.specularScale
+            );
             if (that.sheen) {
               this.specular = pb.mul(this.specular, this.sheenAlbedoScaling);
             }
@@ -1080,9 +1104,10 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
               );
             }
             if (that.clearcoat) {
-              this.alphaRoughness = pb.mul(this.data.ccFactor.y, this.data.ccFactor.y);
+              this.$l.clearcoatAlphaRoughness = pb.mul(this.data.ccFactor.y, this.data.ccFactor.y);
+              this.alphaRoughness = this.clearcoatAlphaRoughness;
               this.NoH = pb.clamp(pb.dot(this.data.ccNormal, this.H), 0, 1);
-              this.NoL = pb.clamp(pb.dot(this.data.ccNormal, this.L), 0, 1);
+              this.NoL = pb.clamp(pb.dot(this.data.ccNormal, this.specularLightDir), 0, 1);
               this.ccF0 = pb.vec3(0.04);
               this.F = that.fresnelSchlick(this, this.VoH, this.ccF0, pb.vec3(1));
               this.D = that.distributionGGX(this, this.NoH, this.alphaRoughness);

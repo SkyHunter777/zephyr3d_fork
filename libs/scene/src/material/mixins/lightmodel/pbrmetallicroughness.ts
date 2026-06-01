@@ -186,11 +186,29 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
           this.$l.anisotropy = this.zAnisotropy;
           this.$l.anisotropyDirection = this.zAnisotropyDirection;
           this.$l.anisotropyDirectionScaleBias = this.zAnisotropyDirectionScaleBias;
-          this.$l.H = pb.normalize(pb.add(this.viewVec, this.L));
-          this.$l.NoH = pb.clamp(pb.dot(this.normal, this.H), 0, 1);
           this.$l.NoL = pb.clamp(pb.dot(this.normal, this.L), 0, 1);
           this.$l.NoV = pb.clamp(pb.dot(this.normal, this.viewVec), 0, 1);
           this.$if(pb.greaterThan(this.NoL, 0), function () {
+            this.$l.specularLightDir = this.L;
+            this.$if(pb.greaterThan(this.sourceRadiusFactor, 0), function () {
+              this.$l.reflectionVec = pb.reflect(pb.neg(this.viewVec), this.normal);
+              this.$l.centerToRay = pb.sub(
+                pb.mul(this.reflectionVec, pb.dot(this.L, this.reflectionVec)),
+                this.L
+              );
+              this.$l.centerToRayLength = pb.length(this.centerToRay);
+              this.$l.sphereLightBlend = pb.clamp(
+                pb.div(this.sourceRadiusFactor, pb.max(this.centerToRayLength, 0.0001)),
+                0,
+                1
+              );
+              this.specularLightDir = pb.normalize(
+                pb.add(this.L, pb.mul(this.centerToRay, this.sphereLightBlend))
+              );
+            });
+            this.$l.H = pb.normalize(pb.add(this.viewVec, this.specularLightDir));
+            this.$l.NoH = pb.clamp(pb.dot(this.normal, this.H), 0, 1);
+            this.$l.specularNoL = pb.clamp(pb.dot(this.normal, this.specularLightDir), 0, 1);
             this.$l.VoH = pb.clamp(pb.dot(this.viewVec, this.H), 0, 1);
             this.$l.schlickFresnel = that.fresnelSchlick(this, this.VoH, this.data.f0.rgb, this.data.f90);
             if (that.iridescence) {
@@ -211,8 +229,8 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
                 this.data.sheenRoughness
               );
             }
-            this.$l.specularRoughness = pb.clamp(pb.add(this.data.roughness, this.sourceRadiusFactor), 0, 1);
-            this.$l.alphaRoughness = pb.mul(this.specularRoughness, this.specularRoughness);
+            this.$l.alphaRoughness = pb.mul(this.data.roughness, this.data.roughness);
+            this.$l.specularRoughness = pb.sqrt(this.alphaRoughness);
             this.$l.Dggx = that.distributionGGX(this, this.NoH, this.alphaRoughness);
             this.$l.D = this.Dggx;
             this.$if(pb.equal(this.reflectionMode, PBR_REFLECTION_MODE.anisotropic), function () {
@@ -266,7 +284,7 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
               this.$l.glintMask = pb.smoothStep(0.97, 1, this.glintNoise);
               this.D = pb.mul(this.Dggx, pb.add(1, pb.mul(this.glintMask, 8)));
             });
-            this.$l.V = that.visGGX(this, this.NoV, this.NoL, this.alphaRoughness);
+            this.$l.V = that.visGGX(this, this.NoV, this.specularNoL, this.alphaRoughness);
             this.$l.specular = pb.mul(
               this.lightColor,
               this.D,
@@ -345,9 +363,10 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
               );
             }
             if (that.clearcoat) {
-              this.alphaRoughness = pb.mul(this.data.ccFactor.y, this.data.ccFactor.y);
+              this.$l.clearcoatAlphaRoughness = pb.mul(this.data.ccFactor.y, this.data.ccFactor.y);
+              this.alphaRoughness = this.clearcoatAlphaRoughness;
               this.NoH = pb.clamp(pb.dot(this.data.ccNormal, this.H), 0, 1);
-              this.NoL = pb.clamp(pb.dot(this.data.ccNormal, this.L), 0, 1);
+              this.NoL = pb.clamp(pb.dot(this.data.ccNormal, this.specularLightDir), 0, 1);
               this.ccF0 = pb.vec3(pb.pow(pb.div(pb.sub(this.data.f0.a, 1), pb.add(this.data.f0.a, 1)), 2));
               this.F = that.fresnelSchlick(this, this.VoH, this.ccF0, pb.vec3(1));
               this.D = that.distributionGGX(this, this.NoH, this.alphaRoughness);
