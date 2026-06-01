@@ -22,6 +22,7 @@ export * from './camera';
 export * from './shaders';
 export * from './shadow';
 export * from './asset';
+export * from './avatar';
 export * from './blitter';
 export * from './values';
 export * from './shaders';
