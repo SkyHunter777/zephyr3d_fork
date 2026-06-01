@@ -286,6 +286,28 @@ export class Material extends Disposable implements Clonable<Material>, IDisposa
         let program = Material._programCache[hash];
         if (!program) {
           program = this.createProgram(ctx, pass) ?? null;
+          if (!program) {
+            console.error('[Material.apply] program build failed', {
+              material: this.constructor.name,
+              pass,
+              renderPassType: ctx.renderPass?.type ?? null,
+              materialFlags: ctx.materialFlags,
+              queue: ctx.queue,
+              lightBlending: ctx.lightBlending,
+              hasOIT: !!ctx.oit,
+              hasShadowLight: !!ctx.currentShadowLight,
+              renderPassHash: ctx.renderPassHash
+            });
+            state = {
+              program: null,
+              bindGroup: null,
+              bindGroupTag: '',
+              renderStateSet: ctx.device.createRenderStateSet(),
+              materialTag: -1
+            };
+            this._states[hash] = state;
+            return false;
+          }
           program.name = `@${this.constructor.name}_program_${this._nextProgramId++}`;
           Material._programCache[hash] = program;
         }
