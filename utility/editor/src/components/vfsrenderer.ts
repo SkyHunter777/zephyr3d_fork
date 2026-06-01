@@ -1863,7 +1863,10 @@ export class VFSRenderer extends makeObservable(Disposable)<{
                       PathUtils.basename(result.paths[i], PathUtils.extname(result.paths[i])),
                       info.targetDirectory.path,
                       dtVFS,
-                      saveOptions[i]
+                      {
+                        ...saveOptions[i],
+                        rebuildPrefab: !!result.rebuildPrefab
+                      }
                     );
                   } catch (err) {
                     console.error(`Write model ${result.paths[i]} failed: ${err}`);
