@@ -104,6 +104,25 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
         return this.$isInstance ? this.coreMaterial.emissiveStrength : 1;
       }
     },
+    {
+      name: 'RectSpecularScale',
+      type: 'float',
+      options: {
+        label: 'RectSpecularScale',
+        animatable: true,
+        minValue: 0,
+        maxValue: 4
+      },
+      get(this: PBRMaterial, value) {
+        value.num[0] = this.rectSpecularScale;
+      },
+      set(this: PBRMaterial, value) {
+        this.rectSpecularScale = value.num[0];
+      },
+      getDefaultValue(this: PBRMaterial) {
+        return this.$isInstance ? this.coreMaterial.rectSpecularScale : 1;
+      }
+    },
     ...getTextureProps<PBRMaterial>(manager, 'emissiveTexture', '2D', true, 0),
     ...getTextureProps<PBRMaterial>(manager, 'specularTexture', '2D', false, 0),
     {

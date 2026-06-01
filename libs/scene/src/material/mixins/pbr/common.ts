@@ -31,6 +31,7 @@ export type IMixinPBRCommon = {
   emissiveColor: Vector3;
   emissiveStrength: number;
   occlusionStrength: number;
+  rectSpecularScale: number;
   transmission: boolean;
   transmissionFactor: number;
   thicknessFactor: number;
@@ -160,6 +161,11 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
 
   const EMISSIVE_COLOR_UNIFORM = S.defineInstanceUniform('emissiveColor', 'rgb', 'EmissiveColor');
   const EMISSIVE_STRENGTH_UNIFORM = S.defineInstanceUniform('emissiveStrength', 'float', 'EmissiveStrength');
+  const RECT_SPECULAR_SCALE_UNIFORM = S.defineInstanceUniform(
+    'rectSpecularScale',
+    'float',
+    'RectSpecularScale'
+  );
 
   const cls = class extends S {
     static readonly pbrCommonMixed = true;
@@ -167,6 +173,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
     private readonly _emissiveColor: Vector3;
     private _emissiveStrength: number;
     private _occlusionStrength: number;
+    private _rectSpecularScale: number;
     private readonly _sheenFactor: Vector4;
     private readonly _clearcoatFactor: Vector4;
     private _transmissionFactor: number;
@@ -180,6 +187,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
       this._occlusionStrength = 1;
       this._emissiveColor = new Vector3(0, 0, 0);
       this._emissiveStrength = 1;
+      this._rectSpecularScale = 1;
       this._sheenFactor = Vector4.zero();
       this._clearcoatFactor = new Vector4(0, 0, 1, 0);
       this._transmissionFactor = 0;
@@ -200,6 +208,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
       this.iridescenceThicknessMin = other.iridescenceThicknessMin;
       this.iridescenceThicknessMax = other.iridescenceThicknessMax;
       this.occlusionStrength = other.occlusionStrength;
+      this.rectSpecularScale = other.rectSpecularScale;
       this.emissiveColor = other.emissiveColor;
       this.emissiveStrength = other.emissiveStrength;
       this.transmission = other.transmission;
@@ -303,6 +312,15 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
         this.uniformChanged();
       }
     }
+    get rectSpecularScale() {
+      return this._rectSpecularScale;
+    }
+    set rectSpecularScale(val) {
+      if (val !== this._rectSpecularScale) {
+        this._rectSpecularScale = val;
+        this.uniformChanged();
+      }
+    }
     get emissiveColor(): Immutable<Vector3> {
       return this._emissiveColor;
     }
@@ -392,6 +410,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
       if (this.needFragmentColor() && this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING) {
         scope.$outputs.zEmissiveColor = this.getInstancedUniform(scope, EMISSIVE_COLOR_UNIFORM);
         scope.$outputs.zEmissiveStrength = this.getInstancedUniform(scope, EMISSIVE_STRENGTH_UNIFORM);
+        scope.$outputs.zRectSpecularScale = this.getInstancedUniform(scope, RECT_SPECULAR_SCALE_UNIFORM);
       }
     }
     fragmentShader(scope: PBFunctionScope) {
@@ -402,6 +421,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
         if (!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING)) {
           scope.zEmissiveColor = pb.vec3().uniform(2);
           scope.zEmissiveStrength = pb.float().uniform(2);
+          scope.zRectSpecularScale = pb.float().uniform(2);
         }
         if (this.occlusionTexture) {
           scope.zOcclusionStrength = pb.float().uniform(2);
@@ -439,6 +459,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
         if (!(ctx.materialFlags & MaterialVaryingFlags.INSTANCING)) {
           bindGroup.setValue('zEmissiveColor', this._emissiveColor);
           bindGroup.setValue('zEmissiveStrength', this._emissiveStrength);
+          bindGroup.setValue('zRectSpecularScale', this._rectSpecularScale);
         }
         if (this.occlusionTexture) {
           bindGroup.setValue('zOcclusionStrength', this._occlusionStrength);
@@ -617,6 +638,19 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
     getEmissiveStrength(scope: PBInsideFunctionScope) {
       const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
       return (instancing ? scope.$inputs.zEmissiveStrength : scope.zEmissiveStrength) as PBShaderExp;
+    }
+    getRectSpecularScale(scope: PBInsideFunctionScope) {
+      const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
+      return (instancing ? scope.$inputs.zRectSpecularScale : scope.zRectSpecularScale) as PBShaderExp;
+    }
+    private needsSSSTransmissionData() {
+      return (
+        !!(this as { subsurfaceProfile?: unknown }).subsurfaceProfile &&
+        this.drawContext.renderPass?.type === RENDER_PASS_TYPE_LIGHT
+      );
+    }
+    private needsTransmissionData() {
+      return this.transmission || this.needsSSSTransmissionData();
     }
     calculateEmissiveColor(scope: PBInsideFunctionScope) {
       const pb = scope.$builder;
@@ -1358,14 +1392,16 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
             this.$l.centerToPoint = pb.sub(this.center, this.worldPos);
             this.$l.dist = pb.length(this.centerToPoint);
             this.$l.L = pb.normalize(this.centerToPoint);
-            this.$l.NoL = pb.clamp(pb.dot(this.normal, this.L), 0, 1);
             this.$l.NoV = pb.clamp(pb.dot(this.normal, this.viewVec), 0.0001, 1);
             this.$l.NoL_light = pb.clamp(pb.dot(this.lightNormal, pb.neg(this.L)), 0, 1);
-            this.$if(pb.greaterThan(pb.mul(this.NoL, this.NoL_light), 1e-5), function () {
+            // Keep rect lights single-sided, but avoid applying an extra cosine falloff
+            // on top of the LTC integral, which makes the light look noticeably dimmer.
+            this.$if(pb.greaterThan(this.NoL_light, 1e-5), function () {
               this.$l.falloff = pb.float(1);
               this.$if(pb.greaterThan(this.range, 0), function () {
-                this.falloff = pb.max(0, pb.sub(1, pb.div(this.dist, this.range)));
-                this.falloff = pb.mul(this.falloff, this.falloff);
+                this.$if(pb.greaterThan(this.dist, this.range), function () {
+                  this.falloff = pb.float(0);
+                });
               });
               this.$l.uv = pb.clamp(
                 pb.add(
@@ -1409,14 +1445,15 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
               this.$l.lightColor = pb.mul(
                 this.colorIntensity.rgb,
                 this.colorIntensity.a,
-                this.NoL_light,
                 this.falloff
               );
               this.$l.baseF0 = this.data.f0.rgb;
+              this.$l.rectSpecularScale = that.getRectSpecularScale(this);
               this.$l.specularLtc = pb.mul(
                 this.spec,
                 pb.add(pb.mul(this.baseF0, this.t2.x), pb.mul(pb.sub(pb.vec3(1), this.baseF0), this.t2.y)),
-                this.data.specularWeight
+                this.data.specularWeight,
+                this.rectSpecularScale
               );
               this.$l.diffuseLtc = pb.mul(this.diff, pb.div(this.data.diffuse.rgb, Math.PI));
               this.outColor = pb.add(
@@ -1625,7 +1662,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
       const pb = scope.$builder;
       const that = this;
       const ctx = that.drawContext;
-      const funcName = `Z_PBRIndirectLighting${outRoughness ? '_R' : ''}${outDiffuseColor ? '_D' : ''}`;
+      const funcName = 'Z_PBRIndirectLighting';
       pb.func(
         funcName,
         [
