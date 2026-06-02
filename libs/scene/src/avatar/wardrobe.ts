@@ -1,4 +1,4 @@
-import { DRef, Disposable, Matrix4x4 } from '@zephyr3d/base';
+import { DRef, Disposable, Matrix4x4, guessMimeType } from '@zephyr3d/base';
 import type { Nullable } from '@zephyr3d/base';
 import { getEngine } from '../app/api';
 import type { ModelFetchOptions } from '../asset/assetmanager';
@@ -199,7 +199,8 @@ export class AvatarWardrobe extends Disposable {
 
     const meshUses = this.collectSkinnedMeshes(root);
     if (meshUses.length === 0) {
-      throw new Error('AvatarWardrobe.equip(): outfit does not contain skinned meshes');
+      console.error('AvatarWardrobe.equip(): outfit does not contain skinned meshes');
+      return null;
     }
 
     const newBindings: SkinBinding[] = [];
@@ -214,7 +215,8 @@ export class AvatarWardrobe extends Disposable {
         .filter((_, index) => !targetJoints[index])
         .map((joint) => joint.name);
       if (missing.length > 0) {
-        throw new Error(`AvatarWardrobe.equip(): cannot map outfit joints: ${missing.join(', ')}`);
+        console.error(`AvatarWardrobe.equip(): cannot map outfit joints: ${missing.join(', ')}`);
+        return null;
       }
       const mappedJoints = targetJoints as SceneNode[];
       const inverseBindMatrices = this.createInverseBindMatrices(use.binding, mappedJoints, fitMode);
@@ -389,14 +391,17 @@ export class AvatarWardrobe extends Disposable {
     const resourceManager = getEngine().resourceManager;
     if (typeof source === 'string') {
       const scene = this._root.scene!;
-      const root = await resourceManager.fetchModel(source, scene, {
-        loadAnimations: false,
-        loadMeshes: true,
-        loadSkeletons: true,
-        loadJointDynamics: false,
-        ...this._modelFetchOptions,
-        ...(options?.modelFetchOptions ?? {})
-      });
+      const root =
+        guessMimeType(source) === 'application/vnd.zephyr3d.prefab+json'
+          ? await resourceManager.instantiatePrefab(scene.rootNode, source)
+          : await resourceManager.fetchModel(source, scene, {
+              loadAnimations: false,
+              loadMeshes: true,
+              loadSkeletons: true,
+              loadJointDynamics: false,
+              ...this._modelFetchOptions,
+              ...(options?.modelFetchOptions ?? {})
+            });
       if (!root) {
         console.error(`AvatarWardrobe.equip(): failed to load outfit '${source}'`);
         return null;
