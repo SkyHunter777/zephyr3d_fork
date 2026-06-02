@@ -969,6 +969,106 @@ export interface AssetVertexBufferInfo {
 // @public
 export const ATMOSPHERIC_FOG_BIT: number;
 
+// @public (undocumented)
+export type AvatarBindMode = 'exact' | 'humanoid' | 'name' | 'custom';
+
+// @public (undocumented)
+export type AvatarBodyRegions = Record<string, AvatarBodyRegionTarget[]>;
+
+// @public (undocumented)
+export type AvatarBodyRegionTarget = SceneNode | Mesh;
+
+// @public (undocumented)
+export type AvatarEquipOptions = {
+    slot?: AvatarSlotId;
+    bindMode?: AvatarBindMode;
+    fitMode?: AvatarFitMode;
+    jointMap?: AvatarJointMap;
+    hideBodyRegions?: string[];
+    modelFetchOptions?: ModelFetchOptions;
+};
+
+// @public (undocumented)
+export type AvatarFitMode = 'reuseInverseBind' | 'preserveRestPose';
+
+// @public (undocumented)
+export type AvatarJointMap = Record<string, string> | ((sourceJoint: SceneNode, targetRig: SkeletonRig, sourceRig: SkeletonRig) => Nullable<SceneNode>);
+
+// @public
+export class AvatarOutfitInstance extends Disposable {
+    // (undocumented)
+    readonly hiddenBodyRegions: string[];
+    // (undocumented)
+    readonly id: string;
+    // (undocumented)
+    readonly meshes: DRef<Mesh>[];
+    // (undocumented)
+    protected onDispose(): void;
+    // (undocumented)
+    readonly root: DRef<SceneNode>;
+    // (undocumented)
+    readonly skinBindings: SkinBinding[];
+    // (undocumented)
+    readonly slot: AvatarSlotId;
+}
+
+// @public (undocumented)
+export type AvatarOutfitSource = string | SceneNode | SharedModel;
+
+// @public (undocumented)
+export type AvatarOutfitValidation = {
+    ok: boolean;
+    meshes: number;
+    skinBindings: number;
+    mappedJoints: number;
+    missingJoints: string[];
+    errors: string[];
+    warnings: string[];
+};
+
+// @public (undocumented)
+export type AvatarSlotId = string;
+
+// @public (undocumented)
+export type AvatarSlotOptions = {
+    id: AvatarSlotId;
+    hideBodyRegions?: string[];
+    exclusiveWith?: AvatarSlotId[];
+    allowMultiple?: boolean;
+};
+
+// @public
+export class AvatarWardrobe extends Disposable {
+    constructor(options: AvatarWardrobeOptions);
+    // (undocumented)
+    clear(): void;
+    // (undocumented)
+    equip(source: AvatarOutfitSource, options?: AvatarEquipOptions): Promise<Nullable<AvatarOutfitInstance>>;
+    // (undocumented)
+    static from(root: SceneNode, options?: Omit<AvatarWardrobeOptions, 'root'>): AvatarWardrobe;
+    // (undocumented)
+    getEquipped(slot?: AvatarSlotId): AvatarOutfitInstance[];
+    // (undocumented)
+    protected onDispose(): void;
+    // (undocumented)
+    get rig(): SkeletonRig;
+    // (undocumented)
+    get root(): SceneNode;
+    // (undocumented)
+    unequip(slotOrInstance: AvatarSlotId | AvatarOutfitInstance): void;
+    // (undocumented)
+    validateOutfit(source: SceneNode, options?: AvatarEquipOptions): AvatarOutfitValidation;
+}
+
+// @public (undocumented)
+export type AvatarWardrobeOptions = {
+    root: SceneNode;
+    rig?: SkeletonRig | string;
+    slots?: AvatarSlotOptions[];
+    bodyRegions?: AvatarBodyRegions;
+    modelFetchOptions?: ModelFetchOptions;
+};
+
 // @public
 export class BaseCameraController {
     constructor();

@@ -482,6 +482,10 @@
     {
       "packageName": "@zephyr3d/spring-test",
       "projectFolder": "apps/spring"
+    },
+    {
+      "packageName": "@zephyr3d/ik-demo",
+      "projectFolder": "apps/ik"
     }
   ]
 }
