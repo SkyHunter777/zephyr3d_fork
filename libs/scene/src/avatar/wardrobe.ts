@@ -1,12 +1,10 @@
 import { DRef, Disposable, Matrix4x4 } from '@zephyr3d/base';
 import type { Nullable } from '@zephyr3d/base';
-import { tryGetApp } from '../app/api';
+import { getEngine } from '../app/api';
 import type { ModelFetchOptions } from '../asset/assetmanager';
 import { SharedModel } from '../asset/model';
-import type { ResourceManager } from '../utility/serialization/manager';
 import type { SceneNode, SceneNodeVisible } from '../scene/scene_node';
 import type { Mesh } from '../scene/mesh';
-import type { MeshMaterial } from '../material/meshmaterial';
 import type { SkeletonBindPose } from '../animation/skeleton';
 import { SkeletonRig, SkinBinding } from '../animation/skeleton';
 
@@ -47,7 +45,6 @@ export type AvatarWardrobeOptions = {
   rig?: SkeletonRig | string;
   slots?: AvatarSlotOptions[];
   bodyRegions?: AvatarBodyRegions;
-  resourceManager?: ResourceManager;
   modelFetchOptions?: ModelFetchOptions;
 };
 
@@ -58,9 +55,7 @@ export type AvatarEquipOptions = {
   fitMode?: AvatarFitMode;
   jointMap?: AvatarJointMap;
   hideBodyRegions?: string[];
-  materialOverrides?: Record<string, MeshMaterial>;
   modelFetchOptions?: ModelFetchOptions;
-  disposeOnUnequip?: boolean;
 };
 
 /** @public */
@@ -72,11 +67,6 @@ export type AvatarOutfitValidation = {
   missingJoints: string[];
   errors: string[];
   warnings: string[];
-};
-
-type LoadedOutfitSource = {
-  root: SceneNode;
-  disposeOnUnequip: boolean;
 };
 
 type MeshBindingUse = {
@@ -96,12 +86,10 @@ let outfitInstanceId = 0;
 export class AvatarOutfitInstance extends Disposable {
   readonly id: string;
   readonly slot: AvatarSlotId;
-  readonly root: SceneNode;
-  readonly meshes: Mesh[];
+  readonly root: DRef<SceneNode>;
+  readonly meshes: DRef<Mesh>[];
   readonly skinBindings: SkinBinding[];
   readonly hiddenBodyRegions: string[];
-  /** @internal */
-  readonly _disposeRootOnUnequip: boolean;
   private _wardrobe: Nullable<AvatarWardrobe>;
 
   /** @internal */
@@ -111,23 +99,25 @@ export class AvatarOutfitInstance extends Disposable {
     root: SceneNode,
     meshes: Mesh[],
     skinBindings: SkinBinding[],
-    hiddenBodyRegions: string[],
-    disposeRootOnUnequip: boolean
+    hiddenBodyRegions: string[]
   ) {
     super();
     this.id = `outfit-${++outfitInstanceId}`;
     this.slot = slot;
-    this.root = root;
-    this.meshes = meshes;
+    this.root = new DRef(root);
+    this.meshes = meshes.map((mesh) => new DRef(mesh));
     this.skinBindings = skinBindings;
     this.hiddenBodyRegions = hiddenBodyRegions;
-    this._disposeRootOnUnequip = disposeRootOnUnequip;
     this._wardrobe = wardrobe;
   }
 
   protected onDispose() {
     this._wardrobe?._releaseInstance(this);
     this._wardrobe = null;
+    for (const meshRef of this.meshes) {
+      meshRef.dispose();
+    }
+    this.meshes.length = 0;
   }
 }
 
@@ -147,7 +137,6 @@ export class AvatarWardrobe extends Disposable {
   private readonly _equipped: Map<AvatarSlotId, AvatarOutfitInstance[]>;
   private readonly _hiddenBodyNodeCounts: Map<SceneNode, number>;
   private readonly _bodyNodeOriginalState: Map<SceneNode, SceneNodeVisible>;
-  private readonly _resourceManager: Nullable<ResourceManager>;
   private readonly _modelFetchOptions: ModelFetchOptions;
 
   constructor(options: AvatarWardrobeOptions) {
@@ -159,7 +148,6 @@ export class AvatarWardrobe extends Disposable {
     this._equipped = new Map();
     this._hiddenBodyNodeCounts = new Map();
     this._bodyNodeOriginalState = new Map();
-    this._resourceManager = options.resourceManager ?? null;
     this._modelFetchOptions = options.modelFetchOptions ?? {};
     for (const slot of options.slots ?? []) {
       this._slots.set(slot.id, { ...slot });
@@ -189,18 +177,27 @@ export class AvatarWardrobe extends Disposable {
     return [...this._equipped.values()].flatMap((items) => [...items]);
   }
 
-  async equip(source: AvatarOutfitSource, options?: AvatarEquipOptions): Promise<AvatarOutfitInstance> {
+  async equip(
+    source: AvatarOutfitSource,
+    options?: AvatarEquipOptions
+  ): Promise<Nullable<AvatarOutfitInstance>> {
     const slot = options?.slot ?? 'default';
     this.enforceSlotRules(slot);
-    const loaded = await this.resolveSource(source, options);
-    if (loaded.root === this._root) {
-      throw new Error('AvatarWardrobe.equip(): outfit root cannot be the avatar root');
+    const root = await this.resolveSource(source, options);
+    if (!root) {
+      console.error('AvatarWardrobe.equip(): failed to load outfit source');
+      return null;
     }
-    if (loaded.root.scene !== this._root.scene) {
-      throw new Error('AvatarWardrobe.equip(): outfit node must belong to the same scene as the avatar');
+    if (root === this._root) {
+      console.error('AvatarWardrobe.equip(): outfit root cannot be the avatar root');
+      return null;
+    }
+    if (root.scene !== this._root.scene) {
+      console.error('AvatarWardrobe.equip(): outfit node must belong to the same scene as the avatar');
+      return null;
     }
 
-    const meshUses = this.collectSkinnedMeshes(loaded.root);
+    const meshUses = this.collectSkinnedMeshes(root);
     if (meshUses.length === 0) {
       throw new Error('AvatarWardrobe.equip(): outfit does not contain skinned meshes');
     }
@@ -231,22 +228,20 @@ export class AvatarWardrobe extends Disposable {
     }
 
     this.stripSourceSkinBindings(
-      loaded.root,
+      root,
       meshUses.map((use) => use.binding)
     );
-    this.applyMaterialOverrides(equippedMeshes, options?.materialOverrides);
-    loaded.root.parent = this._root;
+    root.parent = this._root;
 
     const hiddenBodyRegions = this.getHiddenBodyRegions(slot, options);
     this.retainBodyRegions(hiddenBodyRegions);
     const instance = new AvatarOutfitInstance(
       this,
       slot,
-      loaded.root,
+      root,
       equippedMeshes,
       newBindings,
-      hiddenBodyRegions,
-      loaded.disposeOnUnequip
+      hiddenBodyRegions
     );
     const items = this._equipped.get(slot) ?? [];
     items.push(instance);
@@ -267,18 +262,6 @@ export class AvatarWardrobe extends Disposable {
   clear(): void {
     for (const instance of this.getEquipped()) {
       instance.dispose();
-    }
-  }
-
-  setSlotVisible(slot: AvatarSlotId, visible: boolean): void {
-    for (const instance of this._equipped.get(slot) ?? []) {
-      instance.root.showState = visible ? 'inherit' : 'hidden';
-    }
-  }
-
-  setBodyRegionVisible(region: string, visible: boolean): void {
-    for (const node of this._bodyRegions.get(region) ?? []) {
-      node.showState = visible ? (this._bodyNodeOriginalState.get(node) ?? 'inherit') : 'hidden';
     }
   }
 
@@ -333,7 +316,8 @@ export class AvatarWardrobe extends Disposable {
     if (items.length === 0) {
       this._equipped.delete(instance.slot);
     }
-    for (const mesh of instance.meshes) {
+    for (const meshRef of instance.meshes) {
+      const mesh = meshRef.get()!;
       if (instance.skinBindings.some((binding) => binding.persistentId === mesh.skinBindingName)) {
         mesh.skinBindingName = '';
       }
@@ -342,10 +326,8 @@ export class AvatarWardrobe extends Disposable {
       this.removeSkinBinding(binding);
     }
     this.releaseBodyRegions(instance.hiddenBodyRegions);
-    instance.root.remove();
-    if (instance._disposeRootOnUnequip) {
-      instance.root.dispose();
-    }
+    instance.root.get()?.remove();
+    instance.root.dispose();
   }
 
   protected onDispose() {
@@ -403,13 +385,10 @@ export class AvatarWardrobe extends Disposable {
   private async resolveSource(
     source: AvatarOutfitSource,
     options?: AvatarEquipOptions
-  ): Promise<LoadedOutfitSource> {
+  ): Promise<Nullable<SceneNode>> {
+    const resourceManager = getEngine().resourceManager;
     if (typeof source === 'string') {
-      const resourceManager = this.resolveResourceManager();
-      const scene = this._root.scene;
-      if (!resourceManager || !scene) {
-        throw new Error('AvatarWardrobe.equip(): loading by URL requires a resource manager and scene');
-      }
+      const scene = this._root.scene!;
       const root = await resourceManager.fetchModel(source, scene, {
         loadAnimations: false,
         loadMeshes: true,
@@ -419,16 +398,13 @@ export class AvatarWardrobe extends Disposable {
         ...(options?.modelFetchOptions ?? {})
       });
       if (!root) {
-        throw new Error(`AvatarWardrobe.equip(): failed to load outfit '${source}'`);
+        console.error(`AvatarWardrobe.equip(): failed to load outfit '${source}'`);
+        return null;
       }
-      return { root, disposeOnUnequip: options?.disposeOnUnequip ?? true };
+      return root;
     }
     if (source instanceof SharedModel) {
-      const resourceManager = this.resolveResourceManager();
-      const scene = this._root.scene;
-      if (!resourceManager || !scene) {
-        throw new Error('AvatarWardrobe.equip(): SharedModel source requires a resource manager and scene');
-      }
+      const scene = this._root.scene!;
       const root = await source.createSceneNode(
         resourceManager,
         scene,
@@ -439,13 +415,9 @@ export class AvatarWardrobe extends Disposable {
         false,
         resourceManager.VFS
       );
-      return { root, disposeOnUnequip: options?.disposeOnUnequip ?? true };
+      return root;
     }
-    return { root: source, disposeOnUnequip: options?.disposeOnUnequip ?? false };
-  }
-
-  private resolveResourceManager(): Nullable<ResourceManager> {
-    return this._resourceManager ?? tryGetApp()?.engine?.resourceManager ?? null;
+    return source;
   }
 
   private collectSkinnedMeshes(root: SceneNode): MeshBindingUse[] {
@@ -604,18 +576,6 @@ export class AvatarWardrobe extends Disposable {
     const sourceRigSet = new Set(sourceBindings.map((binding) => binding.rig));
     this.removeRefs(sourceRoot.animationSet.skeletons, (binding) => sourceBindingSet.has(binding));
     this.removeRefs(sourceRoot.animationSet.rigs, (rig) => rig !== this._rig && sourceRigSet.has(rig));
-  }
-
-  private applyMaterialOverrides(meshes: Mesh[], overrides?: Record<string, MeshMaterial>): void {
-    if (!overrides) {
-      return;
-    }
-    for (const mesh of meshes) {
-      const material = overrides[mesh.name] ?? overrides['*'];
-      if (material) {
-        mesh.material = material;
-      }
-    }
   }
 
   private removeSkinBinding(binding: SkinBinding): void {
