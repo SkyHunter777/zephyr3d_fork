@@ -1,11 +1,10 @@
 // Demo entry point — scene setup + animation loop
 
-import { createBoneChainDemo, type BoneChainDemo } from './bone-chain';
-import { createClothGridDemo, type ClothGridDemo } from './cloth-grid';
-import { createBarrelClothDemo, type BarrelClothDemo } from './barrel-cloth';
-import { createClosedChainDemo, type ClosedChainDemo } from './closed-chain';
+import { createBoneChainDemo } from './bone-chain';
+import { createClothGridDemo } from './cloth-grid';
+import { createBarrelClothDemo } from './barrel-cloth';
+import { createClosedChainDemo } from './closed-chain';
 import { Plane, Vector2, Vector3 } from '@zephyr3d/base';
-import type { IControllerPointerDownEvent, SceneNode } from '@zephyr3d/scene';
 import {
   Application,
   DirectionalLight,
@@ -19,8 +18,9 @@ import {
 import { backendWebGL2 } from '@zephyr3d/backend-webgl';
 
 // ── Scene setup ──
+const canvas = /** @type {HTMLCanvasElement} */ (window.document.body.querySelector('#canvas'));
 const app = new Application({
-  canvas: window.document.body.querySelector<HTMLCanvasElement>('#canvas'),
+  canvas,
   backend: backendWebGL2
 });
 
@@ -47,11 +47,11 @@ app.on('tick', tick);
 
 // ── Demos ──
 
-let chainDemo: BoneChainDemo | null = null;
-let clothDemo: ClothGridDemo | null = null;
-let barrelDemo: BarrelClothDemo | null = null;
-let closedDemo: ClosedChainDemo | null = null;
-let activeDemo: 'chain' | 'cloth' | 'barrel' | 'closed' = 'cloth';
+let chainDemo = null;
+let clothDemo = null;
+let barrelDemo = null;
+let closedDemo = null;
+let activeDemo = 'cloth';
 let windEnabled = false;
 let broadPhaseEnabled = true;
 
@@ -101,14 +101,14 @@ function activateChain() {
   chainDemo.springSystem.controller.warp();
   activeDemo = 'chain';
 
-  const fixedSet = new Set<number>();
+  const fixedSet = new Set();
   fixedSet.add(0);
 
   btnChain.classList.add('active');
   btnCloth.classList.remove('active');
   btnBarrel.classList.remove('active');
   btnClosed.classList.remove('active');
-  releaseControls.style.display = 'none';
+  releaseControls.hidden = true;
   applyRuntimeFlags();
   updateStatus();
 }
@@ -118,7 +118,7 @@ function activateCloth() {
   clothDemo = createClothGridDemo(scene);
   activeDemo = 'cloth';
 
-  const fixedSet = new Set<number>();
+  const fixedSet = new Set();
   for (let col = 0; col < 6; col++) {
     fixedSet.add(col * 6);
   }
@@ -127,7 +127,7 @@ function activateCloth() {
   btnCloth.classList.add('active');
   btnBarrel.classList.remove('active');
   btnClosed.classList.remove('active');
-  releaseControls.style.display = 'inline';
+  releaseControls.hidden = false;
   nextReleaseCol = 0;
   applyRuntimeFlags();
   updateStatus();
@@ -138,7 +138,7 @@ function activateBarrel() {
   barrelDemo = createBarrelClothDemo(scene);
   activeDemo = 'barrel';
 
-  const fixedSet = new Set<number>();
+  const fixedSet = new Set();
   for (let col = 0; col < barrelDemo.cols; col++) {
     fixedSet.add(col * barrelDemo.rows);
   }
@@ -147,7 +147,7 @@ function activateBarrel() {
   btnCloth.classList.remove('active');
   btnBarrel.classList.add('active');
   btnClosed.classList.remove('active');
-  releaseControls.style.display = 'inline';
+  releaseControls.hidden = false;
   nextReleaseCol = 0;
   applyRuntimeFlags();
   updateStatus();
@@ -162,25 +162,25 @@ function activateClosed() {
   btnCloth.classList.remove('active');
   btnBarrel.classList.remove('active');
   btnClosed.classList.add('active');
-  releaseControls.style.display = 'none';
+  releaseControls.hidden = true;
   applyRuntimeFlags();
   updateStatus();
 }
 
 // ── UI ──
 
-const btnChain = document.getElementById('btn-chain')!;
-const btnCloth = document.getElementById('btn-cloth')!;
-const btnBarrel = document.getElementById('btn-barrel')!;
-const btnClosed = document.getElementById('btn-closed')!;
-const btnWind = document.getElementById('btn-wind')!;
-const btnBroadPhase = document.getElementById('btn-broadphase')!;
-const btnReset = document.getElementById('btn-reset')!;
-const releaseControls = document.getElementById('release-controls')! as HTMLElement;
-const btnReleaseOne = document.getElementById('btn-release-one')!;
-const btnReleaseAll = document.getElementById('btn-release-all')!;
-const btnFixAll = document.getElementById('btn-fix-all')!;
-const statusDiv = document.getElementById('status')!;
+const btnChain = document.getElementById('btn-chain');
+const btnCloth = document.getElementById('btn-cloth');
+const btnBarrel = document.getElementById('btn-barrel');
+const btnClosed = document.getElementById('btn-closed');
+const btnWind = document.getElementById('btn-wind');
+const btnBroadPhase = document.getElementById('btn-broadphase');
+const btnReset = document.getElementById('btn-reset');
+const releaseControls = document.getElementById('release-controls');
+const btnReleaseOne = document.getElementById('btn-release-one');
+const btnReleaseAll = document.getElementById('btn-release-all');
+const btnFixAll = document.getElementById('btn-fix-all');
+const statusDiv = document.getElementById('status');
 
 let nextReleaseCol = 0;
 
@@ -191,11 +191,12 @@ btnClosed.addEventListener('click', activateClosed);
 btnWind.addEventListener('click', () => {
   windEnabled = !windEnabled;
   btnWind.classList.toggle('active', windEnabled);
+  updateStatus();
 });
 btnBroadPhase.addEventListener('click', () => {
   broadPhaseEnabled = !broadPhaseEnabled;
   btnBroadPhase.classList.toggle('active', broadPhaseEnabled);
-  btnBroadPhase.textContent = broadPhaseEnabled ? 'Broad-Phase On' : 'Broad-Phase Off';
+  btnBroadPhase.textContent = broadPhaseEnabled ? 'Broad On' : 'Broad Off';
   applyRuntimeFlags();
   updateStatus();
 });
@@ -268,19 +269,18 @@ btnFixAll.addEventListener('click', () => {
 function updateStatus() {
   const demo = activeDemo === 'cloth' ? clothDemo : activeDemo === 'barrel' ? barrelDemo : null;
   if (demo) {
-    const states = demo.fixedIndices.map((idx, col) => {
-      const fixed = demo!.springSystem.controller.isPointFixed(idx);
-      return `Col${col}: ${fixed ? 'Fixed' : 'Free'}`;
-    });
-    statusDiv.textContent = `Top row: ${states.join('  |  ')} | Colliders: ${demo.collidersR.length} | Broad-Phase: ${broadPhaseEnabled ? 'On' : 'Off'}`;
+    const fixedCount = demo.fixedIndices.reduce((count, idx) => {
+      return count + (demo.springSystem.controller.isPointFixed(idx) ? 1 : 0);
+    }, 0);
+    statusDiv.textContent = `Pins ${fixedCount}/${demo.fixedIndices.length} fixed | Colliders ${demo.collidersR.length} | Broad ${broadPhaseEnabled ? 'on' : 'off'} | Wind ${windEnabled ? 'on' : 'off'}`;
   } else if (activeDemo === 'closed' && closedDemo) {
     const states = closedDemo.fixedIndices.map((idx, pin) => {
-      const fixed = closedDemo!.springSystem.controller.isPointFixed(idx);
-      return `${pin === 0 ? 'Head' : 'Tail'}: ${fixed ? 'Fixed' : 'Free'}`;
+      const fixed = closedDemo.springSystem.controller.isPointFixed(idx);
+      return `${pin === 0 ? 'Head' : 'Tail'} ${fixed ? 'fixed' : 'free'}`;
     });
-    statusDiv.textContent = `Closed chain pins: ${states.join('  |  ')} | Colliders: ${closedDemo.collidersR.length} | Broad-Phase: ${broadPhaseEnabled ? 'On' : 'Off'}`;
+    statusDiv.textContent = `${states.join(' | ')} | Colliders ${closedDemo.collidersR.length} | Broad ${broadPhaseEnabled ? 'on' : 'off'} | Wind ${windEnabled ? 'on' : 'off'}`;
   } else {
-    statusDiv.textContent = `Broad-Phase: ${broadPhaseEnabled ? 'On' : 'Off'}`;
+    statusDiv.textContent = `Broad ${broadPhaseEnabled ? 'on' : 'off'} | Wind ${windEnabled ? 'on' : 'off'}`;
   }
 }
 
@@ -298,7 +298,7 @@ const grabPlane = new Plane(0, 0, 1, 0);
 const grabIntersect = new Vector3();
 let grabbing = false;
 
-function getActiveGrabber(): SceneNode | null {
+function getActiveGrabber() {
   if (activeDemo === 'chain' && chainDemo) {
     return chainDemo.grabberObj;
   }
@@ -347,7 +347,7 @@ function updateGrabPlane() {
   }
 }
 
-function updateMousePosition(e: IControllerPointerDownEvent) {
+function updateMousePosition(e) {
   mouse.x = e.offsetX;
   mouse.y = e.offsetY;
 }
@@ -371,11 +371,16 @@ function moveGrabberToMouse() {
 }
 
 getInput().useFirst((evt) => {
+  if (evt.target !== canvas) {
+    return false;
+  }
   if (evt.type === 'pointerdown') {
-    const e = evt as unknown as IControllerPointerDownEvent;
+    const e = /** @type {import('@zephyr3d/scene').IControllerPointerDownEvent} */ (
+      /** @type {unknown} */ (evt)
+    );
     if (e.button !== 2) {
       return false;
-    } // right click only
+    }
     grabbing = true;
     updateMousePosition(e);
     updateGrabPlane();
@@ -386,7 +391,9 @@ getInput().useFirst((evt) => {
     }
     return true;
   } else if (evt.type === 'pointermove') {
-    const e = evt as unknown as IControllerPointerDownEvent;
+    const e = /** @type {import('@zephyr3d/scene').IControllerPointerDownEvent} */ (
+      /** @type {unknown} */ (evt)
+    );
     if (!grabbing) {
       return false;
     }
@@ -419,7 +426,7 @@ getInput().useFirst((evt) => {
 });
 // ── Animation loop ──
 
-function tick(dt: number) {
+function tick(dt) {
   scene.mainCamera.updateController();
 
   dt = Math.min(dt / 1000, 1 / 30); // cap at 30fps min

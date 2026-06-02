@@ -16,6 +16,7 @@ const typeFiles = [
   { path: 'vendor/zephyr3d/device/dist/index.d.ts', name: '@zephyr3d/device' },
   { path: 'vendor/zephyr3d/scene/dist/index.d.ts', name: '@zephyr3d/scene' },
   { path: 'vendor/zephyr3d/imgui/dist/index.d.ts', name: '@zephyr3d/imgui' },
+  { path: 'vendor/zephyr3d/loaders/dist/index.d.ts', name: '@zephyr3d/loaders' },
   { path: 'vendor/zephyr3d/backend-webgl/dist/index.d.ts', name: '@zephyr3d/backend-webgl' },
   { path: 'vendor/zephyr3d/backend-webgpu/dist/index.d.ts', name: '@zephyr3d/backend-webgpu' },
   {

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SPCR Joint Dynamics — Three.js Demo</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #151923;
+        color: #f4f7fb;
+        font:
+          13px/1.4 system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+      canvas {
+        display: block;
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 0;
+      }
+      #ui {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        right: 8px;
+        z-index: 2;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 6px;
+        max-height: calc(100vh - 72px);
+        overflow: auto;
+        pointer-events: none;
+      }
+      .control-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 5px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 6px;
+        background: rgba(12, 18, 29, 0.74);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+        pointer-events: auto;
+        backdrop-filter: blur(10px);
+      }
+      #ui button {
+        min-height: 30px;
+        padding: 5px 11px;
+        cursor: pointer;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 4px;
+        background: rgba(35, 45, 60, 0.96);
+        color: #f4f7fb;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        white-space: nowrap;
+        transition:
+          background 120ms ease,
+          border-color 120ms ease;
+      }
+      #ui button.active {
+        background: #2f6fc5;
+        border-color: #78aef2;
+      }
+      #ui button:hover {
+        background: rgba(56, 70, 91, 0.98);
+      }
+      #ui button.active:hover {
+        background: #357bd8;
+      }
+      #release-controls[hidden] {
+        display: none;
+      }
+      #footer {
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+        z-index: 2;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: flex-end;
+        pointer-events: none;
+      }
+      #info {
+        color: rgba(244, 247, 251, 0.72);
+      }
+      #status,
+      #info {
+        max-width: 100%;
+        padding: 5px 8px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 5px;
+        background: rgba(12, 18, 29, 0.7);
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        backdrop-filter: blur(10px);
+      }
+      #status {
+        color: rgba(244, 247, 251, 0.9);
+      }
+      @media (max-width: 520px) {
+        #ui {
+          max-height: calc(100vh - 62px);
+        }
+        .control-group {
+          padding: 4px;
+        }
+        #ui button {
+          min-height: 28px;
+          padding: 4px 8px;
+          font-size: 11px;
+        }
+        #status,
+        #info {
+          font-size: 11px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ui" aria-label="Joint dynamics demo controls">
+      <div class="control-group" aria-label="Demo mode">
+        <button id="btn-chain" type="button">Chain</button>
+        <button id="btn-cloth" class="active" type="button">Cloth</button>
+        <button id="btn-barrel" type="button">Skirt</button>
+        <button id="btn-closed" type="button">Closed</button>
+      </div>
+      <div class="control-group" aria-label="Simulation controls">
+        <button id="btn-wind" type="button">Wind</button>
+        <button id="btn-broadphase" class="active" type="button">Broad On</button>
+        <button id="btn-reset" type="button">Reset</button>
+      </div>
+      <div id="release-controls" class="control-group" aria-label="Pin controls" hidden>
+        <button id="btn-release-one" type="button">Release</button>
+        <button id="btn-release-all" type="button">Free All</button>
+        <button id="btn-fix-all" type="button">Fix All</button>
+      </div>
+    </div>
+    <div id="footer">
+      <div id="status" aria-live="polite"></div>
+      <div id="info">Right-drag grabs bones. Left-drag orbits.</div>
+    </div>
+    <canvas id="canvas"></canvas>
+    <script type="module" src="js/tut-52.js"></script>
+  </body>
+</html>

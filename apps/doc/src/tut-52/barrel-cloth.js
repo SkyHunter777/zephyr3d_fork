@@ -6,12 +6,11 @@
 // and amplifies it under gravity/inertia.
 
 import { InterpolatorScalar, Quaternion } from '@zephyr3d/base';
-import type { BoneNode, ColliderR, GrabberR, Scene } from '@zephyr3d/scene';
 import { BoxShape, createTransformAccess, JointDynamicsSystem } from '@zephyr3d/scene';
 import { CapsuleShape, LambertMaterial, Mesh, SphereShape } from '@zephyr3d/scene';
 import { SceneNode } from '@zephyr3d/scene';
 import { Vector3 } from '@zephyr3d/base';
-
+/*
 export interface BarrelClothDemo {
   group: SceneNode;
   bones: SceneNode[];
@@ -26,8 +25,8 @@ export interface BarrelClothDemo {
   rows: number;
   update: (time: number, dt: number) => void;
 }
-
-export function createBarrelClothDemo(scene: Scene): BarrelClothDemo {
+*/
+export function createBarrelClothDemo(scene) {
   const COLS = 12;
   const ROWS = 10; // longer skirt for visible draping
   const WAIST_RADIUS = 0.15;
@@ -41,8 +40,8 @@ export function createBarrelClothDemo(scene: Scene): BarrelClothDemo {
   // Bone grid with cone-shaped initial layout.
   // Each child bone is offset OUTWARD (radially) as well as downward,
   // so horizontal constraint rest-lengths increase toward the hem.
-  const boneGrid: SceneNode[][] = [];
-  const allBones: SceneNode[] = [];
+  const boneGrid = [];
+  const allBones = [];
   const boneMat = new LambertMaterial();
   const boneGeo = new BoxShape({ size: 0.03 });
 
@@ -50,7 +49,7 @@ export function createBarrelClothDemo(scene: Scene): BarrelClothDemo {
     const angle = (col / COLS) * Math.PI * 2;
     const cx = Math.cos(angle);
     const cz = Math.sin(angle);
-    const chain: SceneNode[] = [];
+    const chain = [];
 
     for (let row = 0; row < ROWS; row++) {
       const bone = new SceneNode(scene);
@@ -90,9 +89,9 @@ export function createBarrelClothDemo(scene: Scene): BarrelClothDemo {
   grabberVis.showState = 'hidden';
   grabberVis.parent = grabberObj;
 
-  const grabbersR: GrabberR[] = [{ radius: 0.3, force: 0.5 }];
+  const grabbersR = [{ radius: 0.3, force: 0.5 }];
 
-  const boneNodes: BoneNode[] = allBones.map((b, i) => {
+  const boneNodes = allBones.map((b, i) => {
     const wp = new Vector3();
     b.getWorldPosition(wp);
     const row = i % ROWS;
@@ -115,7 +114,7 @@ export function createBarrelClothDemo(scene: Scene): BarrelClothDemo {
 
   const rootPoints = boneGrid.map((_, col) => boneNodes[col * ROWS]);
 
-  const collidersR: ColliderR[] = [
+  const collidersR = [
     {
       radius: BODY_RADIUS,
       radiusTailScale: 1,
@@ -176,7 +175,7 @@ export function createBarrelClothDemo(scene: Scene): BarrelClothDemo {
   const fixedIndices = Array.from({ length: COLS }, (_, col) => col * ROWS);
 
   // Graceful hip sway — slow and smooth so the cloth drapes, not bounces
-  const update = (time: number, dt: number) => {
+  const update = (time, dt) => {
     group.position.x = Math.sin(time * 1.5) * 0.25;
     group.position.z = Math.sin(time * 0.8) * 0.15;
     group.rotation = Quaternion.fromAxisAngle(Vector3.axisPY(), time * 2.4);

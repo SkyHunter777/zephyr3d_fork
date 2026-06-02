@@ -29,6 +29,8 @@
   - 动画
     - [概述](zh-cn/animation-intro.md)
     - [骨骼动画](zh-cn/animation-skeleton.md)
+    - [IK（反向运动学）](zh-cn/animation-ik.md)
+    - [JointDynamics](zh-cn/animation-joint-dynamics.md)
     - [关键帧动画](zh-cn/animation-keyframe.md)
     - [动画融合](zh-cn/animation-blending.md)
     - [自定义动画](zh-cn/animation-custom.md)

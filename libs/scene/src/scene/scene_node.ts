@@ -835,8 +835,48 @@ export class SceneNode
   set boundingBoxDrawMode(mode) {
     this._boxDrawMode = mode;
   }
+  /**
+   * Force transform update and notify descendants.
+   * @param invalidateLocal - If true, also invalidate local matrix; otherwise only invalidate world matrix.
+   */
   invalidateTransform(invalidateLocal = true) {
     this._onTransformChanged(invalidateLocal);
+  }
+  /**
+   * Set morph target weight by name for all meshes in the subtree.
+   * @param name - Morph target name
+   * @param weight - Morph target weight
+   */
+  setMorphTargetWeight(name: string, weight: number) {
+    if (!this._prefabId) {
+      return;
+    }
+    this.iterate((node) => {
+      if (node.isMesh()) {
+        const index = node.getMorphTargetIndexByName(name);
+        if (index >= 0) {
+          node.setMorphWeightByIndex(index, weight);
+        }
+      }
+    });
+  }
+  /**
+   * Collect all morph target names from meshes in the subtree.
+   * @returns Array of unique morph target names
+   */
+  collectMorphTargetNames(): string[] {
+    if (!this._prefabId) {
+      return [];
+    }
+    const names = new Set<string>();
+    this.iterate((node) => {
+      if (node.isMesh()) {
+        for (let i = 0; i < node.getNumMorphTargets(); i++) {
+          names.add(node.getMorphTargetName(i)!);
+        }
+      }
+    });
+    return Array.from(names);
   }
   /** Get called when the node was just created by cloning from other node */
   protected onPostClone(): void | Promise<void> {}
