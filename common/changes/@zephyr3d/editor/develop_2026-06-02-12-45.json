@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "packageName": "@zephyr3d/editor",
+      "comment": "Fix project compilation error",
+      "type": "patch"
+    }
+  ],
+  "packageName": "@zephyr3d/editor"
+}

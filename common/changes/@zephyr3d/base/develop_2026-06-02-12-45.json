@@ -1,0 +1,10 @@
+{
+  "changes": [
+    {
+      "packageName": "@zephyr3d/base",
+      "comment": "Add detection for absolute http/https URL while reading VFS files",
+      "type": "patch"
+    }
+  ],
+  "packageName": "@zephyr3d/base"
+}
