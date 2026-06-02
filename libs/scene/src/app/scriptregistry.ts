@@ -41,21 +41,31 @@ function isBareModule(spec: string) {
   return !spec.startsWith('./') && !spec.startsWith('../') && !spec.startsWith('/') && !spec.startsWith('#/');
 }
 
+type ScriptModuleType = 'js' | 'ts';
+
+type ScriptModuleInfo = {
+  id: string;
+  path: string;
+  type: ScriptModuleType;
+  deps: string[];
+  systemCode: string;
+};
+
 /**
  * Resolves, builds, and serves runtime modules using a VFS.
  *
  * Responsibilities:
  * - Resolve logical module IDs to physical paths or URLs.
- * - In editor mode, rewrite import specifiers and serve modules as data URLs after transpile.
+ * - In editor mode, bundle local script modules into a single data URL after transpile.
  * - Transpile TypeScript to JavaScript on the fly (requires `window.ts` TypeScript runtime).
  * - Gather static and dynamic import dependencies for tooling.
  *
  * Modes:
- * - Editor mode (`editorMode === true`): modules are rewritten to data URLs after transpile/build.
+ * - Editor mode (`editorMode === true`): local script graphs are bundled to data URLs.
  * - Runtime mode (`editorMode === false`): returns .js URLs directly (with .ts -\> .js mapping).
  *
  * Caching:
- * - Built modules are memoized in `_built` map keyed by logical ID.
+ * - Built bundles are memoized in `_built` map keyed by canonical source path.
  *
  * @public
  */
@@ -63,16 +73,19 @@ export class ScriptRegistry {
   private _vfs: VFS;
   private _scriptsRoot: string;
   private _built: Map<string, string>; // logicalId -> dataURL
+  private _building: Map<string, Promise<string>>;
+  private _builtDeps: Map<string, Set<string>>;
 
   /**
    * @param vfs - The virtual file system for existence checks, reads, and path ops.
    * @param scriptsRoot - Root directory for script resolution (used with `#/` specifiers).
-   * @param editorMode - Whether to build modules to data URLs and rewrite imports.
    */
   constructor(vfs: VFS, scriptsRoot: string) {
     this._vfs = vfs;
     this._scriptsRoot = scriptsRoot;
     this._built = new Map();
+    this._building = new Map();
+    this._builtDeps = new Map();
   }
 
   /**
@@ -87,6 +100,8 @@ export class ScriptRegistry {
     if (vfs !== this._vfs) {
       this._vfs = vfs;
       this._built.clear();
+      this._building.clear();
+      this._builtDeps.clear();
     }
   }
 
@@ -111,15 +126,35 @@ export class ScriptRegistry {
   invalidate(moduleId?: string) {
     if (!moduleId) {
       this._built.clear();
+      this._building.clear();
+      this._builtDeps.clear();
       return;
     }
     const normalized = String(moduleId);
-    this._built.delete(normalized);
+    const variants = new Set([normalized]);
     if (normalized.endsWith('.ts') || normalized.endsWith('.js')) {
-      this._built.delete(normalized.slice(0, -3));
+      variants.add(normalized.slice(0, -3));
+    } else if (normalized.endsWith('.mjs')) {
+      variants.add(normalized.slice(0, -4));
     } else {
-      this._built.delete(`${normalized}.ts`);
-      this._built.delete(`${normalized}.js`);
+      variants.add(`${normalized}.ts`);
+      variants.add(`${normalized}.js`);
+      variants.add(`${normalized}.mjs`);
+    }
+    for (const key of variants) {
+      this._built.delete(key);
+      this._building.delete(key);
+      this._builtDeps.delete(key);
+    }
+    for (const [entryId, deps] of [...this._builtDeps]) {
+      for (const variant of variants) {
+        if (deps.has(variant)) {
+          this._built.delete(entryId);
+          this._building.delete(entryId);
+          this._builtDeps.delete(entryId);
+          break;
+        }
+      }
     }
   }
 
@@ -242,110 +277,165 @@ export class ScriptRegistry {
   }
 
   /**
-   * Builds a logical module id into a data URL (editor mode pipeline).
+   * Builds a logical module id into a bundled data URL (editor mode pipeline).
    *
    * Steps:
    * - Resolve source path (.ts/.js) via {@link ScriptRegistry.resolveSourcePath}.
-   * - Read source code.
-   * - Rewrite import specifiers via {@link ScriptRegistry.rewriteImports}.
-   * - Transpile TypeScript if needed via {@link ScriptRegistry.transpile}.
-   * - Convert to `data:` URL and memoize in `_built`.
+   * - Collect reachable local imports without recursively building data URLs.
+   * - Transpile local modules to `System.register`.
+   * - Emit a single `data:` URL with a small module loader and memoize it in `_built`.
    *
    * @param id - Logical module id to build.
    * @returns Data URL string for dynamic import, or empty string if not found.
    */
   private async build(id: string) {
-    const key = String(id);
+    const entry = await this.resolveModuleInfo(String(id));
+    if (!entry) {
+      return '';
+    }
+
+    const key = entry.id;
     const cached = this._built.get(key);
     if (cached) {
       return cached;
     }
+    const pending = this._building.get(key);
+    if (pending) {
+      return await pending;
+    }
 
-    const srcPath = await this.resolveSourcePath(key);
-    if (!srcPath) {
+    const task = this.buildBundle(key);
+    this._building.set(key, task);
+    try {
+      const url = await task;
+      if (url) {
+        this._built.set(key, url);
+      }
+      return url;
+    } finally {
+      this._building.delete(key);
+    }
+  }
+
+  private async buildBundle(entryId: string) {
+    const modules = new Map<string, ScriptModuleInfo>();
+    const entry = await this.collectModule(entryId, modules);
+    if (!entry) {
       return '';
     }
-    const code = (await this._vfs.readFile(srcPath.path, { encoding: 'utf8' })) as string;
 
-    const rewritten = await this.rewriteImports(code, key);
-    const js = await this.transpile(rewritten, key, srcPath.type);
-    const url = toDataUrl(js, key);
-    this._built.set(key, url);
+    const chunks = [this.getSystemBundleRuntime()];
+    for (const module of modules.values()) {
+      chunks.push(`__z3dRegister(${JSON.stringify(module.id)}, () => {\n${module.systemCode}\n});`);
+    }
+    chunks.push(
+      `const __z3dEntry = await __z3dLoad(${JSON.stringify(entry.id)});\n` +
+        `const plugin = __z3dEntry.plugin;\n` +
+        `const __z3dDefault = __z3dEntry.default ?? __z3dEntry.plugin ?? __z3dEntry;\n` +
+        `export { plugin };\n` +
+        `export default __z3dDefault;\n` +
+        `//# sourceURL=${entry.id}`
+    );
+
+    const url = toDataUrl(chunks.join('\n'), entry.id);
+    this._builtDeps.set(entry.id, new Set(modules.keys()));
     return url;
   }
 
-  /**
-   * Transpiles code to JavaScript and appends sourceURL/sourceMap hints.
-   *
-   * Behavior:
-   * - For `'js'`, returns code with `//# sourceURL=logicalId`.
-   * - For `'ts'`, requires `window.ts` (TypeScript compiler) to be present and
-   *   transpiles to ES2015/ESNext module with inline source maps.
-   *
-   * @param code - Source code to transpile.
-   * @param _id - Logical module id (used for fileName/sourceURL).
-   * @param type - Source type (`'js' | 'ts'`).
-   * @returns Transpiled JavaScript source.
-   * @throws If TypeScript runtime is not found for TS input.
-   */
-  private async transpile(code: string, _id: string, type: 'js' | 'ts') {
-    const logicalId = String(_id);
-
-    if (type === 'js') {
-      return `${code}\n//# sourceURL=${logicalId}`;
+  private async collectModule(id: string, modules: Map<string, ScriptModuleInfo>) {
+    const module = await this.resolveModuleInfo(id);
+    if (!module) {
+      return null;
+    }
+    if (modules.has(module.id)) {
+      return modules.get(module.id)!;
     }
 
+    modules.set(module.id, module);
+
+    const source = (await this._vfs.readFile(module.path, { encoding: 'utf8' })) as string;
+    const esmCode = await this.transpileToESModule(source, module.id, module.type);
+    const rewritten = await this.rewriteImportsToLogicalIds(esmCode, module.id);
+    module.deps = rewritten.deps;
+    module.systemCode = await this.transpileToSystemModule(rewritten.code, module.id);
+
+    for (const dep of module.deps) {
+      await this.collectModule(dep, modules);
+    }
+    return module;
+  }
+
+  private async resolveModuleInfo(id: string): Promise<Nullable<ScriptModuleInfo>> {
+    const srcPath = await this.resolveSourcePath(id);
+    if (!srcPath) {
+      return null;
+    }
+    const path = this._vfs.normalizePath(srcPath.path);
+    return {
+      id: path,
+      path,
+      type: srcPath.type,
+      deps: [],
+      systemCode: ''
+    };
+  }
+
+  private getTypeScriptRuntime() {
     const ts = (window as any).ts as typeof TS;
     if (!ts) {
       throw new Error('TypeScript runtime (window.ts) not found. Load typescript.js first.');
     }
+    return ts;
+  }
+
+  private async transpileToESModule(code: string, _id: string, type: ScriptModuleType) {
+    const logicalId = String(_id);
+
+    if (type === 'js') {
+      return code;
+    }
+
+    const ts = this.getTypeScriptRuntime();
 
     const res = ts.transpileModule(code, {
       compilerOptions: {
         target: ts.ScriptTarget.ES2015,
         module: ts.ModuleKind.ESNext,
-        sourceMap: true,
-        inlineSources: true,
         experimentalDecorators: true,
         useDefineForClassFields: false
       },
       fileName: logicalId
     });
 
-    let out = res.outputText || '';
-    if (res.sourceMapText) {
-      const mapBase64 = btoa(unescape(encodeURIComponent(res.sourceMapText)));
-      out += `\n//# sourceMappingURL=data:application/json;base64,${mapBase64}`;
-    }
-    out += `\n//# sourceURL=${logicalId}`;
-    return out;
+    return res.outputText || '';
+  }
+
+  private async transpileToSystemModule(code: string, _id: string) {
+    const logicalId = String(_id);
+    const ts = this.getTypeScriptRuntime();
+    const res = ts.transpileModule(code, {
+      compilerOptions: {
+        allowJs: true,
+        target: ts.ScriptTarget.ES2015,
+        module: ts.ModuleKind.System,
+        esModuleInterop: true,
+        experimentalDecorators: true,
+        useDefineForClassFields: false
+      },
+      fileName: logicalId
+    });
+    return res.outputText || '';
   }
 
   /**
-   * Rewrites ESM import specifiers in `code` into runtime-loadable URLs.
-   *
-   * Parsing:
-   * - Uses `es-module-lexer` to find import spans; sorts them ascending by start.
-   *
-   * Replacement rules:
-   * - Skip invalid spans or ones without quoted specifiers.
-   * - If spec is absolute URL, special URL (data:, blob:), or bare module:
-   *   - If it starts with `@zephyr3d/`, keep as-is (external).
-   *   - Otherwise resolve to a logical id and attempt to `build` it (if available).
-   * - Else (relative spec), resolve from `fromId` and `build` recursively.
-   *
-   * Output:
-   * - Directly writes the replacement specifier without re-adding quotes,
-   *   so replacements must themselves be quoted or be valid URLs/data URLs.
-   *
-   * @param code - Module source code to transform.
-   * @param fromId - The logical id of the current module (resolution base for relatives).
-   * @returns Transformed source with rewritten import specifiers.
+   * Rewrites local ESM specifiers to canonical source paths and records local deps.
+   * External URLs and package imports are left for the native dynamic import path.
    */
-  private async rewriteImports(code: string, fromId: string) {
+  private async rewriteImportsToLogicalIds(code: string, fromId: string) {
     await init;
     const [imports] = parse(code);
     const list = [...imports].sort((a, b) => (a.s || 0) - (b.s || 0));
+    const deps = new Set<string>();
     let out = '';
     let last = 0;
 
@@ -369,23 +459,118 @@ export class ScriptRegistry {
       out += code.slice(last, im.s);
 
       const spec = code.slice(im.s, im.e); // original spec
-      let replacement = spec;
-      if (isAbsoluteUrl(spec) || isSpecialUrl(spec) || isBareModule(spec)) {
-        if (spec.startsWith('@zephyr3d/')) {
-          replacement = spec;
-        } else {
-          const depId = await this.resolveLogicalId(spec);
-          replacement = await this.build(depId); // try build as dependence
-        }
-      } else {
-        const depId = await this.resolveLogicalId(spec, String(fromId));
-        replacement = await this.build(depId); // recursively build as dataURL
+      const resolved = await this.resolveImportTarget(spec, String(fromId));
+      const replacement = resolved.id ?? spec;
+      if (resolved.id) {
+        deps.add(resolved.id);
       }
       out += replacement; // Do not wrap in quotes
       last = im.e;
     }
     out += code.slice(last);
-    return out;
+    return { code: out, deps: [...deps] };
+  }
+
+  private async resolveImportTarget(spec: string, fromId: string) {
+    if (isAbsoluteUrl(spec) || isSpecialUrl(spec) || spec.startsWith('@zephyr3d/')) {
+      return { id: null };
+    }
+
+    const depId = await this.resolveLogicalId(spec, isBareModule(spec) ? undefined : fromId);
+    const module = await this.resolveModuleInfo(depId);
+    return { id: module?.id ?? null };
+  }
+
+  private getSystemBundleRuntime() {
+    return `
+const __z3dRegistry = new Map();
+let __z3dCurrentId = '';
+const System = {
+  register(deps, declare) {
+    if (!__z3dCurrentId) {
+      throw new Error('System.register called without module id');
+    }
+    __z3dRegistry.set(__z3dCurrentId, {
+      id: __z3dCurrentId,
+      deps,
+      declare,
+      exports: Object.create(null),
+      setters: [],
+      execute: null,
+      importers: [],
+      state: 0
+    });
+  }
+};
+function __z3dRegister(id, factory) {
+  const prev = __z3dCurrentId;
+  __z3dCurrentId = id;
+  try {
+    factory();
+  } finally {
+    __z3dCurrentId = prev;
+  }
+}
+function __z3dResolve(spec, parentId) {
+  if (__z3dRegistry.has(spec)) {
+    return spec;
+  }
+  if (spec.startsWith('./') || spec.startsWith('../')) {
+    const base = parentId.slice(0, parentId.lastIndexOf('/') + 1);
+    return new URL(spec, 'file://' + base).pathname;
+  }
+  return spec;
+}
+function __z3dExport(record, name, value) {
+  if (name && typeof name === 'object') {
+    for (const key of Object.keys(name)) {
+      __z3dExport(record, key, name[key]);
+    }
+    return name;
+  }
+  record.exports[name] = value;
+  for (const notify of record.importers) {
+    notify(record.exports);
+  }
+  return value;
+}
+async function __z3dLoad(spec, parentId = '') {
+  const id = parentId ? __z3dResolve(spec, parentId) : spec;
+  const record = __z3dRegistry.get(id);
+  if (!record) {
+    return await import(id);
+  }
+  if (record.state === 2 || record.state === 1) {
+    return record.exports;
+  }
+  record.state = 1;
+  const declaration = record.declare((name, value) => __z3dExport(record, name, value), {
+    id,
+    import: (dep) => __z3dLoad(dep, id),
+    meta: { url: id }
+  }) || {};
+  record.setters = declaration.setters || [];
+  record.execute = declaration.execute || (() => {});
+  for (let i = 0; i < record.deps.length; i++) {
+    const depId = __z3dResolve(record.deps[i], id);
+    const depRecord = __z3dRegistry.get(depId);
+    const depExports = depRecord ? await __z3dLoad(depId) : await import(depId);
+    const setter = record.setters[i];
+    if (typeof setter === 'function') {
+      setter(depExports);
+      if (depRecord) {
+        depRecord.importers.push((exports) => setter(exports));
+      }
+    }
+  }
+  const result = record.execute();
+  if (result && typeof result.then === 'function') {
+    await result;
+  }
+  record.state = 2;
+  return record.exports;
+}
+`;
   }
 
   /**

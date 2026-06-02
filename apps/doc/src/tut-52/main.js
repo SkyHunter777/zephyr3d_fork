@@ -18,7 +18,7 @@ import {
 import { backendWebGL2 } from '@zephyr3d/backend-webgl';
 
 // ── Scene setup ──
-const canvas = window.document.body.querySelector('#canvas');
+const canvas = /** @type {HTMLCanvasElement} */ (window.document.body.querySelector('#canvas'));
 const app = new Application({
   canvas,
   backend: backendWebGL2

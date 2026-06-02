@@ -776,7 +776,7 @@ export abstract class VFS extends Observable<{
    */
   async readFile(path: string, options?: ReadOptions): Promise<ArrayBuffer | string> {
     // Special case for Object URL and Data URL
-    if (this.isObjectURL(path) || this.parseDataURI(path)) {
+    if (this.isObjectURL(path) || this.parseDataURI(path) || this.isAbsoluteURL(path)) {
       try {
         const response = await fetch(path);
         if (!response.ok) {
