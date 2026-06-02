@@ -196,6 +196,7 @@ export class AnimationSet extends Disposable implements IDisposable {
     get numAnimations(): number;
     protected onDispose(): void;
     playAnimation(name: string, options?: PlayAnimationOptions): void;
+    resetSkeletonModifiers(): void;
     get rigs(): DRef<SkeletonRig>[];
     setAnimationWeight(name: string, weight: number): void;
     get skeletons(): DRef<SkinBinding>[];
@@ -570,7 +571,7 @@ export interface AssetMaterial {
     // (undocumented)
     common: AssetMaterialCommon;
     // (undocumented)
-    material?: MeshMaterial;
+    material?: DRef<MeshMaterial>;
     // (undocumented)
     path?: string;
     // (undocumented)
@@ -762,8 +763,6 @@ export interface AssetPrimitiveInfo {
     // (undocumented)
     path?: string;
     // (undocumented)
-    primitive?: Primitive;
-    // (undocumented)
     type: PrimitiveType;
     // (undocumented)
     vertices: Record<VertexSemantic, {
@@ -906,8 +905,6 @@ export interface AssetSpringBoneJoint {
 export interface AssetSubMeshData {
     // (undocumented)
     material: Nullable<AssetMaterial>;
-    // (undocumented)
-    mesh?: Mesh;
     // (undocumented)
     morphAttribCount?: number;
     // (undocumented)
@@ -2880,11 +2877,15 @@ export class EnvConstantAmbient extends EnvironmentLighting {
     // @override
     getRadiance(_scope: PBInsideFunctionScope, _refl: PBShaderExp, _roughness: PBShaderExp): null;
     // @override
+    getSheenRadiance(_scope: PBInsideFunctionScope, _refl: PBShaderExp, _roughness: PBShaderExp): null;
+    // @override
     getType(): "constant";
     // @override
     hasIrradiance(): boolean;
     // @override
     hasRadiance(): boolean;
+    // @override
+    hasSheenRadiance(): boolean;
     // @override
     initShaderBindings(pb: ProgramBuilder): void;
     // @override
@@ -2903,11 +2904,15 @@ export class EnvHemisphericAmbient extends EnvironmentLighting {
     // @override
     getRadiance(scope: PBInsideFunctionScope, refl: PBShaderExp, _roughness: PBShaderExp): PBShaderExp;
     // @override
+    getSheenRadiance(scope: PBInsideFunctionScope, refl: PBShaderExp, roughness: PBShaderExp): PBShaderExp;
+    // @override
     getType(): "hemisphere";
     // @override
     hasIrradiance(): boolean;
     // @override
     hasRadiance(): boolean;
+    // @override
+    hasSheenRadiance(): boolean;
     // @override
     initShaderBindings(pb: ProgramBuilder): void;
     // @override
@@ -2925,9 +2930,11 @@ export class Environment extends Disposable {
 export abstract class EnvironmentLighting extends Disposable {
     abstract getIrradiance(scope: PBInsideFunctionScope, normal: PBShaderExp): PBShaderExp;
     abstract getRadiance(scope: PBInsideFunctionScope, refl: PBShaderExp, roughness: PBShaderExp): Nullable<PBShaderExp>;
+    abstract getSheenRadiance(scope: PBInsideFunctionScope, refl: PBShaderExp, roughness: PBShaderExp): Nullable<PBShaderExp>;
     abstract getType(): EnvLightType;
     abstract hasIrradiance(): boolean;
     abstract hasRadiance(): boolean;
+    abstract hasSheenRadiance(): boolean;
     abstract initShaderBindings(pb: ProgramBuilder): void;
     abstract updateBindGroup(bg: BindGroup): void;
 }
@@ -2952,6 +2959,8 @@ export class EnvLightWrapper extends Disposable {
     protected onDispose(): void;
     get radianceMap(): Nullable<TextureCube<unknown>>;
     set radianceMap(tex: Nullable<TextureCube<unknown>>);
+    get sheenRadianceMap(): Nullable<TextureCube<unknown>>;
+    set sheenRadianceMap(tex: Nullable<TextureCube<unknown>>);
     get strength(): number;
     set strength(val: number);
     get type(): EnvLightType;
@@ -2960,17 +2969,21 @@ export class EnvLightWrapper extends Disposable {
 
 // @public
 export class EnvShIBL extends EnvironmentLighting {
-    constructor(radianceMap?: TextureCube, irradianceSH?: GPUDataBuffer, irradianceSHFB?: FrameBuffer);
+    constructor(radianceMap?: TextureCube, irradianceSH?: GPUDataBuffer, irradianceSHFB?: FrameBuffer, sheenRadianceMap?: TextureCube);
     // @override
     getIrradiance(scope: PBInsideFunctionScope, normal: PBShaderExp): PBShaderExp;
     // @override
     getRadiance(scope: PBInsideFunctionScope, refl: PBShaderExp, roughness: PBShaderExp): PBShaderExp;
+    // @override
+    getSheenRadiance(scope: PBInsideFunctionScope, refl: PBShaderExp, roughness: PBShaderExp): PBShaderExp;
     // @override
     getType(): "ibl";
     // @override
     hasIrradiance(): boolean;
     // @override
     hasRadiance(): boolean;
+    // @override
+    hasSheenRadiance(): boolean;
     // @override
     initShaderBindings(pb: ProgramBuilder): void;
     get irradianceSH(): Nullable<GPUDataBuffer<unknown>>;
@@ -2983,6 +2996,8 @@ export class EnvShIBL extends EnvironmentLighting {
     protected onDispose(): void;
     get radianceMap(): Nullable<TextureCube<unknown>>;
     set radianceMap(tex: Nullable<TextureCube<unknown>>);
+    get sheenRadianceMap(): Nullable<TextureCube<unknown>>;
+    set sheenRadianceMap(tex: Nullable<TextureCube<unknown>>);
     // @override
     updateBindGroup(bg: BindGroup): void;
 }
@@ -4207,6 +4222,8 @@ export type IMixinPBRCommon = {
     getCommonDatasStruct(scope: PBInsideFunctionScope): ShaderTypeFunc;
     calculateEmissiveColor(scope: PBInsideFunctionScope): PBShaderExp;
     getF0(scope: PBInsideFunctionScope): PBShaderExp;
+    getSheenAlbedoScaling(scope: PBInsideFunctionScope, Ndot: PBShaderExp, sheenColor: PBShaderExp, sheenRoughness: PBShaderExp): PBShaderExp;
+    getSheenAlbedoScalingForDirect(scope: PBInsideFunctionScope, NoV: PBShaderExp, NoL: PBShaderExp, sheenColor: PBShaderExp, sheenRoughness: PBShaderExp): PBShaderExp;
     directLighting(scope: PBInsideFunctionScope, lightDir: PBShaderExp, lightColor: PBShaderExp, normal: PBShaderExp, viewVec: PBShaderExp, commonData: PBShaderExp, diffuseScale: PBShaderExp, specularScale: PBShaderExp, sourceRadiusFactor: PBShaderExp, outColor: PBShaderExp): void;
     directRectLight(scope: PBInsideFunctionScope, worldPos: PBShaderExp, normal: PBShaderExp, viewVec: PBShaderExp, commonData: PBShaderExp, posRange: PBShaderExp, axisX: PBShaderExp, axisY: PBShaderExp, colorIntensity: PBShaderExp, outColor: PBShaderExp): void;
     indirectLighting(scope: PBInsideFunctionScope, normal: PBShaderExp, viewVec: PBShaderExp, commonData: PBShaderExp, outColor: PBShaderExp, outRoughness?: PBShaderExp): void;
@@ -4528,6 +4545,7 @@ export class JointDynamicsSystem {
     removeFlatPlaneAt(index: number): boolean;
     removeGrabber(handle: JointDynamicsGrabberHandle): boolean;
     removeGrabberAt(index: number): boolean;
+    resetChains(): void;
     setColliderEnabled(handle: JointDynamicsColliderHandle, enabled: boolean): boolean;
     setFlatPlaneEnabled(handle: JointDynamicsFlatPlaneHandle, enabled: boolean): boolean;
     setGrabberEnabled(handle: JointDynamicsGrabberHandle, enabled: boolean): boolean;
@@ -4838,6 +4856,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     getMaterial(): MeshMaterial | null;
     getMorphData(): Nullable<MorphData>;
     getMorphInfo(): Nullable<MorphInfo>;
+    getMorphTargetIndexByName(name: string): number;
     getMorphTargetName(index: number): Nullable<string>;
     getMorphWeight(name: string): number;
     getNode(): this;
@@ -4860,6 +4879,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     setMorphData(data: Nullable<MorphData>): void;
     setMorphInfo(info: Nullable<MorphInfo>): void;
     setMorphWeight(name: string, weight: number): void;
+    setMorphWeightByIndex(index: number, weight: number): void;
     // (undocumented)
     setPickTarget(node: SceneNode, label?: string): void;
     setSkinnedBoundingInfo(info: Nullable<SkinnedBoundingBox>): void;
@@ -6766,7 +6786,7 @@ export class ResourceManager {
     fetchBinary(path: string, options?: BaseFetchOptions): Promise<Nullable<ArrayBuffer>>;
     fetchFontAsset(path: string, options?: FontAssetFetchOptions): Promise<Nullable<FontAsset>>;
     fetchMaterial<T extends Material = MeshMaterial>(path: string, options?: BaseFetchOptions): Promise<Nullable<T>>;
-    fetchModel(path: string, scene: Scene, options?: ModelFetchOptions): Promise<SceneNode>;
+    fetchModel(path: string, scene: Scene, options?: ModelFetchOptions): Promise<SceneNode | undefined>;
     fetchPrimitive<T extends Primitive = Primitive>(path: string, options?: BaseFetchOptions): Promise<Nullable<T>>;
     fetchTexture<T extends Texture2D | TextureCube | Texture2DArray>(path: string, options?: TextureFetchOptions<T>): Promise<T>;
     findAnimationTarget(node: SceneNode, track: PropertyTrack): object | null;
@@ -7094,6 +7114,7 @@ export class SceneNode extends SceneNode_base implements IDisposable {
     get clipTestEnabled(): boolean;
     set clipTestEnabled(val: boolean);
     clone(): Promise<this>;
+    collectMorphTargetNames(): string[];
     computeBoundingVolume(): Nullable<BoundingVolume>;
     get computedBoundingBoxDrawMode(): number;
     computeWorldBoundingVolume(localBV: Nullable<BoundingVolume>): Nullable<BoundingVolume>;
@@ -7111,7 +7132,6 @@ export class SceneNode extends SceneNode_base implements IDisposable {
     hasChild(child: SceneNode): boolean;
     get hidden(): boolean;
     invalidateBoundingVolume(): void;
-    // (undocumented)
     invalidateTransform(invalidateLocal?: boolean): void;
     invalidateWorldBoundingVolume(transformChanged: boolean): void;
     get invWorldMatrix(): Immutable<Matrix4x4>;
@@ -7185,6 +7205,7 @@ export class SceneNode extends SceneNode_base implements IDisposable {
     set sealed(val: boolean);
     setBoundingVolume(bv: BoundingVolume): void;
     setLocalTransform(matrix: Matrix4x4): this;
+    setMorphTargetWeight(name: string, weight: number): void;
     get sharedModel(): Nullable<SharedModel>;
     set sharedModel(model: Nullable<SharedModel>);
     get showState(): SceneNodeVisible;
@@ -7931,6 +7952,7 @@ export class SkyRenderer extends Disposable {
     renderSkyDistantLut(ctx: DrawContext, skybox: TextureCube): void;
     // (undocumented)
     renderUberFog(camera: Camera, depthTexture: Nullable<BaseTexture>): void;
+    get sheenRadianceMap(): TextureCube<unknown>;
     get shWindowWeights(): Immutable<Vector3>;
     set shWindowWeights(weights: Immutable<Vector3>);
     get skyboxRotation(): Immutable<Vector3>;

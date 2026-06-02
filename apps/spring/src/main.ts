@@ -3,6 +3,7 @@
 import { createBoneChainDemo, type BoneChainDemo } from './bone-chain';
 import { createClothGridDemo, type ClothGridDemo } from './cloth-grid';
 import { createBarrelClothDemo, type BarrelClothDemo } from './barrel-cloth';
+import { createClosedChainDemo, type ClosedChainDemo } from './closed-chain';
 import { Plane, Vector2, Vector3 } from '@zephyr3d/base';
 import type { IControllerPointerDownEvent, SceneNode } from '@zephyr3d/scene';
 import {
@@ -49,7 +50,8 @@ app.on('tick', tick);
 let chainDemo: BoneChainDemo | null = null;
 let clothDemo: ClothGridDemo | null = null;
 let barrelDemo: BarrelClothDemo | null = null;
-let activeDemo: 'chain' | 'cloth' | 'barrel' = 'cloth';
+let closedDemo: ClosedChainDemo | null = null;
+let activeDemo: 'chain' | 'cloth' | 'barrel' | 'closed' = 'cloth';
 let windEnabled = false;
 let broadPhaseEnabled = true;
 
@@ -82,6 +84,15 @@ function clearDemos() {
     barrelDemo.grabberObj.remove();
     barrelDemo = null;
   }
+  if (closedDemo) {
+    closedDemo.root.remove();
+    closedDemo.colliderObj.remove();
+    closedDemo.grabberObj.remove();
+    for (const b of closedDemo.bones) {
+      b.remove();
+    }
+    closedDemo = null;
+  }
 }
 
 function activateChain() {
@@ -96,6 +107,7 @@ function activateChain() {
   btnChain.classList.add('active');
   btnCloth.classList.remove('active');
   btnBarrel.classList.remove('active');
+  btnClosed.classList.remove('active');
   releaseControls.style.display = 'none';
   applyRuntimeFlags();
   updateStatus();
@@ -114,6 +126,7 @@ function activateCloth() {
   btnChain.classList.remove('active');
   btnCloth.classList.add('active');
   btnBarrel.classList.remove('active');
+  btnClosed.classList.remove('active');
   releaseControls.style.display = 'inline';
   nextReleaseCol = 0;
   applyRuntimeFlags();
@@ -133,8 +146,23 @@ function activateBarrel() {
   btnChain.classList.remove('active');
   btnCloth.classList.remove('active');
   btnBarrel.classList.add('active');
+  btnClosed.classList.remove('active');
   releaseControls.style.display = 'inline';
   nextReleaseCol = 0;
+  applyRuntimeFlags();
+  updateStatus();
+}
+
+function activateClosed() {
+  clearDemos();
+  closedDemo = createClosedChainDemo(scene);
+  activeDemo = 'closed';
+
+  btnChain.classList.remove('active');
+  btnCloth.classList.remove('active');
+  btnBarrel.classList.remove('active');
+  btnClosed.classList.add('active');
+  releaseControls.style.display = 'none';
   applyRuntimeFlags();
   updateStatus();
 }
@@ -144,6 +172,7 @@ function activateBarrel() {
 const btnChain = document.getElementById('btn-chain')!;
 const btnCloth = document.getElementById('btn-cloth')!;
 const btnBarrel = document.getElementById('btn-barrel')!;
+const btnClosed = document.getElementById('btn-closed')!;
 const btnWind = document.getElementById('btn-wind')!;
 const btnBroadPhase = document.getElementById('btn-broadphase')!;
 const btnReset = document.getElementById('btn-reset')!;
@@ -158,6 +187,7 @@ let nextReleaseCol = 0;
 btnChain.addEventListener('click', activateChain);
 btnCloth.addEventListener('click', activateCloth);
 btnBarrel.addEventListener('click', activateBarrel);
+btnClosed.addEventListener('click', activateClosed);
 btnWind.addEventListener('click', () => {
   windEnabled = !windEnabled;
   btnWind.classList.toggle('active', windEnabled);
@@ -187,6 +217,12 @@ btnReset.addEventListener('click', () => {
       barrelDemo.springSystem.controller.fixPoint(idx);
     }
     nextReleaseCol = 0;
+  }
+  if (closedDemo) {
+    closedDemo.springSystem.controller.reset();
+    for (const idx of closedDemo.fixedIndices) {
+      closedDemo.springSystem.controller.fixPoint(idx);
+    }
   }
   updateStatus();
 });
@@ -237,6 +273,12 @@ function updateStatus() {
       return `Col${col}: ${fixed ? 'Fixed' : 'Free'}`;
     });
     statusDiv.textContent = `Top row: ${states.join('  |  ')} | Colliders: ${demo.collidersR.length} | Broad-Phase: ${broadPhaseEnabled ? 'On' : 'Off'}`;
+  } else if (activeDemo === 'closed' && closedDemo) {
+    const states = closedDemo.fixedIndices.map((idx, pin) => {
+      const fixed = closedDemo!.springSystem.controller.isPointFixed(idx);
+      return `${pin === 0 ? 'Head' : 'Tail'}: ${fixed ? 'Fixed' : 'Free'}`;
+    });
+    statusDiv.textContent = `Closed chain pins: ${states.join('  |  ')} | Colliders: ${closedDemo.collidersR.length} | Broad-Phase: ${broadPhaseEnabled ? 'On' : 'Off'}`;
   } else {
     statusDiv.textContent = `Broad-Phase: ${broadPhaseEnabled ? 'On' : 'Off'}`;
   }
@@ -266,6 +308,9 @@ function getActiveGrabber(): SceneNode | null {
   if (activeDemo === 'barrel' && barrelDemo) {
     return barrelDemo.grabberObj;
   }
+  if (activeDemo === 'closed' && closedDemo) {
+    return closedDemo.grabberObj;
+  }
   return null;
 }
 
@@ -278,6 +323,9 @@ function getActiveController() {
   }
   if (activeDemo === 'barrel' && barrelDemo) {
     return barrelDemo.springSystem.controller;
+  }
+  if (activeDemo === 'closed' && closedDemo) {
+    return closedDemo.springSystem.controller;
   }
   return null;
 }
@@ -394,5 +442,10 @@ function tick(dt: number) {
   if (activeDemo === 'barrel' && barrelDemo) {
     barrelDemo.springSystem.controller.setWindForce(wind);
     barrelDemo.update(elapsed, dt);
+  }
+
+  if (activeDemo === 'closed' && closedDemo) {
+    closedDemo.springSystem.controller.setWindForce(wind);
+    closedDemo.update(elapsed, dt);
   }
 }

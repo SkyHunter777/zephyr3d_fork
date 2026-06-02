@@ -149,10 +149,10 @@ export function createBarrelClothDemo(scene: Scene): BarrelClothDemo {
           shearShrink: InterpolatorScalar.constant(0.025),
           shearStretch: InterpolatorScalar.constant(0.025),
           // ── KEY: very soft bending = cloth folds/drapes freely ──
-          bendingShrinkVertical: InterpolatorScalar.constant(0.02),
-          bendingStretchVertical: InterpolatorScalar.constant(0.02),
-          bendingShrinkHorizontal: InterpolatorScalar.constant(0.02),
-          bendingStretchHorizontal: InterpolatorScalar.constant(0.02)
+          bendingShrinkVertical: InterpolatorScalar.constant(0.002),
+          bendingStretchVertical: InterpolatorScalar.constant(0.002),
+          bendingShrinkHorizontal: InterpolatorScalar.constant(0.002),
+          bendingStretchHorizontal: InterpolatorScalar.constant(0.002)
         },
         constraintOptions: {
           structuralVertical: true,

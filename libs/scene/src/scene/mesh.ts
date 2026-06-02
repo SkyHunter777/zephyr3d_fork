@@ -369,21 +369,40 @@ export class Mesh extends MeshBase implements BatchDrawable {
     return null;
   }
   /**
+   * Get the index of the morph target by name
+   * @param name - The name of the morph target
+   * @returns The index of the morph target, or -1 if not found
+   */
+  getMorphTargetIndexByName(name: string): number {
+    return this._morphInfo?.names?.[name] ?? -1;
+  }
+  /**
    * Update morph target weight
    *
    * @param name - The name of the morph target
    * @param weight - The weight of the morph target
    */
   setMorphWeight(name: string, weight: number) {
-    const index = this._morphInfo?.names?.[name];
-    if (index !== undefined && index >= 0 && index < this._morphInfo!.data[3]) {
+    const index = this.getMorphTargetIndexByName(name);
+    if (index >= 0) {
+      this.setMorphWeightByIndex(index, weight);
+    }
+  }
+  /**
+   * Update morph target weight by index
+   *
+   * @param index - The index of the morph target
+   * @param weight - The weight of the morph target
+   */
+  setMorphWeightByIndex(index: number, weight: number) {
+    if (index >= 0 && index < this._morphInfo!.data[3]) {
       if (this._morphInfo!.data[4 + index] !== weight) {
         this._morphInfo!.data[4 + index] = weight;
         this._morphDirty = true;
         this.scene!.queueUpdateNode(this);
       }
     } else {
-      console.warn(`Morph target ${name} not found`);
+      console.warn(`Morph target index out of range: ${index}`);
     }
   }
   /**
@@ -400,7 +419,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     return 0;
   }
   /**
-   * Update morph target weight
+   * Update morph target weights
    *
    * @param weight - The morph target weights. The length must not exceed the mesh's morph target count.
    */
