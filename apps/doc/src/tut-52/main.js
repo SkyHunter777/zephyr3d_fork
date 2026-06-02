@@ -18,8 +18,9 @@ import {
 import { backendWebGL2 } from '@zephyr3d/backend-webgl';
 
 // ── Scene setup ──
+const canvas = window.document.body.querySelector('#canvas');
 const app = new Application({
-  canvas: window.document.body.querySelector('#canvas'),
+  canvas,
   backend: backendWebGL2
 });
 
@@ -107,7 +108,7 @@ function activateChain() {
   btnCloth.classList.remove('active');
   btnBarrel.classList.remove('active');
   btnClosed.classList.remove('active');
-  releaseControls.style.display = 'none';
+  releaseControls.hidden = true;
   applyRuntimeFlags();
   updateStatus();
 }
@@ -126,7 +127,7 @@ function activateCloth() {
   btnCloth.classList.add('active');
   btnBarrel.classList.remove('active');
   btnClosed.classList.remove('active');
-  releaseControls.style.display = 'inline';
+  releaseControls.hidden = false;
   nextReleaseCol = 0;
   applyRuntimeFlags();
   updateStatus();
@@ -146,7 +147,7 @@ function activateBarrel() {
   btnCloth.classList.remove('active');
   btnBarrel.classList.add('active');
   btnClosed.classList.remove('active');
-  releaseControls.style.display = 'inline';
+  releaseControls.hidden = false;
   nextReleaseCol = 0;
   applyRuntimeFlags();
   updateStatus();
@@ -161,7 +162,7 @@ function activateClosed() {
   btnCloth.classList.remove('active');
   btnBarrel.classList.remove('active');
   btnClosed.classList.add('active');
-  releaseControls.style.display = 'none';
+  releaseControls.hidden = true;
   applyRuntimeFlags();
   updateStatus();
 }
@@ -190,11 +191,12 @@ btnClosed.addEventListener('click', activateClosed);
 btnWind.addEventListener('click', () => {
   windEnabled = !windEnabled;
   btnWind.classList.toggle('active', windEnabled);
+  updateStatus();
 });
 btnBroadPhase.addEventListener('click', () => {
   broadPhaseEnabled = !broadPhaseEnabled;
   btnBroadPhase.classList.toggle('active', broadPhaseEnabled);
-  btnBroadPhase.textContent = broadPhaseEnabled ? 'Broad-Phase On' : 'Broad-Phase Off';
+  btnBroadPhase.textContent = broadPhaseEnabled ? 'Broad On' : 'Broad Off';
   applyRuntimeFlags();
   updateStatus();
 });
@@ -267,19 +269,18 @@ btnFixAll.addEventListener('click', () => {
 function updateStatus() {
   const demo = activeDemo === 'cloth' ? clothDemo : activeDemo === 'barrel' ? barrelDemo : null;
   if (demo) {
-    const states = demo.fixedIndices.map((idx, col) => {
-      const fixed = demo.springSystem.controller.isPointFixed(idx);
-      return `Col${col}: ${fixed ? 'Fixed' : 'Free'}`;
-    });
-    statusDiv.textContent = `Top row: ${states.join('  |  ')} | Colliders: ${demo.collidersR.length} | Broad-Phase: ${broadPhaseEnabled ? 'On' : 'Off'}`;
+    const fixedCount = demo.fixedIndices.reduce((count, idx) => {
+      return count + (demo.springSystem.controller.isPointFixed(idx) ? 1 : 0);
+    }, 0);
+    statusDiv.textContent = `Pins ${fixedCount}/${demo.fixedIndices.length} fixed | Colliders ${demo.collidersR.length} | Broad ${broadPhaseEnabled ? 'on' : 'off'} | Wind ${windEnabled ? 'on' : 'off'}`;
   } else if (activeDemo === 'closed' && closedDemo) {
     const states = closedDemo.fixedIndices.map((idx, pin) => {
       const fixed = closedDemo.springSystem.controller.isPointFixed(idx);
-      return `${pin === 0 ? 'Head' : 'Tail'}: ${fixed ? 'Fixed' : 'Free'}`;
+      return `${pin === 0 ? 'Head' : 'Tail'} ${fixed ? 'fixed' : 'free'}`;
     });
-    statusDiv.textContent = `Closed chain pins: ${states.join('  |  ')} | Colliders: ${closedDemo.collidersR.length} | Broad-Phase: ${broadPhaseEnabled ? 'On' : 'Off'}`;
+    statusDiv.textContent = `${states.join(' | ')} | Colliders ${closedDemo.collidersR.length} | Broad ${broadPhaseEnabled ? 'on' : 'off'} | Wind ${windEnabled ? 'on' : 'off'}`;
   } else {
-    statusDiv.textContent = `Broad-Phase: ${broadPhaseEnabled ? 'On' : 'Off'}`;
+    statusDiv.textContent = `Broad ${broadPhaseEnabled ? 'on' : 'off'} | Wind ${windEnabled ? 'on' : 'off'}`;
   }
 }
 
@@ -370,6 +371,9 @@ function moveGrabberToMouse() {
 }
 
 getInput().useFirst((evt) => {
+  if (evt.target !== canvas) {
+    return false;
+  }
   if (evt.type === 'pointerdown') {
     const e = /** @type {import('@zephyr3d/scene').IControllerPointerDownEvent} */ (
       /** @type {unknown} */ (evt)

@@ -33,6 +33,42 @@
         }
         location.href = url.href;
       }
+      function disableSidebarAutoScroll(hook) {
+        function keepDocsifySidebarHoverGuard() {
+          var sidebar = document.querySelector('.sidebar');
+          var event;
+          if (!sidebar) {
+            return;
+          }
+          if (typeof MouseEvent === 'function') {
+            event = new MouseEvent('mouseover', {
+              bubbles: true,
+              cancelable: true,
+              view: window
+            });
+          } else {
+            event = document.createEvent('MouseEvents');
+            event.initMouseEvent('mouseover', true, true, window);
+          }
+          sidebar.dispatchEvent(event);
+        }
+
+        document.addEventListener(
+          'mouseleave',
+          function (event) {
+            var target = event.target;
+            if (target && target.classList && target.classList.contains('sidebar')) {
+              event.stopImmediatePropagation();
+            }
+          },
+          true
+        );
+
+        hook.doneEach(function () {
+          keepDocsifySidebarHoverGuard();
+          setTimeout(keepDocsifySidebarHoverGuard, 0);
+        });
+      }
       window.$docsify = {
         auto2top: true,
         coverpage: true,
@@ -40,6 +76,7 @@
         hideSidebar: false,
         loadNavbar: true,
         executeScript: true,
+        plugins: [disableSidebarAutoScroll],
         maxLevel: 2,
         subMaxLevel: 2,
         coverpage: ['/en/', '/zh-cn/'],

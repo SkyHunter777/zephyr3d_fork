@@ -29,6 +29,8 @@
   - Animation
     - [Overview](en/animation-intro.md)
     - [Skeletal Animation](en/animation-skeleton.md)
+    - [Inverse Kinematics](en/animation-ik.md)
+    - [Joint Dynamics](en/animation-joint-dynamics.md)
     - [Keyframe Animation](en/animation-keyframe.md)
     - [Animation Blending](en/animation-blending.md)
     - [Custom Animation](en/animation-custom.md)

@@ -4,3 +4,7 @@
   right: 0;
   text-align: right;
 }
+
+.sidebar {
+  overscroll-behavior-y: contain;
+}
