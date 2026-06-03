@@ -1184,11 +1184,43 @@ export class SharedModel extends Disposable {
           name: group.name,
           bindings,
           isBinary: group.isBinary,
-          weight: 0
+          weight: this.getInitialMorphTargetGroupWeight(bindings, group.isBinary)
         });
       }
     }
     rootNode.morphTargetGroups = runtimeGroups;
+  }
+  private getInitialMorphTargetGroupWeight(bindings: SceneMorphTargetBinding[], isBinary?: boolean): number {
+    let result = 0;
+    let found = false;
+    for (const binding of bindings) {
+      if (!binding.weight) {
+        continue;
+      }
+      const targetWeight = this.getMorphTargetBindingWeight(binding);
+      if (targetWeight === null) {
+        continue;
+      }
+      const groupWeight = targetWeight / binding.weight;
+      if (!found || Math.abs(groupWeight) > Math.abs(result)) {
+        result = groupWeight;
+        found = true;
+      }
+    }
+    return isBinary ? (result > 0.5 ? 1 : 0) : result;
+  }
+  private getMorphTargetBindingWeight(binding: SceneMorphTargetBinding): Nullable<number> {
+    const targetIndex = binding.targetIndex;
+    if (typeof targetIndex === 'number' && targetIndex >= 0 && targetIndex < binding.mesh.getNumMorphTargets()) {
+      const targetName = binding.mesh.getMorphTargetName(targetIndex);
+      if (targetName) {
+        return binding.mesh.getMorphWeight(targetName);
+      }
+    }
+    if (binding.targetName) {
+      return binding.mesh.getMorphWeight(binding.targetName);
+    }
+    return null;
   }
   async createSceneNode(
     manager: ResourceManager,
@@ -2129,6 +2161,7 @@ function processMorphData(
   }
   mesh.setMorphData({ width: textureSize, height: textureSize, data: textureData });
   mesh.setMorphInfo({ data: weightsAndOffsets, names });
+  mesh.setMorphBoundingInfo({ targetBoxes: subMesh.targetBox!, originBox: new BoundingBox(meshAABB) });
   mesh.setAnimatedBoundingBox(morphBoundingBox);
 }
 
@@ -2160,9 +2193,9 @@ function calculateMorphBoundingBox(
     const keyframeBox = keyframeBoundingBox[i];
     morphBoundingBox.minPoint.x += keyframeBox.minPoint.x * weight;
     morphBoundingBox.minPoint.y += keyframeBox.minPoint.y * weight;
-    morphBoundingBox.minPoint.y += keyframeBox.minPoint.z * weight;
+    morphBoundingBox.minPoint.z += keyframeBox.minPoint.z * weight;
     morphBoundingBox.maxPoint.x += keyframeBox.maxPoint.x * weight;
     morphBoundingBox.maxPoint.y += keyframeBox.maxPoint.y * weight;
-    morphBoundingBox.maxPoint.y += keyframeBox.maxPoint.z * weight;
+    morphBoundingBox.maxPoint.z += keyframeBox.maxPoint.z * weight;
   }
 }

@@ -14,9 +14,9 @@ export function calculateMorphBoundingBox(
     const keyframeBox = keyframeBoundingBox[i];
     morphBoundingBox.minPoint.x += keyframeBox.minPoint.x * weight;
     morphBoundingBox.minPoint.y += keyframeBox.minPoint.y * weight;
-    morphBoundingBox.minPoint.y += keyframeBox.minPoint.z * weight;
+    morphBoundingBox.minPoint.z += keyframeBox.minPoint.z * weight;
     morphBoundingBox.maxPoint.x += keyframeBox.maxPoint.x * weight;
     morphBoundingBox.maxPoint.y += keyframeBox.maxPoint.y * weight;
-    morphBoundingBox.maxPoint.y += keyframeBox.maxPoint.z * weight;
+    morphBoundingBox.maxPoint.z += keyframeBox.maxPoint.z * weight;
   }
 }

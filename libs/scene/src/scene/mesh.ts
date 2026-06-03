@@ -22,14 +22,14 @@ import {
   type Texture2D
 } from '@zephyr3d/device';
 import type { Scene } from './scene';
-import type { BoundingVolume } from '../utility/bounding_volume';
-import type { BoundingBox } from '../utility/bounding_volume';
+import { BoundingBox, type BoundingVolume } from '../utility/bounding_volume';
 import { MORPH_ATTRIBUTE_VECTOR_COUNT, MORPH_WEIGHTS_VECTOR_COUNT, QUEUE_OPAQUE } from '../values';
 import { mixinDrawable } from '../render/drawable_mixin';
 import { RenderBundleWrapper } from '../render/renderbundle_wrapper';
 import type { SceneNode } from './scene_node';
 import { getDevice } from '../app/api';
 import type { SkinnedBoundingBox } from '../animation';
+import { calculateMorphBoundingBox } from '../animation/morphtarget';
 
 /**
  * Callback invoked after a mesh finishes its per-frame update.
@@ -37,6 +37,16 @@ import type { SkinnedBoundingBox } from '../animation';
  * @public
  */
 export type MeshUpdateCallback = (frameId: number, elapsedInSeconds: number, deltaInSeconds: number) => void;
+
+/**
+ * Bounding data used to update a mesh's local bounding box after morph target weights change.
+ *
+ * @public
+ */
+export interface MorphBoundingInfo {
+  targetBoxes: BoundingBox[];
+  originBox: BoundingBox;
+}
 
 const MeshBase = castObservable(applyMixins(GraphNode, mixinDrawable))<{
   primitive_changed: [primitive: Nullable<Primitive>];
@@ -66,6 +76,8 @@ export class Mesh extends MeshBase implements BatchDrawable {
   protected _morphData: Nullable<MorphData>;
   /** @internal */
   protected _morphInfo: Nullable<MorphInfo>;
+  /** @internal */
+  protected _morphBoundingInfo: Nullable<MorphBoundingInfo>;
   /** @internal */
   protected _morphDirty: boolean;
   /** @internal */
@@ -100,6 +112,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     this._boneMatrices = new DRef();
     this._morphData = null;
     this._morphInfo = null;
+    this._morphBoundingInfo = null;
     this._morphDirty = false;
     this._instanceHash = null;
     this._pickTarget = { node: this };
@@ -233,6 +246,25 @@ export class Mesh extends MeshBase implements BatchDrawable {
     return this._animatedBoundingBox ?? null;
   }
   /**
+   * Sets morph target bounding data used to update the animated bounding box when weights change.
+   * @param info - Morph target bounding data
+   */
+  setMorphBoundingInfo(info: Nullable<MorphBoundingInfo>) {
+    this._morphBoundingInfo = info
+      ? {
+          targetBoxes: info.targetBoxes.map((box) => box.clone()),
+          originBox: info.originBox.clone()
+        }
+      : null;
+    this.updateMorphBoundingBox();
+  }
+  /**
+   * Gets morph target bounding data.
+   */
+  getMorphBoundingInfo() {
+    return this._morphBoundingInfo;
+  }
+  /**
    * Sets the texture that contains the bone matrices for skeletal animation
    * @param matrices - The texture that contains the bone matrices
    */
@@ -337,6 +369,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
         this._morphInfo.buffer!.set(morphUniformBuffer);
       }
       this._morphDirty = false;
+      this.updateMorphBoundingBox();
       this._renderBundle = {};
       RenderBundleWrapper.drawableChanged(this);
     }
@@ -399,6 +432,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
       if (this._morphInfo!.data[4 + index] !== weight) {
         this._morphInfo!.data[4 + index] = weight;
         this._morphDirty = true;
+        this.updateMorphBoundingBox();
         this.scene!.queueUpdateNode(this);
       }
     } else {
@@ -427,6 +461,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     if (this._morphInfo && weight && weight.length <= this._morphInfo.data[3]) {
       this._morphInfo.data.set(weight, 4);
       this._morphDirty = true;
+      this.updateMorphBoundingBox();
       this.scene!.queueUpdateNode(this);
     }
   }
@@ -489,10 +524,34 @@ export class Mesh extends MeshBase implements BatchDrawable {
     return this.material?.needSceneDepth() ?? false;
   }
   /** @internal */
+  private updateMorphBoundingBox() {
+    if (!this._morphInfo || !this._morphBoundingInfo) {
+      return;
+    }
+    const numTargets = Math.min(this._morphInfo.data[3], this._morphBoundingInfo.targetBoxes.length);
+    if (numTargets <= 0) {
+      return;
+    }
+    const weights =
+      this._morphInfo.data instanceof Float32Array
+        ? this._morphInfo.data.subarray(4, 4 + numTargets)
+        : new Float32Array(Array.from(this._morphInfo.data.subarray(4, 4 + numTargets)));
+    const bbox = new BoundingBox();
+    calculateMorphBoundingBox(
+      bbox,
+      this._morphBoundingInfo.targetBoxes,
+      weights,
+      numTargets
+    );
+    bbox.minPoint.addBy(this._morphBoundingInfo.originBox.minPoint);
+    bbox.maxPoint.addBy(this._morphBoundingInfo.originBox.maxPoint);
+    this.setAnimatedBoundingBox(bbox);
+  }
+  /** @internal */
   private updateMorphState() {
     if (this._morphInfo && this._morphDirty) {
-      console.log(`jawOpen: ${this._morphInfo.data[20]}`);
       this._morphInfo.buffer!.get()!.bufferSubData(4 * 4, this._morphInfo.data, 4, this._morphInfo.data[3]);
+      this.updateMorphBoundingBox();
       this._morphDirty = false;
     }
   }
@@ -510,7 +569,9 @@ export class Mesh extends MeshBase implements BatchDrawable {
       this.setAnimatedBoundingBox(this._skinnedBoundingInfo!.boundingBox);
     } else {
       this.setBoneMatrices(null);
-      this.setAnimatedBoundingBox(null);
+      if (!this._morphInfo || !this._morphBoundingInfo) {
+        this.setAnimatedBoundingBox(null);
+      }
     }
     if (this._skinBindingName) {
       this.scene!.queueUpdateNode(this);
@@ -591,6 +652,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     this._boneMatrices.dispose();
     this.setMorphData(null);
     this.setMorphInfo(null);
+    this.setMorphBoundingInfo(null);
     this._renderBundle = null;
     RenderBundleWrapper.drawableChanged(this);
   }

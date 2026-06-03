@@ -1,6 +1,7 @@
-import { MemoryFS } from '@zephyr3d/base';
+import { MemoryFS, Vector3 } from '@zephyr3d/base';
 import {
   AssetHierarchyNode,
+  BoundingBox,
   Mesh,
   ResourceManager,
   Scene,
@@ -51,14 +52,27 @@ function createAssetMesh(name: string, morphNames: string[]): AssetMeshData {
   };
 }
 
-function setMorphInfo(mesh: Mesh, names: string[]) {
+function setMorphInfo(mesh: Mesh, names: string[], weights: number[] = []) {
   const data = new Float32Array(4 + names.length);
   data[3] = names.length;
+  weights.forEach((weight, index) => {
+    data[4 + index] = weight;
+  });
   const nameMap: Record<string, number> = {};
   names.forEach((name, index) => {
     nameMap[name] = index;
   });
   mesh.setMorphInfo({ data, names: nameMap });
+}
+
+function expectBoundingBox(box: BoundingBox | null, min: number[], max: number[]) {
+  expect(box).not.toBeNull();
+  expect(box!.minPoint.x).toBeCloseTo(min[0]);
+  expect(box!.minPoint.y).toBeCloseTo(min[1]);
+  expect(box!.minPoint.z).toBeCloseTo(min[2]);
+  expect(box!.maxPoint.x).toBeCloseTo(max[0]);
+  expect(box!.maxPoint.y).toBeCloseTo(max[1]);
+  expect(box!.maxPoint.z).toBeCloseTo(max[2]);
 }
 
 describe('morph target groups', () => {
@@ -73,6 +87,39 @@ describe('morph target groups', () => {
 
     expect(model.morphTargetGroups.map((group) => group.name)).toEqual(['smile', 'blink', 'aa']);
     expect(model.getMorphTargetGroup('smile')?.bindings).toHaveLength(2);
+  });
+
+  test('initializes runtime group weight from mesh morph weights', () => {
+    const model = new SharedModel();
+    const assetNode = new AssetHierarchyNode('face', model);
+    const assetMesh = createAssetMesh('face-0', ['smile']);
+    assetNode.mesh = assetMesh;
+    model.buildMorphTargetGroupsByName();
+
+    const scene = new Scene();
+    const root = new SceneNode(scene);
+    const faceMesh = new Mesh(scene);
+    faceMesh.parent = root;
+    setMorphInfo(faceMesh, ['smile'], [0.5]);
+
+    (model as any).createMorphTargetGroups(root, new Map([[assetMesh.subMeshes[0], faceMesh]]));
+
+    expect(root.getMorphTargetGroupWeight('smile')).toBe(0.5);
+    expect(root.getSerializedMorphTargetGroups()).toEqual([
+      {
+        name: 'smile',
+        isBinary: undefined,
+        weight: 0.5,
+        bindings: [
+          {
+            meshId: faceMesh.persistentId,
+            targetIndex: 0,
+            targetName: 'smile',
+            weight: 1
+          }
+        ]
+      }
+    ]);
   });
 
   test('applies morph target group only to matching asset mesh bindings', () => {
@@ -192,5 +239,30 @@ describe('morph target groups', () => {
 
     restored.setMorphTargetGroupWeight('happy', 0.25);
     expect(restoredMesh.getMorphWeight('smile')).toBe(0.25);
+  });
+
+  test('updates serialized morph bounding info after weight changes', async () => {
+    const scene = new Scene();
+    const root = new SceneNode(scene);
+    root.remove();
+    const faceMesh = new Mesh(scene);
+    faceMesh.parent = root;
+    setMorphInfo(faceMesh, ['smile'], [0.5]);
+    faceMesh.setMorphBoundingInfo({
+      originBox: new BoundingBox(new Vector3(0, 0, 0), new Vector3(1, 1, 1)),
+      targetBoxes: [new BoundingBox(new Vector3(-1, -2, -3), new Vector3(2, 3, 4))]
+    });
+    expectBoundingBox(faceMesh.getAnimatedBoundingBox(), [-0.5, -1, -1.5], [2, 2.5, 3]);
+
+    const manager = new ResourceManager(new MemoryFS());
+    mockResourceManager = manager;
+    const serialized = await manager.serializeObject(root);
+    const restored = (await manager.deserializeObject<SceneNode>(new SceneNode(scene), serialized))!;
+    const restoredMesh = restored.children[0] as Mesh;
+
+    expectBoundingBox(restoredMesh.getAnimatedBoundingBox(), [-0.5, -1, -1.5], [2, 2.5, 3]);
+
+    restoredMesh.setMorphWeight('smile', 1);
+    expectBoundingBox(restoredMesh.getAnimatedBoundingBox(), [-1, -2, -3], [3, 4, 5]);
   });
 });

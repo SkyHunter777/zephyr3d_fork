@@ -7,6 +7,17 @@ import { BoundingBox } from '../../bounding_volume';
 import { meshInstanceClsMap } from './common';
 import { JSONData } from '../json';
 
+function serializeBoundingBox(box: BoundingBox): number[] {
+  return [...box.minPoint, ...box.maxPoint];
+}
+
+function deserializeBoundingBox(data: unknown): BoundingBox | null {
+  if (!Array.isArray(data) || data.length < 6 || !data.every((v) => typeof v === 'number')) {
+    return null;
+  }
+  return new BoundingBox(new Vector3(data.slice(0, 3)), new Vector3(data.slice(3, 6)));
+}
+
 /** @internal */
 export function getMeshClass(): SerializableClass {
   return {
@@ -231,6 +242,41 @@ export function getMeshClass(): SerializableClass {
               this.setAnimatedBoundingBox(bbox);
             } else {
               this.setAnimatedBoundingBox(null);
+            }
+          }
+        },
+        {
+          name: 'MorphBoundingInfo',
+          description: 'Serialized morph-target bounding data',
+          type: 'string',
+          isHidden() {
+            return true;
+          },
+          get(this: Mesh, value) {
+            const info = this.getMorphBoundingInfo();
+            value.str[0] = info
+              ? JSON.stringify({
+                  originBox: serializeBoundingBox(info.originBox),
+                  targetBoxes: info.targetBoxes.map((box) => serializeBoundingBox(box))
+                })
+              : '';
+          },
+          set(this: Mesh, value) {
+            if (!value.str[0]) {
+              this.setMorphBoundingInfo(null);
+              return;
+            }
+            try {
+              const data = JSON.parse(value.str[0]);
+              const originBox = deserializeBoundingBox(data.originBox);
+              const targetBoxes = Array.isArray(data.targetBoxes)
+                ? data.targetBoxes
+                    .map((item: unknown) => deserializeBoundingBox(item))
+                    .filter((box: BoundingBox | null): box is BoundingBox => !!box)
+                : [];
+              this.setMorphBoundingInfo(originBox && targetBoxes.length > 0 ? { originBox, targetBoxes } : null);
+            } catch {
+              this.setMorphBoundingInfo(null);
             }
           }
         },
