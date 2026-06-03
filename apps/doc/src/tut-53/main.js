@@ -1,6 +1,5 @@
 import { Plane, Vector2, Vector3 } from '@zephyr3d/base';
 import { backendWebGL2 } from '@zephyr3d/backend-webgl';
-import type { IControllerPointerDownEvent, SceneNode } from '@zephyr3d/scene';
 import {
   Application,
   DirectionalLight,
@@ -11,10 +10,10 @@ import {
   RaycastVisitor,
   Scene
 } from '@zephyr3d/scene';
-import { createIKDemo, type IKHandle } from './ik-demo';
+import { createIKDemo } from './ik-demo';
 
 const app = new Application({
-  canvas: window.document.body.querySelector<HTMLCanvasElement>('#canvas'),
+  canvas: window.document.body.querySelector('#canvas'),
   backend: backendWebGL2
 });
 
@@ -37,11 +36,11 @@ getEngine().setRenderable(scene, 0);
 
 const demo = createIKDemo(scene);
 
-const btnAuto = document.getElementById('btn-auto')!;
-const btnReset = document.getElementById('btn-reset')!;
-const weightInput = document.getElementById('weight')! as HTMLInputElement;
+const btnAuto = document.getElementById('btn-auto');
+const btnReset = document.getElementById('btn-reset');
+const weightInput = /** @type {HTMLInputElement} */ (document.getElementById('weight'));
 
-let activeHandle: IKHandle = 'target';
+let activeHandle = 'target';
 let autoTarget = true;
 let elapsed = 0;
 
@@ -59,15 +58,15 @@ weightInput.addEventListener('input', () => {
   demo.setWeight(Number(weightInput.value));
 });
 
-function setActiveHandle(handle: IKHandle) {
+function setActiveHandle(handle) {
   activeHandle = handle;
 }
 
-function getHandleNode(handle: IKHandle): SceneNode {
+function getHandleNode(handle) {
   return handle === 'target' ? demo.targetNode : demo.poleNode;
 }
 
-function updateAutoTarget(time: number) {
+function updateAutoTarget(time) {
   if (!autoTarget || dragging) {
     return;
   }
@@ -85,7 +84,7 @@ const dragIntersect = new Vector3();
 const tempWorld = new Vector3();
 let dragging = false;
 
-function pickHandle(): IKHandle | null {
+function pickHandle() {
   raycaster.ray = camera.constructRay(mouse.x, mouse.y);
   const targetDist = raycaster.ray.intersectionTestSphere(demo.targetNode.getWorldPosition(tempWorld), 0.12);
   const targetHit = targetDist ? Math.min(...targetDist) : Number.POSITIVE_INFINITY;
@@ -97,7 +96,7 @@ function pickHandle(): IKHandle | null {
   return targetHit <= poleHit ? 'target' : 'pole';
 }
 
-function updateMousePosition(e: IControllerPointerDownEvent) {
+function updateMousePosition(e) {
   mouse.x = e.offsetX;
   mouse.y = e.offsetY;
 }
@@ -127,7 +126,9 @@ function moveActiveHandleToMouse() {
 
 getInput().useFirst((evt) => {
   if (evt.type === 'pointerdown') {
-    const e = evt as unknown as IControllerPointerDownEvent;
+    const e = /** @type {import('@zephyr3d/scene').IControllerPointerDownEvent} */ (
+      /** @type {unknown} */ (evt)
+    );
     if (e.button !== 0) {
       return false;
     }
@@ -144,7 +145,9 @@ getInput().useFirst((evt) => {
     return true;
   }
   if (evt.type === 'pointermove') {
-    const e = evt as unknown as IControllerPointerDownEvent;
+    const e = /** @type {import('@zephyr3d/scene').IControllerPointerMoveEvent} */ (
+      /** @type {unknown} */ (evt)
+    );
     if (!dragging) {
       return false;
     }
@@ -165,7 +168,7 @@ getInput().useFirst((evt) => {
 app.on('tick', tick);
 app.run();
 
-function tick(dt: number) {
+function tick(dt) {
   scene.mainCamera.updateController();
   elapsed += Math.min(dt / 1000, 1 / 30);
   updateAutoTarget(elapsed);

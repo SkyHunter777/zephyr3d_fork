@@ -125,7 +125,7 @@ describe('AvatarWardrobe', () => {
       fitMode: 'reuseInverseBind'
     });
 
-    expect(instance.root.parent).toBe(avatarRoot);
+    expect(instance.root.get().parent).toBe(avatarRoot);
     expect(instance.skinBindings).toHaveLength(1);
     expect(instance.skinBindings[0].rig).toBe(avatarRig);
     expect(instance.skinBindings[0].joints).toEqual(avatarRig.joints);

@@ -1,5 +1,4 @@
 import { Quaternion, Vector3, Vector4 } from '@zephyr3d/base';
-import type { Scene } from '@zephyr3d/scene';
 import {
   BoxShape,
   IKChain,
@@ -17,45 +16,29 @@ const SHOULDER_POSITION = new Vector3(0.38, 0.52, 0);
 const UPPER_ARM_LENGTH = 0.48;
 const FOREARM_LENGTH = 0.46;
 
-export type IKHandle = 'target' | 'pole';
-
-export interface IKDemo {
-  root: SceneNode;
-  targetNode: SceneNode;
-  poleNode: SceneNode;
-  setWeight: (weight: number) => void;
-  reset: () => void;
-  update: (time: number) => void;
-}
-
-function makeMaterial(color: Vector4) {
+function makeMaterial(color) {
   const material = new LambertMaterial();
   material.albedoColor = color;
   return material;
 }
 
-function addSphere(scene: Scene, parent: SceneNode, radius: number, color: Vector4) {
+function addSphere(scene, parent, radius, color) {
   const mesh = new Mesh(scene, new SphereShape({ radius }), makeMaterial(color));
   mesh.parent = parent;
   return mesh;
 }
 
-function addBox(
-  scene: Scene,
-  parent: SceneNode,
-  options: ConstructorParameters<typeof BoxShape>[0],
-  color: Vector4
-) {
+function addBox(scene, parent, options, color) {
   const mesh = new Mesh(scene, new BoxShape(options), makeMaterial(color));
   mesh.parent = parent;
   return mesh;
 }
 
-function resetRotation(node: SceneNode) {
+function resetRotation(node) {
   node.rotation = Quaternion.identity();
 }
 
-function createArmRig(scene: Scene, root: SceneNode) {
+function createArmRig(scene, root) {
   const shoulder = new SceneNode(scene);
   shoulder.name = 'IK_RightShoulder';
   shoulder.parent = root;
@@ -104,14 +87,13 @@ function createArmRig(scene: Scene, root: SceneNode) {
   return { shoulder, elbow, wrist };
 }
 
-export function createIKDemo(scene: Scene): IKDemo {
+export function createIKDemo(scene) {
   const root = new SceneNode(scene);
   root.name = 'IK_DemoRoot';
   root.position.set(ROOT_POSITION);
 
   const { shoulder, elbow, wrist } = createArmRig(scene, root);
   const chain = IKChain.fromNodeHierarchy(shoulder, wrist);
-  //const solver = new TwoBoneIKSolver(chain, DEFAULT_POLE, 1);
   const solver = new TwoBoneIKSolver(chain, DEFAULT_POLE, 10);
   solver.poleVector = DEFAULT_POLE;
   solver.setTwistConstraint(0, -Math.PI * 0.01, Math.PI * 0.01, 0.8);
@@ -140,7 +122,7 @@ export function createIKDemo(scene: Scene): IKDemo {
     resetRotation(wrist);
   };
 
-  const update = (time: number) => {
+  const update = (time) => {
     root.position.y = ROOT_POSITION.y + Math.sin(time * 1.2) * 0.025;
     resetRotation(shoulder);
     resetRotation(elbow);
@@ -156,7 +138,7 @@ export function createIKDemo(scene: Scene): IKDemo {
     root,
     targetNode,
     poleNode,
-    setWeight(nextWeight: number) {
+    setWeight(nextWeight) {
       weight = Math.max(0, Math.min(1, nextWeight));
     },
     reset,

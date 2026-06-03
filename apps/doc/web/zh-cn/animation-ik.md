@@ -130,6 +130,8 @@ solver.applyToNodes(1);
 
 `solve()` 返回是否在容差内收敛。即使返回 `false`，求解器也会尽量把末端拉向目标点。
 
+<div class="showcase" case="tut-53"></div>
+
 ---
 
 ## 注意事项

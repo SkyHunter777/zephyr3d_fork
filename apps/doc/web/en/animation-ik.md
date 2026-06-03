@@ -130,6 +130,8 @@ solver.applyToNodes(1);
 
 `solve()` returns whether the chain converged within tolerance. Even when it returns `false`, the solver still moves the end effector as close to the target as possible.
 
+<div class="showcase" case="tut-53"></div>
+
 ---
 
 ## Notes
