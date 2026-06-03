@@ -46,6 +46,77 @@ export type NodeIterateFunc = ((node: SceneNode) => boolean) | ((node: SceneNode
  */
 export type SceneNodeVisible = 'visible' | 'inherit' | 'hidden';
 
+/** @internal */
+export interface SceneMeshAssetBinding {
+  node: unknown;
+  mesh: unknown;
+  subMesh: unknown;
+}
+
+/**
+ * Runtime morph target binding used by model-level expression groups.
+ * @public
+ */
+export interface SceneMorphTargetBinding {
+  mesh: Mesh;
+  targetIndex?: number;
+  targetName?: string;
+  weight: number;
+}
+
+/**
+ * Runtime morph target group used by model instances.
+ * @public
+ */
+export interface SceneMorphTargetGroup {
+  name: string;
+  bindings: SceneMorphTargetBinding[];
+  isBinary?: boolean;
+  weight?: number;
+}
+
+/**
+ * Serializable morph target binding descriptor.
+ * @public
+ */
+export interface SerializedMorphTargetBinding {
+  meshId: string;
+  targetIndex?: number;
+  targetName?: string;
+  weight: number;
+}
+
+/**
+ * Serializable morph target group descriptor.
+ * @public
+ */
+export interface SerializedMorphTargetGroup {
+  name: string;
+  bindings: SerializedMorphTargetBinding[];
+  isBinary?: boolean;
+  weight?: number;
+}
+
+interface MorphTargetBindingView {
+  node?: unknown;
+  mesh?: unknown;
+  targetIndex?: number;
+  targetName?: string;
+  weight: number;
+}
+
+const sceneMeshAssetBindings = new WeakMap<Mesh, SceneMeshAssetBinding>();
+
+/** @internal */
+export function setSceneMeshAssetBinding(mesh: Mesh, binding: SceneMeshAssetBinding) {
+  sceneMeshAssetBindings.set(mesh, binding);
+}
+
+/** @internal */
+function getSceneMeshAssetBinding(mesh: Mesh): Nullable<SceneMeshAssetBinding> {
+  return sceneMeshAssetBindings.get(mesh) ?? null;
+}
+
 /**
  * The base class of all scene graph objects.
  *
@@ -110,6 +181,8 @@ export class SceneNode
   protected _animationSet: DRef<AnimationSet>;
   /** @internal Optional shared model reference for instancing. */
   protected _sharedModel: DRef<SharedModel>;
+  /** @internal Model-level morph target groups bound to runtime meshes. */
+  protected _morphTargetGroups: SceneMorphTargetGroup[];
   /** @internal */
   protected _jointTypeT: 'none' | 'animated' | 'static';
   /** @internal */
@@ -198,6 +271,7 @@ export class SceneNode
     this._name = '';
     this._animationSet = new DRef();
     this._sharedModel = new DRef();
+    this._morphTargetGroups = [];
     this._jointTypeT = 'none';
     this._jointTypeS = 'none';
     this._jointTypeR = 'none';
@@ -451,6 +525,13 @@ export class SceneNode
   }
   set sharedModel(model: Nullable<SharedModel>) {
     this._sharedModel.set(model);
+  }
+  /** Runtime morph target groups bound to this model instance. */
+  get morphTargetGroups(): SceneMorphTargetGroup[] {
+    return this._morphTargetGroups;
+  }
+  set morphTargetGroups(groups: SceneMorphTargetGroup[]) {
+    this._morphTargetGroups = (groups ?? []).filter((group) => !!group?.name && group.bindings.length > 0);
   }
   /**
    * Clone this node.
@@ -835,6 +916,110 @@ export class SceneNode
   set boundingBoxDrawMode(mode) {
     this._boxDrawMode = mode;
   }
+  /** @internal */
+  private matchesMorphTargetBinding(mesh: Mesh, binding: MorphTargetBindingView): boolean {
+    const assetBinding = getSceneMeshAssetBinding(mesh);
+    if (binding.node && assetBinding?.node !== binding.node) {
+      return false;
+    }
+    if (binding.mesh && binding.mesh !== mesh && assetBinding?.mesh !== binding.mesh) {
+      return false;
+    }
+    return true;
+  }
+  /** @internal */
+  private applyMorphTargetBindingWeight(mesh: Mesh, binding: MorphTargetBindingView, weight: number): void {
+    if (!this.matchesMorphTargetBinding(mesh, binding)) {
+      return;
+    }
+    const targetWeight = weight * binding.weight;
+    const targetIndex = binding.targetIndex;
+    if (typeof targetIndex === 'number' && targetIndex >= 0 && targetIndex < mesh.getNumMorphTargets()) {
+      mesh.setMorphWeightByIndex(targetIndex, targetWeight);
+      return;
+    }
+    if (binding.targetName) {
+      mesh.setMorphWeight(binding.targetName, targetWeight);
+    }
+  }
+  /** @internal */
+  private getMorphTargetGroupRoot(): SceneNode {
+    let node: Nullable<SceneNode> = this;
+    while (node) {
+      if (node._morphTargetGroups.length > 0 || node.sharedModel) {
+        return node;
+      }
+      node = node.parent;
+    }
+    return this.getPrefabNode() ?? this;
+  }
+  /** @internal */
+  private applyMorphTargetGroupWeight(group: { bindings: MorphTargetBindingView[] }, weight: number) {
+    const root = this.getMorphTargetGroupRoot();
+    root.iterate((node) => {
+      if (node.isMesh()) {
+        for (const binding of group.bindings) {
+          this.applyMorphTargetBindingWeight(node, binding, weight);
+        }
+      }
+    });
+  }
+  /** @internal */
+  private getRuntimeMorphTargetGroup(name: string): Nullable<SceneMorphTargetGroup> {
+    const root = this.getMorphTargetGroupRoot();
+    return root._morphTargetGroups.find((group) => group.name === name) ?? null;
+  }
+  /** Returns serialized morph target groups for this node. */
+  getSerializedMorphTargetGroups(): SerializedMorphTargetGroup[] {
+    return this._morphTargetGroups
+      .map((group) => ({
+        name: group.name,
+        isBinary: group.isBinary,
+        weight: group.weight ?? 0,
+        bindings: group.bindings
+          .filter((binding) => !!binding.mesh)
+          .map((binding) => ({
+            meshId: binding.mesh.persistentId,
+            targetIndex: binding.targetIndex,
+            targetName: binding.targetName,
+            weight: binding.weight
+          }))
+      }))
+      .filter((group) => group.bindings.length > 0);
+  }
+  /** Restores serialized morph target groups for this node. */
+  setSerializedMorphTargetGroups(groups: SerializedMorphTargetGroup[]) {
+    const runtimeGroups: SceneMorphTargetGroup[] = [];
+    for (const group of groups ?? []) {
+      if (!group?.name || !Array.isArray(group.bindings)) {
+        continue;
+      }
+      const bindings: SceneMorphTargetBinding[] = [];
+      for (const binding of group.bindings) {
+        const mesh = binding?.meshId ? this.findNodeById(binding.meshId) : null;
+        if (mesh?.isMesh()) {
+          bindings.push({
+            mesh,
+            targetIndex: binding.targetIndex,
+            targetName: binding.targetName,
+            weight: typeof binding.weight === 'number' ? binding.weight : 1
+          });
+        }
+      }
+      if (bindings.length > 0) {
+        runtimeGroups.push({
+          name: group.name,
+          bindings,
+          isBinary: group.isBinary,
+          weight: typeof group.weight === 'number' ? group.weight : 0
+        });
+      }
+    }
+    this._morphTargetGroups = runtimeGroups;
+    for (const group of this._morphTargetGroups) {
+      this.applyMorphTargetGroupWeight(group, group.weight ?? 0);
+    }
+  }
   /**
    * Force transform update and notify descendants.
    * @param invalidateLocal - If true, also invalidate local matrix; otherwise only invalidate world matrix.
@@ -848,10 +1033,8 @@ export class SceneNode
    * @param weight - Morph target weight
    */
   setMorphTargetWeight(name: string, weight: number) {
-    if (!this._prefabId) {
-      return;
-    }
-    this.iterate((node) => {
+    const root = this.getPrefabNode() ?? this;
+    root.iterate((node) => {
       if (node.isMesh()) {
         const index = node.getMorphTargetIndexByName(name);
         if (index >= 0) {
@@ -861,15 +1044,44 @@ export class SceneNode
     });
   }
   /**
+   * Set morph target group weight for the model instance.
+   * @param name - Morph target group name
+   * @param weight - Group weight
+   */
+  setMorphTargetGroupWeight(name: string, weight: number) {
+    const runtimeGroup = this.getRuntimeMorphTargetGroup(name);
+    if (runtimeGroup) {
+      const groupWeight = runtimeGroup.isBinary ? (weight > 0.5 ? 1 : 0) : weight;
+      runtimeGroup.weight = groupWeight;
+      this.applyMorphTargetGroupWeight(runtimeGroup, groupWeight);
+      return;
+    }
+    const root = this.getMorphTargetGroupRoot();
+    const group = root.sharedModel?.getMorphTargetGroup(name);
+    if (!group) {
+      this.setMorphTargetWeight(name, weight);
+      return;
+    }
+    const groupWeight = group.isBinary ? (weight > 0.5 ? 1 : 0) : weight;
+    this.applyMorphTargetGroupWeight(group, groupWeight);
+  }
+  /**
+   * Get morph target group weight.
+   * @param name - Morph target group name
+   * @returns The group weight, or 0 if no group was found
+   */
+  getMorphTargetGroupWeight(name: string): number {
+    const runtimeGroup = this.getRuntimeMorphTargetGroup(name);
+    return runtimeGroup?.weight ?? 0;
+  }
+  /**
    * Collect all morph target names from meshes in the subtree.
    * @returns Array of unique morph target names
    */
   collectMorphTargetNames(): string[] {
-    if (!this._prefabId) {
-      return [];
-    }
+    const root = this.getPrefabNode() ?? this;
     const names = new Set<string>();
-    this.iterate((node) => {
+    root.iterate((node) => {
       if (node.isMesh()) {
         for (let i = 0; i < node.getNumMorphTargets(); i++) {
           names.add(node.getMorphTargetName(i)!);
@@ -877,6 +1089,18 @@ export class SceneNode
       }
     });
     return Array.from(names);
+  }
+  /**
+   * Collect all model-level morph target group names.
+   * @returns Array of morph target group names
+   */
+  collectMorphTargetGroupNames(): string[] {
+    const root = this.getMorphTargetGroupRoot();
+    if (root._morphTargetGroups.length > 0) {
+      return root._morphTargetGroups.map((group) => group.name);
+    }
+    const groups = root.sharedModel?.morphTargetGroups;
+    return groups ? groups.map((group) => group.name) : [];
   }
   /** Get called when the node was just created by cloning from other node */
   protected onPostClone(): void | Promise<void> {}

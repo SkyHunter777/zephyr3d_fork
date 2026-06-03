@@ -1,5 +1,5 @@
 import { SceneNode } from '../../../scene/scene_node';
-import type { SceneNodeVisible } from '../../../scene/scene_node';
+import type { SceneNodeVisible, SerializedMorphTargetGroup } from '../../../scene/scene_node';
 import { Scene } from '../../../scene/scene';
 import { defineProps, type SerializableClass } from '../types';
 import type { DiffPatch, DiffValue } from '@zephyr3d/base';
@@ -388,6 +388,26 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
               } else {
                 console.error(`Invalid scene node: ${child}`);
               }
+            }
+          }
+        },
+        {
+          name: 'MorphTargetGroups',
+          description: 'Serialized model-level morph target groups for this node',
+          type: 'object',
+          phase: 10,
+          options: { objectTypes: [JSONArray] },
+          isHidden() {
+            return true;
+          },
+          get(this: SceneNode, value) {
+            const groups = this.getSerializedMorphTargetGroups();
+            value.object[0] = groups.length > 0 ? new JSONArray(null, groups) : null;
+          },
+          set(this: SceneNode, value) {
+            const data = value?.object[0] as JSONArray | SerializedMorphTargetGroup[] | null | undefined;
+            if (data) {
+              this.setSerializedMorphTargetGroups(data instanceof JSONArray ? data.data : data);
             }
           }
         },

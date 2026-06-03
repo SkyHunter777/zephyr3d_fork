@@ -25,7 +25,12 @@ import type { ColliderR } from '../animation/joint_dynamics/types';
 import type { ControllerConfig } from '../animation/joint_dynamics/controller';
 import type { ResourceManager } from '../utility/serialization/manager';
 import type { Scene } from '../scene/scene';
-import { SceneNode } from '../scene/scene_node';
+import {
+  SceneNode,
+  setSceneMeshAssetBinding,
+  type SceneMorphTargetBinding,
+  type SceneMorphTargetGroup
+} from '../scene/scene_node';
 import { SkeletonRig, SkinBinding } from '../animation/skeleton';
 import type { FixedGeometryCacheFrame } from '../animation/fixed_geometry_cache_track';
 import type { PCAGeometryCacheTrackData } from '../animation';
@@ -282,6 +287,33 @@ export interface AssetMeshData {
   morphWeights?: number[];
   morphNames?: string[];
   subMeshes: AssetSubMeshData[];
+}
+
+/**
+ * Morph target binding in a model-level expression/group.
+ * @public
+ */
+export interface AssetMorphTargetBinding {
+  /** Restrict this binding to runtime meshes created from this asset node. */
+  node?: AssetHierarchyNode;
+  /** Restrict this binding to runtime meshes created from this asset mesh. */
+  mesh?: AssetMeshData;
+  /** Morph target index in the source mesh. */
+  targetIndex?: number;
+  /** Morph target name in the source mesh. */
+  targetName?: string;
+  /** Weight contributed by this binding when the group weight is 1. */
+  weight: number;
+}
+
+/**
+ * Model-level morph target group, commonly used as a complete facial expression.
+ * @public
+ */
+export interface AssetMorphTargetGroup {
+  name: string;
+  bindings: AssetMorphTargetBinding[];
+  isBinary?: boolean;
 }
 
 /**
@@ -777,6 +809,8 @@ export class SharedModel extends Disposable {
   /** @internal */
   private _jointDynamicsSpringBones: AssetJointDynamicsSpringBone[];
   /** @internal */
+  private _morphTargetGroups: AssetMorphTargetGroup[];
+  /** @internal */
   private _textureMap: Map<AssetTextureInfo, DRef<Texture2D>>;
   /** @internal */
   private _primitiveMap: Map<AssetPrimitiveInfo, DRef<Primitive>>;
@@ -798,6 +832,7 @@ export class SharedModel extends Disposable {
     this._springBones = [];
     this._jointDynamicsColliders = [];
     this._jointDynamicsSpringBones = [];
+    this._morphTargetGroups = [];
     this._activeScene = -1;
     this._textureMap = new Map();
     this._primitiveMap = new Map();
@@ -842,6 +877,10 @@ export class SharedModel extends Disposable {
   get jointDynamicsSpringBones(): AssetJointDynamicsSpringBone[] {
     return this._jointDynamicsSpringBones;
   }
+  /** Model-level morph target groups, commonly facial expressions. */
+  get morphTargetGroups(): AssetMorphTargetGroup[] {
+    return this._morphTargetGroups;
+  }
   /** The active scene of the model */
   get activeScene(): number {
     return this._activeScene;
@@ -863,6 +902,62 @@ export class SharedModel extends Disposable {
   }
   addPrimitive(prim: AssetPrimitiveInfo) {
     this._primitiveList.push(prim);
+  }
+  /**
+   * Adds a model-level morph target group.
+   * @param group - Morph target group to add
+   */
+  addMorphTargetGroup(group: AssetMorphTargetGroup) {
+    if (group?.name && group.bindings?.length > 0) {
+      this._morphTargetGroups.push(group);
+    }
+  }
+  /**
+   * Removes all model-level morph target groups.
+   */
+  clearMorphTargetGroups() {
+    this._morphTargetGroups = [];
+  }
+  /**
+   * Finds a model-level morph target group by name.
+   * @param name - Group name
+   * @returns The matching group, or null if not found
+   */
+  getMorphTargetGroup(name: string): Nullable<AssetMorphTargetGroup> {
+    return this._morphTargetGroups.find((group) => group.name === name) ?? null;
+  }
+  /**
+   * Builds morph target groups by collecting morph target names from every mesh.
+   * @returns Generated morph target groups
+   */
+  buildMorphTargetGroupsByName(): AssetMorphTargetGroup[] {
+    this.clearMorphTargetGroups();
+    const groups = new Map<string, AssetMorphTargetGroup>();
+    const meshes = new Set<AssetMeshData>();
+    for (const node of this._nodes) {
+      if (node.mesh) {
+        meshes.add(node.mesh);
+      }
+    }
+    for (const mesh of meshes) {
+      const count = getAssetMeshMorphTargetCount(mesh);
+      for (let i = 0; i < count; i++) {
+        const targetName = getAssetMeshMorphTargetName(mesh, i);
+        let group = groups.get(targetName);
+        if (!group) {
+          group = { name: targetName, bindings: [] };
+          groups.set(targetName, group);
+        }
+        group.bindings.push({
+          mesh,
+          targetIndex: i,
+          targetName,
+          weight: 1
+        });
+      }
+    }
+    this._morphTargetGroups = Array.from(groups.values());
+    return this._morphTargetGroups;
   }
   /**
    * Adds a skeleton to the scene
@@ -1063,6 +1158,38 @@ export class SharedModel extends Disposable {
       }
     }
   }
+  private createMorphTargetGroups(rootNode: SceneNode, meshMap: Map<AssetSubMeshData, Mesh>) {
+    const runtimeGroups: SceneMorphTargetGroup[] = [];
+    for (const group of this._morphTargetGroups) {
+      const bindings: SceneMorphTargetBinding[] = [];
+      for (const binding of group.bindings) {
+        const assetMesh = binding.node?.mesh ?? binding.mesh ?? null;
+        if (!assetMesh) {
+          continue;
+        }
+        for (const subMesh of assetMesh.subMeshes) {
+          const mesh = meshMap.get(subMesh);
+          if (mesh) {
+            bindings.push({
+              mesh,
+              targetIndex: binding.targetIndex,
+              targetName: binding.targetName,
+              weight: binding.weight
+            });
+          }
+        }
+      }
+      if (bindings.length > 0) {
+        runtimeGroups.push({
+          name: group.name,
+          bindings,
+          isBinary: group.isBinary,
+          weight: 0
+        });
+      }
+    }
+    rootNode.morphTargetGroups = runtimeGroups;
+  }
   async createSceneNode(
     manager: ResourceManager,
     scene: Scene,
@@ -1220,6 +1347,7 @@ export class SharedModel extends Disposable {
     if (saveJointDynamics && saveSkeletons) {
       this.createJointDynamics(group, nodeMap);
     }
+    this.createMorphTargetGroups(group, meshMap);
     return group;
   }
 
@@ -1504,7 +1632,13 @@ export class SharedModel extends Disposable {
           }
           meshNode.parent = node;
           meshMap.set(subMesh, meshNode);
-          processMorphData(subMesh, meshNode, meshData.morphWeights!, meshData.morphNames);
+          setSceneMeshAssetBinding(meshNode, { node: assetNode, mesh: meshData, subMesh });
+          processMorphData(
+            subMesh,
+            meshNode,
+            assetNode.weights ?? meshData.morphWeights,
+            meshData.morphNames
+          );
           if (skeleton) {
             if (!skeletonMeshMap.has(skeleton)) {
               skeletonMeshMap.set(skeleton, { mesh: [meshNode], bounding: [subMesh] });
@@ -1928,7 +2062,7 @@ export class SharedModel extends Disposable {
 function processMorphData(
   subMesh: AssetSubMeshData,
   mesh: Mesh,
-  morphWeights: number[],
+  morphWeights?: Nullable<number[]>,
   morphNames?: Nullable<string[]>
 ) {
   const device = getDevice();
@@ -1996,6 +2130,20 @@ function processMorphData(
   mesh.setMorphData({ width: textureSize, height: textureSize, data: textureData });
   mesh.setMorphInfo({ data: weightsAndOffsets, names });
   mesh.setAnimatedBoundingBox(morphBoundingBox);
+}
+
+/** @internal */
+function getAssetMeshMorphTargetCount(mesh: AssetMeshData): number {
+  let count = 0;
+  for (const subMesh of mesh.subMeshes) {
+    count = Math.max(count, subMesh.numTargets);
+  }
+  return count;
+}
+
+/** @internal */
+function getAssetMeshMorphTargetName(mesh: AssetMeshData, index: number): string {
+  return mesh.morphNames?.[index] ?? `Target${index}`;
 }
 
 /** @internal */

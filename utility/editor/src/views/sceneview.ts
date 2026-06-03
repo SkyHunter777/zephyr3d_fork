@@ -67,6 +67,7 @@ import {
 } from '../commands/scenecommands';
 import { NodeProxy } from '../helpers/proxy';
 import { clearScriptPropertyAccessorCache } from '../helpers/scriptprops';
+import { getMorphTargetGroupPropertyAccessors } from '../helpers/morphtargetprops';
 import { shapePrimitivePaths, type ShapePrimitiveType } from '../helpers/shapeprimitives';
 import type { EditTool, EditToolContext } from './edittools/edittool';
 import { createEditTool, isObjectEditable } from './edittools/edittool';
@@ -245,6 +246,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       onSceneChanged: () => eventBus.dispatchEvent('scene_changed'),
       onRefreshMainProperties: () => this._propGrid.refresh()
     });
+    this._propGrid.setExtraPropertiesProvider('morph-target-groups', (object) =>
+      getMorphTargetGroupPropertyAccessors(object)
+    );
     this._propGrid.setExtraPropertiesProvider('plugin-contributions', (object) =>
       this.editor.plugins.getPropertyAccessors(object)
     );

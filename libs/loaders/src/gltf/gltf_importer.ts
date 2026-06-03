@@ -23,6 +23,7 @@ import type {
   AssetMaterialCommon,
   AssetPBRMaterialCommon,
   AssetAnimationTrack,
+  AssetMorphTargetBinding,
   AssetPrimitiveInfo,
   AssetTextureInfo,
   AssetSpringBoneCollider,
@@ -67,6 +68,29 @@ type SpringBoneJointInfo = {
   gravityPower?: number;
   gravityDir?: unknown;
   dragForce?: number;
+};
+
+type VRMC0BlendShapeBindInfo = {
+  mesh?: unknown;
+  index?: unknown;
+  weight?: unknown;
+};
+
+type VRMC0BlendShapeGroupInfo = {
+  name?: unknown;
+  presetName?: unknown;
+  binds?: unknown;
+};
+
+type VRMC1MorphTargetBindInfo = {
+  node?: unknown;
+  index?: unknown;
+  weight?: unknown;
+};
+
+type VRMC1ExpressionInfo = {
+  isBinary?: unknown;
+  morphTargetBinds?: unknown;
 };
 
 const VRM_SPRING_BONE_SUBSTEPS = 3;
@@ -186,6 +210,7 @@ export class GLTFImporter extends AbstractModelImporter {
     await this._loadMeshes(sharedModel, gltf, vfs);
     this._loadNodes(gltf, sharedModel);
     this._loadSkins(gltf, sharedModel);
+    this._loadMorphTargetGroups(gltf, sharedModel);
     for (let i = 0; i < (gltf.nodes?.length ?? 0); i++) {
       if (typeof gltf.nodes![i].skin === 'number' && gltf.nodes![i].skin! >= 0) {
         gltf._nodes[i].skeleton = sharedModel.skeletons[gltf.nodes![i].skin!];
@@ -209,6 +234,133 @@ export class GLTFImporter extends AbstractModelImporter {
     this._loadVRMC0SpringBones(gltf, model);
     this._loadVRMC1SpringBones(gltf, model);
     this._buildJointDynamicsSpringBones(model);
+  }
+
+  /** @internal */
+  private _loadMorphTargetGroups(gltf: GLTFContent, model: SharedModel) {
+    model.clearMorphTargetGroups();
+    const hasVRMC1 = !!gltf.extensions?.VRMC_vrm;
+    const hasVRMC0 = !!gltf.extensions?.VRM;
+    if (hasVRMC1) {
+      this._loadVRMC1MorphTargetGroups(gltf, model);
+    } else if (hasVRMC0) {
+      this._loadVRMC0MorphTargetGroups(gltf, model);
+    } else {
+      model.buildMorphTargetGroupsByName();
+    }
+  }
+
+  private _loadVRMC0MorphTargetGroups(gltf: GLTFContent, model: SharedModel) {
+    const groups = gltf.extensions?.VRM?.blendShapeMaster?.blendShapeGroups;
+    if (!Array.isArray(groups)) {
+      return;
+    }
+    for (const value of groups) {
+      if (!value || typeof value !== 'object') {
+        continue;
+      }
+      const groupInfo = value as VRMC0BlendShapeGroupInfo;
+      const name = this._getVRMC0BlendShapeGroupName(groupInfo);
+      if (!name) {
+        continue;
+      }
+      const bindings: AssetMorphTargetBinding[] = [];
+      const binds = Array.isArray(groupInfo.binds) ? groupInfo.binds : [];
+      for (const bindValue of binds) {
+        if (!bindValue || typeof bindValue !== 'object') {
+          continue;
+        }
+        const bindInfo = bindValue as VRMC0BlendShapeBindInfo;
+        const meshIndex = typeof bindInfo.mesh === 'number' ? bindInfo.mesh : -1;
+        const targetIndex = typeof bindInfo.index === 'number' ? bindInfo.index : -1;
+        const mesh = meshIndex >= 0 ? gltf._meshes[meshIndex] : null;
+        if (!mesh) {
+          continue;
+        }
+        const targetName = this._getMorphTargetName(mesh, targetIndex);
+        if (!targetName) {
+          continue;
+        }
+        bindings.push({
+          mesh,
+          targetIndex,
+          targetName,
+          weight: typeof bindInfo.weight === 'number' ? bindInfo.weight / 100 : 1
+        });
+      }
+      model.addMorphTargetGroup({ name, bindings });
+    }
+  }
+
+  private _loadVRMC1MorphTargetGroups(gltf: GLTFContent, model: SharedModel) {
+    const expressions = gltf.extensions?.VRMC_vrm?.expressions;
+    if (!expressions) {
+      return;
+    }
+    this._loadVRMC1ExpressionMap(gltf, model, expressions.preset);
+    this._loadVRMC1ExpressionMap(gltf, model, expressions.custom);
+  }
+
+  private _loadVRMC1ExpressionMap(gltf: GLTFContent, model: SharedModel, expressionMap: unknown) {
+    if (!expressionMap || typeof expressionMap !== 'object') {
+      return;
+    }
+    for (const [name, expressionInfo] of Object.entries(expressionMap)) {
+      if (!expressionInfo || typeof expressionInfo !== 'object') {
+        continue;
+      }
+      const expression = expressionInfo as VRMC1ExpressionInfo;
+      const bindings: AssetMorphTargetBinding[] = [];
+      const morphTargetBinds = Array.isArray(expression.morphTargetBinds) ? expression.morphTargetBinds : [];
+      for (const bindValue of morphTargetBinds) {
+        if (!bindValue || typeof bindValue !== 'object') {
+          continue;
+        }
+        const bindInfo = bindValue as VRMC1MorphTargetBindInfo;
+        const nodeIndex = typeof bindInfo.node === 'number' ? bindInfo.node : -1;
+        const targetIndex = typeof bindInfo.index === 'number' ? bindInfo.index : -1;
+        const node = nodeIndex >= 0 ? gltf._nodes[nodeIndex] : null;
+        const mesh = node?.mesh ?? null;
+        if (!node || !mesh) {
+          continue;
+        }
+        const targetName = this._getMorphTargetName(mesh, targetIndex);
+        if (!targetName) {
+          continue;
+        }
+        bindings.push({
+          node,
+          targetIndex,
+          targetName,
+          weight: typeof bindInfo.weight === 'number' ? bindInfo.weight : 1
+        });
+      }
+      model.addMorphTargetGroup({
+        name,
+        bindings,
+        isBinary: expression.isBinary === true
+      });
+    }
+  }
+
+  private _getVRMC0BlendShapeGroupName(groupInfo: VRMC0BlendShapeGroupInfo): Nullable<string> {
+    const presetName = typeof groupInfo.presetName === 'string' ? groupInfo.presetName : '';
+    if (presetName && presetName.toLowerCase() !== 'unknown') {
+      return presetName;
+    }
+    const name = typeof groupInfo.name === 'string' ? groupInfo.name : '';
+    return name || presetName || null;
+  }
+
+  private _getMorphTargetName(mesh: AssetMeshData, targetIndex: number): Nullable<string> {
+    if (targetIndex < 0) {
+      return null;
+    }
+    let count = 0;
+    for (const subMesh of mesh.subMeshes) {
+      count = Math.max(count, subMesh.numTargets);
+    }
+    return targetIndex < count ? (mesh.morphNames?.[targetIndex] ?? `Target${targetIndex}`) : null;
   }
 
   private _loadVRMC1SpringBones(gltf: GLTFContent, model: SharedModel) {
@@ -949,13 +1101,11 @@ export class GLTFImporter extends AbstractModelImporter {
     const nodeInfo = gltf.nodes?.[nodeIndex];
     if (nodeInfo) {
       node = new AssetHierarchyNode(nodeInfo.name, model, parent!); //model.addNode(parent, nodeInfo.name);
+      node.weights = nodeInfo.weights ?? null;
       if (typeof nodeInfo.mesh === 'number') {
         node.mesh = gltf._meshes[nodeInfo.mesh];
-        if (node.weights) {
-          node.mesh.morphWeights = node.weights;
-          if (!node.mesh.morphNames && (node as any)['extras']?.targetNames) {
-            node.mesh.morphNames = (node as any)['extras'].targetNames;
-          }
+        if (!node.mesh.morphNames && nodeInfo.extras?.targetNames) {
+          node.mesh.morphNames = nodeInfo.extras.targetNames;
         }
         const instancing = nodeInfo.extensions?.['EXT_mesh_gpu_instancing'];
         if (instancing) {
