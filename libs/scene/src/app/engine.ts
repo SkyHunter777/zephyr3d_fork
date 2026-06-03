@@ -109,6 +109,14 @@ export class Engine {
   get VFS() {
     return this._scriptingSystem.registry.VFS;
   }
+  /**
+   * Replaces the virtual file system used by the engine.
+   *
+   * The previous resource manager VFS is closed, the scripting registry is updated,
+   * and built-in assets are remounted on the new VFS.
+   *
+   * @param vfs - New virtual file system.
+   */
   set VFS(vfs: VFS) {
     if (vfs !== this._resourceManager.VFS) {
       this._resourceManager.VFS?.close();
@@ -135,7 +143,7 @@ export class Engine {
    * Existing scene nodes that still reference this font asset are not updated automatically.
    * Call this only after you have stopped using the font, or when you intentionally want it to rebuild later.
    *
-   * @param fontAsset - The loaded font asset to release.
+   * @param font - The loaded font asset path to release.
    * @returns `true` if either the atlas cache or the font cache had an entry to remove.
    */
   releaseFontAsset(font: string) {
@@ -216,6 +224,7 @@ export class Engine {
    * @typeParam T - Host type.
    * @param host - Host object to attach the script to.
    * @param module - Module identifier to resolve and load.
+   * @param config - Optional configuration passed to the script instance.
    * @returns The `RuntimeScript<T>` instance, or `null` if disabled or on failure.
    */
   async attachScript<T extends Host>(
@@ -262,6 +271,15 @@ export class Engine {
       this._scriptingSystem.update(deltaTime, elapsedTime);
     }
   }
+  /**
+   * Loads a scene from a file path.
+   *
+   * Concurrent requests for the same normalized path share the same loading promise.
+   * Scripts declared on the scene and its nodes are attached after the scene is loaded.
+   *
+   * @param path - Scene file path in the current VFS.
+   * @returns The loaded scene, or `null` when loading fails.
+   */
   async loadSceneFromFile(path: string) {
     path = this.VFS.normalizePath(path);
     if (!this._loadingScenes[path]) {
@@ -269,6 +287,16 @@ export class Engine {
     }
     return this._loadingScenes[path]!;
   }
+  /**
+   * Sets or clears the renderable for a render layer.
+   *
+   * Passing `null` clears the layer. Object renderables are held through a strong reference wrapper,
+   * while render functions are stored directly.
+   *
+   * @param renderable - Renderable object or render function to assign, or `null` to clear.
+   * @param layer - Render layer index. Defaults to `0`.
+   * @param hook - Optional render hook invoked before and after this layer renders.
+   */
   setRenderable(renderable: Nullable<IRenderable | RenderFunc>, layer = 0, hook?: IRenderHook) {
     const entry = this._activeRenderables[layer];
     if (!entry) {
@@ -295,6 +323,14 @@ export class Engine {
       entry.hook = hook ?? null;
     }
   }
+  /**
+   * Reads a file from the current VFS.
+   *
+   * @typeParam T - Requested read encoding.
+   * @param path - File path to read.
+   * @param encoding - Optional read encoding. Defaults to `binary`.
+   * @returns The file content, or `null` when the read fails.
+   */
   async readFile<T extends ReadOptions['encoding'] = 'binary'>(path: string, encoding?: T) {
     try {
       const content = await this.VFS.readFile(path, { encoding: encoding ?? 'binary' });
@@ -304,6 +340,15 @@ export class Engine {
       return null;
     }
   }
+  /**
+   * Starts the runtime by optionally showing a splash screen, running a startup script,
+   * and loading the startup scene.
+   *
+   * @param startupScene - Optional scene path rendered on layer `0` after startup completes.
+   * @param splashScreen - Optional scene path rendered on a temporary splash layer during startup.
+   * @param startupScript - Optional startup script module path. A trailing `.ts` or `.js`
+   * extension is removed before loading.
+   */
   async startup(
     startupScene?: Nullable<string>,
     splashScreen?: Nullable<string>,
@@ -329,6 +374,12 @@ export class Engine {
     }
     this.setRenderable(null, splashScreenLayer);
   }
+  /**
+   * Renders all active render layers.
+   *
+   * Each layer's `beforeRender` hook can return `false` to skip rendering that layer.
+   * The `afterRender` hook is invoked after the render attempt.
+   */
   render() {
     this._activeRenderables.forEach((info) => {
       if (!info.renderable) {
