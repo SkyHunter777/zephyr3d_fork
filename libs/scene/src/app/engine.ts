@@ -36,6 +36,8 @@ export interface IRenderable extends IDisposable {
   render(): void;
 }
 
+export type RenderFunc = () => void;
+
 /**
  * Interface for render hooks to customize rendering behavior.
  *
@@ -73,7 +75,7 @@ export class Engine {
   private _enabled: boolean;
   private _screen: ScreenAdapter;
   protected _activeRenderables: {
-    renderable: DRef<IRenderable>;
+    renderable: Nullable<RenderFunc> | DRef<IRenderable>;
     hook: Nullable<IRenderHook>;
   }[];
   private _loadingScenes: Partial<Record<string, Promise<Nullable<Scene>>>>;
@@ -267,15 +269,31 @@ export class Engine {
     }
     return this._loadingScenes[path]!;
   }
-  setRenderable(renderable: Nullable<IRenderable>, layer = 0, hook?: IRenderHook) {
-    if (!this._activeRenderables[layer]) {
+  setRenderable(renderable: Nullable<IRenderable | RenderFunc>, layer = 0, hook?: IRenderHook) {
+    const entry = this._activeRenderables[layer];
+    if (!entry) {
       this._activeRenderables[layer] = {
-        renderable: new DRef<IRenderable>(null),
-        hook: null
+        renderable: renderable
+          ? typeof renderable === 'function'
+            ? renderable
+            : new DRef<IRenderable>(renderable)
+          : null,
+        hook: hook ?? null
       };
+    } else {
+      if (entry.renderable) {
+        if (entry.renderable instanceof DRef) {
+          entry.renderable.dispose();
+        }
+        entry.renderable = null;
+      }
+      if (typeof renderable === 'function') {
+        entry.renderable = renderable;
+      } else if (renderable) {
+        entry.renderable = new DRef<IRenderable>(renderable);
+      }
+      entry.hook = hook ?? null;
     }
-    this._activeRenderables[layer].hook = hook ?? null;
-    this._activeRenderables[layer].renderable.set(renderable);
   }
   async readFile<T extends ReadOptions['encoding'] = 'binary'>(path: string, encoding?: T) {
     try {
@@ -313,14 +331,25 @@ export class Engine {
   }
   render() {
     this._activeRenderables.forEach((info) => {
+      if (!info.renderable) {
+        return;
+      }
       const render = info.hook?.beforeRender
-        ? (info.hook.beforeRender(info.renderable.get() ?? null) ?? true)
+        ? (info.hook.beforeRender(
+            typeof info.renderable === 'function' ? info.renderable : info.renderable.get()
+          ) ?? true)
         : true;
       if (render) {
-        info.renderable.get()?.render();
+        if (typeof info.renderable === 'function') {
+          info.renderable();
+        } else {
+          info.renderable.get()?.render();
+        }
       }
       if (info.hook?.afterRender) {
-        info.hook.afterRender(info.renderable.get() ?? null);
+        info.hook.afterRender(
+          typeof info.renderable === 'function' ? info.renderable : info.renderable.get()
+        );
       }
     });
   }

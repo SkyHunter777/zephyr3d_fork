@@ -400,6 +400,11 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           isHidden() {
             return true;
           },
+          isPersistent(this: SceneNode) {
+            return (
+              !this._prefabId || guessMimeType(this._prefabId) === 'application/vnd.zephyr3d.prefab+json'
+            );
+          },
           get(this: SceneNode, value) {
             const groups = this.getSerializedMorphTargetGroups();
             value.object[0] = groups.length > 0 ? new JSONArray(null, groups) : null;
