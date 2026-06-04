@@ -537,12 +537,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
         ? this._morphInfo.data.subarray(4, 4 + numTargets)
         : new Float32Array(Array.from(this._morphInfo.data.subarray(4, 4 + numTargets)));
     const bbox = new BoundingBox();
-    calculateMorphBoundingBox(
-      bbox,
-      this._morphBoundingInfo.targetBoxes,
-      weights,
-      numTargets
-    );
+    calculateMorphBoundingBox(bbox, this._morphBoundingInfo.targetBoxes, weights, numTargets);
     bbox.minPoint.addBy(this._morphBoundingInfo.originBox.minPoint);
     bbox.maxPoint.addBy(this._morphBoundingInfo.originBox.maxPoint);
     this.setAnimatedBoundingBox(bbox);

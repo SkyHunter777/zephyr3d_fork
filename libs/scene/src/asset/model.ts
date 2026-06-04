@@ -1211,7 +1211,11 @@ export class SharedModel extends Disposable {
   }
   private getMorphTargetBindingWeight(binding: SceneMorphTargetBinding): Nullable<number> {
     const targetIndex = binding.targetIndex;
-    if (typeof targetIndex === 'number' && targetIndex >= 0 && targetIndex < binding.mesh.getNumMorphTargets()) {
+    if (
+      typeof targetIndex === 'number' &&
+      targetIndex >= 0 &&
+      targetIndex < binding.mesh.getNumMorphTargets()
+    ) {
       const targetName = binding.mesh.getMorphTargetName(targetIndex);
       if (targetName) {
         return binding.mesh.getMorphWeight(targetName);

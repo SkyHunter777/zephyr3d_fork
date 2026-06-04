@@ -274,7 +274,9 @@ export function getMeshClass(): SerializableClass {
                     .map((item: unknown) => deserializeBoundingBox(item))
                     .filter((box: BoundingBox | null): box is BoundingBox => !!box)
                 : [];
-              this.setMorphBoundingInfo(originBox && targetBoxes.length > 0 ? { originBox, targetBoxes } : null);
+              this.setMorphBoundingInfo(
+                originBox && targetBoxes.length > 0 ? { originBox, targetBoxes } : null
+              );
             } catch {
               this.setMorphBoundingInfo(null);
             }
