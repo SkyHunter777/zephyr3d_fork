@@ -677,6 +677,25 @@ export interface AssetMeshData {
 }
 
 // @public
+export interface AssetMorphTargetBinding {
+    mesh?: AssetMeshData;
+    node?: AssetHierarchyNode;
+    targetIndex?: number;
+    targetName?: string;
+    weight: number;
+}
+
+// @public
+export interface AssetMorphTargetGroup {
+    // (undocumented)
+    bindings: AssetMorphTargetBinding[];
+    // (undocumented)
+    isBinary?: boolean;
+    // (undocumented)
+    name: string;
+}
+
+// @public
 export interface AssetPBRMaterialCommon extends AssetUnlitMaterial {
     // (undocumented)
     ior?: number;
@@ -2932,7 +2951,7 @@ export class Engine {
     constructor(VFS?: VFS, scriptsRoot?: string, enabled?: boolean);
     // (undocumented)
     protected _activeRenderables: {
-        renderable: DRef<IRenderable>;
+        renderable: Nullable<RenderFunc> | DRef<IRenderable>;
         hook: Nullable<IRenderHook>;
     }[];
     attachScript<T extends Host>(host: Nullable<T>, module: string, config?: Nullable<RuntimeScriptConfig>): Promise<Nullable<RuntimeScript<T>>>;
@@ -2944,20 +2963,15 @@ export class Engine {
         url: string;
         cls: GenericConstructor<RuntimeScript<T>>;
     }>>;
-    // (undocumented)
     loadSceneFromFile(path: string): Promise<Nullable<Scene>>;
     get msdfTextAtlasManager(): MSDFTextAtlasManager;
-    // (undocumented)
     readFile<T extends ReadOptions['encoding'] = 'binary'>(path: string, encoding?: T): Promise<(T extends "binary" ? ArrayBuffer : string) | null>;
     releaseFontAsset(font: string): boolean;
-    // (undocumented)
     render(): void;
     get resourceManager(): ResourceManager;
     get screen(): ScreenAdapter;
     get scriptingSystem(): ScriptingSystem;
-    // (undocumented)
-    setRenderable(renderable: Nullable<IRenderable>, layer?: number, hook?: IRenderHook): void;
-    // (undocumented)
+    setRenderable(renderable: Nullable<IRenderable | RenderFunc>, layer?: number, hook?: IRenderHook): void;
     startup(startupScene?: Nullable<string>, splashScreen?: Nullable<string>, startupScript?: Nullable<string>): Promise<void>;
     update(deltaTime: number, elapsedTime: number): void;
     get VFS(): VFS;
@@ -4954,6 +4968,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     getInstanceId(_renderPass: RenderPass): string;
     getInstanceUniforms(): Float32Array<ArrayBuffer>;
     getMaterial(): MeshMaterial | null;
+    getMorphBoundingInfo(): Nullable<MorphBoundingInfo>;
     getMorphData(): Nullable<MorphData>;
     getMorphInfo(): Nullable<MorphInfo>;
     getMorphTargetIndexByName(name: string): number;
@@ -4976,6 +4991,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     set primitive(prim: Primitive | null);
     setAnimatedBoundingBox(bbox: Nullable<BoundingBox>): void;
     setBoneMatrices(matrices: Nullable<Texture2D>): void;
+    setMorphBoundingInfo(info: Nullable<MorphBoundingInfo>): void;
     setMorphData(data: Nullable<MorphData>): void;
     setMorphInfo(info: Nullable<MorphInfo>): void;
     setMorphWeight(name: string, weight: number): void;
@@ -5173,6 +5189,14 @@ export const MORPH_TARGET_TEX3 = 7;
 
 // @public (undocumented)
 export const MORPH_WEIGHTS_VECTOR_COUNT: number;
+
+// @public
+export interface MorphBoundingInfo {
+    // (undocumented)
+    originBox: BoundingBox;
+    // (undocumented)
+    targetBoxes: BoundingBox[];
+}
 
 // @public
 export type MorphData = {
@@ -6670,6 +6694,9 @@ export class RenderContext {
     renderWidth: number;
 }
 
+// @public (undocumented)
+export type RenderFunc = () => void;
+
 // @public
 export class RenderGraph {
     addPass<T = void>(name: string, setup: (builder: RGPassBuilder) => T): T;
@@ -7195,6 +7222,30 @@ export class Scene extends Scene_base implements IRenderable {
     updateNodePlacement(octree: Octree, list: Set<GraphNode>): void;
 }
 
+// @public
+export interface SceneMorphTargetBinding {
+    // (undocumented)
+    mesh: Mesh;
+    // (undocumented)
+    targetIndex?: number;
+    // (undocumented)
+    targetName?: string;
+    // (undocumented)
+    weight: number;
+}
+
+// @public
+export interface SceneMorphTargetGroup {
+    // (undocumented)
+    bindings: SceneMorphTargetBinding[];
+    // (undocumented)
+    isBinary?: boolean;
+    // (undocumented)
+    name: string;
+    // (undocumented)
+    weight?: number;
+}
+
 // Warning: (ae-forgotten-export) The symbol "SceneNode_base" needs to be exported by the entry point index.d.ts
 //
 // @public
@@ -7214,6 +7265,7 @@ export class SceneNode extends SceneNode_base implements IDisposable {
     get clipTestEnabled(): boolean;
     set clipTestEnabled(val: boolean);
     clone(): Promise<this>;
+    collectMorphTargetGroupNames(): string[];
     collectMorphTargetNames(): string[];
     computeBoundingVolume(): Nullable<BoundingVolume>;
     get computedBoundingBoxDrawMode(): number;
@@ -7224,7 +7276,9 @@ export class SceneNode extends SceneNode_base implements IDisposable {
     findSkeletonRigById(id: string): SkeletonRig | null;
     findSkinBindingById(id: string): SkinBinding | null;
     getBoundingVolume(): Nullable<BoundingVolume>;
+    getMorphTargetGroupWeight(name: string): number;
     getPrefabNode(): Nullable<SceneNode>;
+    getSerializedMorphTargetGroups(): SerializedMorphTargetGroup[];
     getWorldBoundingVolume(): Nullable<BoundingVolume>;
     getWorldPosition(outPos?: Vector3): Vector3;
     get gpuPickable(): boolean;
@@ -7261,6 +7315,8 @@ export class SceneNode extends SceneNode_base implements IDisposable {
     lookAt(eye: Vector3, target: Vector3, up: Vector3): this;
     get metaData(): Nullable<Metadata_2>;
     set metaData(val: Nullable<Metadata_2>);
+    get morphTargetGroups(): SceneMorphTargetGroup[];
+    set morphTargetGroups(groups: SceneMorphTargetGroup[]);
     moveBy(delta: Vector3): this;
     get name(): string;
     set name(val: string);
@@ -7305,7 +7361,9 @@ export class SceneNode extends SceneNode_base implements IDisposable {
     set sealed(val: boolean);
     setBoundingVolume(bv: BoundingVolume): void;
     setLocalTransform(matrix: Matrix4x4): this;
+    setMorphTargetGroupWeight(name: string, weight: number): void;
     setMorphTargetWeight(name: string, weight: number): void;
+    setSerializedMorphTargetGroups(groups: SerializedMorphTargetGroup[]): void;
     get sharedModel(): Nullable<SharedModel>;
     set sharedModel(model: Nullable<SharedModel>);
     get showState(): SceneNodeVisible;
@@ -7490,6 +7548,30 @@ export type SerializableClass = {
     }) => any;
     getProps: () => PropertyAccessor<any>[];
 };
+
+// @public
+export interface SerializedMorphTargetBinding {
+    // (undocumented)
+    meshId: string;
+    // (undocumented)
+    targetIndex?: number;
+    // (undocumented)
+    targetName?: string;
+    // (undocumented)
+    weight: number;
+}
+
+// @public
+export interface SerializedMorphTargetGroup {
+    // (undocumented)
+    bindings: SerializedMorphTargetBinding[];
+    // (undocumented)
+    isBinary?: boolean;
+    // (undocumented)
+    name: string;
+    // (undocumented)
+    weight?: number;
+}
 
 // @public
 export class ShaderHelper {
@@ -7692,10 +7774,13 @@ export class SharedModel extends Disposable {
     get activeScene(): number;
     set activeScene(val: number);
     addAnimation(animation: AssetAnimationData): void;
+    addMorphTargetGroup(group: AssetMorphTargetGroup): void;
     // (undocumented)
     addPrimitive(prim: AssetPrimitiveInfo): void;
     addSkeleton(skeleton: AssetSkeleton): void;
     get animations(): AssetAnimationData[];
+    buildMorphTargetGroupsByName(): AssetMorphTargetGroup[];
+    clearMorphTargetGroups(): void;
     // (undocumented)
     createJointDynamics(rootNode: SceneNode, nodeMap: Map<AssetHierarchyNode, SceneNode>): void;
     // (undocumented)
@@ -7704,8 +7789,10 @@ export class SharedModel extends Disposable {
     getImage(index: number): AssetImageInfo;
     // (undocumented)
     getMaterial(hash: string): AssetMaterial;
+    getMorphTargetGroup(name: string): Nullable<AssetMorphTargetGroup>;
     get jointDynamicsColliders(): AssetJointDynamicsCollider[];
     get jointDynamicsSpringBones(): AssetJointDynamicsSpringBone[];
+    get morphTargetGroups(): AssetMorphTargetGroup[];
     get nodes(): AssetHierarchyNode[];
     // (undocumented)
     protected onDispose(): void;
