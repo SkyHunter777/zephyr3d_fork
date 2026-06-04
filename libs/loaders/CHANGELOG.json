@@ -1,0 +1,25 @@
+{
+  "name": "@zephyr3d/loaders",
+  "entries": [
+    {
+      "version": "0.1.1",
+      "tag": "@zephyr3d/loaders_v0.1.1",
+      "date": "Thu, 04 Jun 2026 07:58:17 GMT",
+      "comments": {
+        "patch": [
+          {
+            "comment": "Initial commit"
+          }
+        ],
+        "dependency": [
+          {
+            "comment": "Updating dependency \"@zephyr3d/base\" from `^0.2.5` to `0.2.6`"
+          },
+          {
+            "comment": "Updating dependency \"@zephyr3d/scene\" from `^0.9.4` to `0.9.5`"
+          }
+        ]
+      }
+    }
+  ]
+}

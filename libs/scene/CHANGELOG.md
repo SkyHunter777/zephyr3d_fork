@@ -1,6 +1,14 @@
 # Change Log - @zephyr3d/scene
 
-This log was last generated on Tue, 19 May 2026 07:41:46 GMT and should not be manually modified.
+This log was last generated on Thu, 04 Jun 2026 07:58:17 GMT and should not be manually modified.
+
+## 0.9.5
+Thu, 04 Jun 2026 07:58:17 GMT
+
+### Patches
+
+- Update resource management API
+- Improve text rendering support
 
 ## 0.9.4
 Tue, 19 May 2026 07:41:46 GMT

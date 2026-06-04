@@ -1,6 +1,14 @@
 # Change Log - @zephyr3d/editor
 
-This log was last generated on Tue, 19 May 2026 07:41:46 GMT and should not be manually modified.
+This log was last generated on Thu, 04 Jun 2026 07:58:17 GMT and should not be manually modified.
+
+## 0.3.3
+Thu, 04 Jun 2026 07:58:17 GMT
+
+### Patches
+
+- Integrate new loader API
+- Fix project compilation error
 
 ## 0.3.2
 Tue, 19 May 2026 07:41:46 GMT

@@ -1,6 +1,13 @@
 # Change Log - @zephyr3d/base
 
-This log was last generated on Tue, 19 May 2026 07:41:46 GMT and should not be manually modified.
+This log was last generated on Thu, 04 Jun 2026 07:58:17 GMT and should not be manually modified.
+
+## 0.2.6
+Thu, 04 Jun 2026 07:58:17 GMT
+
+### Patches
+
+- Add detection for absolute http/https URL while reading VFS files
 
 ## 0.2.5
 Tue, 19 May 2026 07:41:46 GMT
