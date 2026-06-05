@@ -2,6 +2,18 @@
   "name": "@zephyr3d/scene",
   "entries": [
     {
+      "version": "0.9.6",
+      "tag": "@zephyr3d/scene_v0.9.6",
+      "date": "Fri, 05 Jun 2026 10:56:10 GMT",
+      "comments": {
+        "patch": [
+          {
+            "comment": "Fixed otf font loading"
+          }
+        ]
+      }
+    },
+    {
       "version": "0.9.5",
       "tag": "@zephyr3d/scene_v0.9.5",
       "date": "Thu, 04 Jun 2026 07:58:17 GMT",
