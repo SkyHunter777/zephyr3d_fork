@@ -19,6 +19,7 @@
     - [基本框架](zh-cn/scene-basic.md)
     - [网格及材质](zh-cn/mesh-material.md)
     - [场景图及节点](zh-cn/scene-graph.md)
+    - [文本渲染](zh-cn/text-rendering.md)
   - 光照
     - [概述](zh-cn/lighting-intro.md)
     - [直接光照](zh-cn/lighting-direct.md)

@@ -134,9 +134,9 @@ export class MSDFTextMaterial extends MeshMaterial implements Clonable<MSDFTextM
       scope.zMSDFAtlasSize = pb.vec2().uniform(2);
       scope.zMSDFSmallGlyphThreshold = pb.float().uniform(2);
       scope.zMSDFOutlineWidth = pb.float().uniform(2);
-      scope.$l.sample = pb.textureSample(scope.zMSDFAtlas, scope.$inputs.zMSDFUV);
-      scope.$l.msdf = scope.sample.rgb;
-      scope.$l.sdf = scope.sample.a;
+      scope.$l.msdfSample = pb.textureSample(scope.zMSDFAtlas, scope.$inputs.zMSDFUV);
+      scope.$l.msdf = scope.msdfSample.rgb;
+      scope.$l.sdf = scope.msdfSample.a;
       scope.$l.sd = median3(pb, scope.msdf.r, scope.msdf.g, scope.msdf.b);
       scope.$l.unitRange = pb.div(
         pb.vec2(scope.zMSDFDistanceRange),

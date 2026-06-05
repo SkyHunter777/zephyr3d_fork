@@ -19,6 +19,7 @@
     - [Basic Framework](en/scene-basic.md)
     - [Meshes and Materials](en/mesh-material.md)
     - [Scene Graph And Nodes](en/scene-graph.md)
+    - [Text Rendering](en/text-rendering.md)
   - Lighting
     - [Overview](en/lighting-intro.md)
     - [Direct lighting](en/lighting-direct.md)
