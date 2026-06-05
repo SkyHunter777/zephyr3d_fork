@@ -1104,6 +1104,15 @@ export class GLTFImporter extends AbstractModelImporter {
       node.weights = nodeInfo.weights ?? null;
       if (typeof nodeInfo.mesh === 'number') {
         node.mesh = gltf._meshes[nodeInfo.mesh];
+        if (node.mesh && nodeInfo.name) {
+          const subMeshCount = node.mesh.subMeshes.length;
+          for (let i = 0; i < subMeshCount; i++) {
+            const primitive = node.mesh.subMeshes[i]?.primitive;
+            if (primitive) {
+              primitive.name = subMeshCount > 1 ? `${nodeInfo.name}_${i}` : nodeInfo.name;
+            }
+          }
+        }
         if (!node.mesh.morphNames && nodeInfo.extras?.targetNames) {
           node.mesh.morphNames = nodeInfo.extras.targetNames;
         }
@@ -1200,8 +1209,9 @@ export class GLTFImporter extends AbstractModelImporter {
       if (primitives) {
         for (let i = 0; i < primitives.length; i++) {
           const p = primitives[i];
+          const subMeshName = meshName ? (primitives.length > 1 ? `${meshName}_${i}` : meshName) : `mesh_${meshIndex}_${i}`;
           const subMeshData: AssetSubMeshData = {
-            name: `${meshName}-${i}`,
+            name: subMeshName,
             primitive: null,
             material: null,
             rawPositions: null,
@@ -1210,6 +1220,7 @@ export class GLTFImporter extends AbstractModelImporter {
             numTargets: 0
           };
           const primitive: AssetPrimitiveInfo = {
+            name: subMeshName,
             vertices: {} as any,
             type: 'triangle-list',
             indexCount: 0,
@@ -1358,6 +1369,7 @@ export class GLTFImporter extends AbstractModelImporter {
     useTangent: boolean,
     vfs: VFS
   ): Promise<AssetMaterial> {
+    const materialName = materialInfo?.name || 'material';
     let assetMaterial: Nullable<AssetMaterial> = null;
     let pbrMetallicRoughness: Nullable<AssetPBRMaterialMR> = null;
     let pbrSpecularGlossness: Nullable<AssetPBRMaterialSG> = null;
@@ -1404,6 +1416,7 @@ export class GLTFImporter extends AbstractModelImporter {
     }
     if (materialInfo?.pbrMetallicRoughness) {
       pbrMetallicRoughness = {
+        name: materialName,
         type: 'pbrMetallicRoughness',
         ior: 1.5,
         common: pbrCommon
@@ -1431,6 +1444,7 @@ export class GLTFImporter extends AbstractModelImporter {
     if (materialInfo?.extensions?.KHR_materials_pbrSpecularGlossiness) {
       const sg = materialInfo.extensions?.KHR_materials_pbrSpecularGlossiness;
       pbrSpecularGlossness = {
+        name: materialName,
         type: 'pbrSpecularGlossiness',
         ior: 1.5,
         common: pbrCommon
@@ -1449,6 +1463,7 @@ export class GLTFImporter extends AbstractModelImporter {
     if (!assetMaterial || materialInfo?.extensions?.KHR_materials_unlit) {
       if (materialInfo?.extensions?.KHR_materials_unlit) {
         assetMaterial = {
+          name: materialName,
           type: 'unlit',
           common: pbrCommon,
           diffuse: pbrMetallicRoughness?.diffuse ?? Vector4.one(),
@@ -1456,6 +1471,7 @@ export class GLTFImporter extends AbstractModelImporter {
         } as AssetUnlitMaterial;
       } else {
         assetMaterial = {
+          name: materialName,
           type: 'pbrMetallicRoughness',
           common: pbrCommon,
           diffuse: Vector4.one(),
@@ -1583,6 +1599,7 @@ export class GLTFImporter extends AbstractModelImporter {
     vfs: VFS
   ): Promise<AssetTextureInfo> {
     const mt: AssetTextureInfo = {
+      name: null,
       image: null,
       sampler: null,
       texCoord: info.texCoord ?? 0,
@@ -1609,6 +1626,7 @@ export class GLTFImporter extends AbstractModelImporter {
             : Vector3.zero();
         mt.transform = Matrix4x4.scaling(scale).multiplyLeft(rotation).translateLeft(translation);
       }
+      mt.name = textureInfo.name || null;
       let wrapS: TextureAddressMode = 'repeat';
       let wrapT: TextureAddressMode = 'repeat';
       let magFilter: TextureFilterMode = 'linear';
@@ -1682,6 +1700,7 @@ export class GLTFImporter extends AbstractModelImporter {
           if (image.uri) {
             const imageUrl = vfs.normalizePath(vfs.join(gltf._baseURI, image.uri));
             mt.image = {
+              name: image.name || textureInfo.name || null,
               uri: imageUrl
             };
           } else if (typeof image.bufferView === 'number' && image.mimeType) {
@@ -1692,6 +1711,7 @@ export class GLTFImporter extends AbstractModelImporter {
                 const view = new Uint8Array(arrayBuffer, bufferView.byteOffset || 0, bufferView.byteLength);
                 const mimeType = image.mimeType;
                 mt.image = {
+                  name: image.name || textureInfo.name || null,
                   data: view,
                   mimeType
                 };
