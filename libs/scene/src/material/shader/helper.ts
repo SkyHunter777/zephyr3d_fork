@@ -86,6 +86,7 @@ export class ShaderHelper {
     shadowCameraParams: new Vector4(),
     depthBiasScales: new Vector4(),
     shadowMatrices: new Float32Array(16 * 4),
+    shadowStrength: 1,
     envLightStrength: 1
   };
   /** @internal */
@@ -246,6 +247,7 @@ export class ShaderHelper {
             pb.vec4('shadowCameraParams'),
             pb.vec4('depthBiasScales'),
             pb.vec4[16]('shadowMatrices'),
+            pb.float('shadowStrength'),
             pb.float('envLightStrength')
           ])
         : pb.defineStruct([
@@ -903,6 +905,7 @@ export class ShaderHelper {
     this._lightUniformShadow.shadowCameraParams.set(shadowMapParams.cameraParams);
     this._lightUniformShadow.depthBiasScales.set(shadowMapParams.depthBiasScales);
     this._lightUniformShadow.shadowMatrices.set(shadowMapParams.shadowMatrices);
+    this._lightUniformShadow.shadowStrength = light.shadow.shadowStrength;
     this._lightUniformShadow.envLightStrength = ctx.env?.light.strength ?? 0;
     bindGroup.setValue('light', this._lightUniformShadow);
     bindGroup.setTexture(
@@ -1353,6 +1356,7 @@ export class ShaderHelper {
             pb.distance(that.getCameraPosition(this), this.worldPos)
           )
         );
+        this.shadow = pb.mix(1, this.shadow, this.light.shadowStrength);
         this.shadow = pb.clamp(this.shadow, 0, 1);
         this.$return(this.shadow);
       } else {
@@ -1375,6 +1379,7 @@ export class ShaderHelper {
             pb.distance(that.getCameraPosition(this), this.worldPos)
           )
         );
+        this.shadow = pb.mix(1, this.shadow, this.light.shadowStrength);
         this.shadow = pb.clamp(this.shadow, 0, 1);
         this.$return(this.shadow);
       }

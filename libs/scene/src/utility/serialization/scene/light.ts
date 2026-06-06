@@ -206,6 +206,26 @@ export function getPunctualLightClass(): SerializableClass {
           }
         },
         {
+          name: 'ShadowStrength',
+          description: 'Shadow strength, 0 means disabled and 1 means full effect',
+          type: 'float',
+          phase: 1,
+          default: 1,
+          options: {
+            minValue: 0,
+            maxValue: 1
+          },
+          get(this: PunctualLight, value) {
+            value.num[0] = this.shadow.shadowStrength;
+          },
+          set(this: PunctualLight, value) {
+            this.shadow.shadowStrength = value.num[0];
+          },
+          isValid(this: PunctualLight) {
+            return !!this.castShadow;
+          }
+        },
+        {
           name: 'ShadowCascades',
           description: 'Cascade count for CSM',
           type: 'int',

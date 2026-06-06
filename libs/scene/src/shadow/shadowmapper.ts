@@ -129,6 +129,8 @@ export class ShadowMapper {
   /** @internal */
   protected _esmDepthScale: number;
   /** @internal */
+  protected _shadowStrength: number;
+  /** @internal */
   protected _shadowRegion: Nullable<AABB>;
   /** @internal */
   protected _autoShadowRegion: boolean;
@@ -160,6 +162,7 @@ export class ShadowMapper {
     this._esmBlurKernelSize = 5;
     this._esmBlurRadius = 4;
     this._esmDepthScale = 200;
+    this._shadowStrength = 1;
     this._shadowRegion = null;
     this._autoShadowRegion = false;
     this.applyMode(this._shadowMode);
@@ -184,6 +187,7 @@ export class ShadowMapper {
     this.esmBlurKernelSize = other.esmBlurKernelSize;
     this.esmBlurRadius = other.esmBlurRadius;
     this.esmDepthScale = other.esmDepthScale;
+    this.shadowStrength = other.shadowStrength;
   }
   /** The light that is used to generate shadow map */
   get light() {
@@ -293,6 +297,13 @@ export class ShadowMapper {
     if (this._config.nearClip !== val) {
       this._config.nearClip = val;
     }
+  }
+  /** Shadow strength, 0 means no shadowing and 1 means full shadowing */
+  get shadowStrength() {
+    return this._shadowStrength;
+  }
+  set shadowStrength(val) {
+    this._shadowStrength = Math.min(1, Math.max(0, Number(val) || 0));
   }
   /** Shadow map mode */
   get mode() {
