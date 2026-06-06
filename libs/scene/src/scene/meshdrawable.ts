@@ -23,6 +23,9 @@ export class MeshDrawableBase extends Disposable {
     super();
     this._node = node;
   }
+  getName() {
+    return this._node.name;
+  }
   getNode() {
     return this._node;
   }
@@ -107,5 +110,9 @@ export class MeshDrawable<M extends MeshMaterial>
     super.onDispose();
     this._material.dispose();
     this._primitive.dispose();
+  }
+
+  getName() {
+    return this.getNode().name;
   }
 }

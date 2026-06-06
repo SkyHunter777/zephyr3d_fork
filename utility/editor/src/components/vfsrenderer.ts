@@ -1549,7 +1549,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     this.dispatchEvent('loaded');
   }
 
-  private queueFileSystemReload(preserveSelection = false) {
+  queueFileSystemReload(preserveSelection = false) {
     this._reloadQueued = true;
     this._reloadQueuedPreserveSelection = this._reloadQueuedPreserveSelection || preserveSelection;
     if (this._reloadTimer) {
@@ -1580,7 +1580,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     }
   }
 
-  private removePathsFromFileSystem(paths: string[]) {
+  removePathsFromFileSystem(paths: string[]) {
     if (!this._filesystem || !paths?.length) {
       return;
     }
