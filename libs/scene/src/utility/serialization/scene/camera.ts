@@ -1,6 +1,6 @@
 import { defineProps, type SerializableClass } from '../types';
-import type { CameraOITMode } from '../../../camera';
 import { Camera, OrthoCamera, PerspectiveCamera } from '../../../camera';
+import type { CameraOITMode, SSSDebugView, SSSQualityPreset } from '../../../camera';
 import { SceneNode } from '../../../scene';
 import {
   TAA_DEBUG_ALAPH,
@@ -28,7 +28,6 @@ export function getCameraClass(): SerializableClass {
       return defineProps([
         {
           name: 'UseScreenSettings',
-          description: 'Whether this camera is adapted to screen settings',
           type: 'bool',
           default: false,
           get(this: Camera, value) {
@@ -40,7 +39,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'DesignWidth',
-          description: 'Design width of screen settings',
           type: 'int',
           options: { minValue: 1 },
           default: 1280,
@@ -56,7 +54,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'DesignHeight',
-          description: 'Design height of screen settings',
           type: 'int',
           options: { minValue: 1 },
           default: 720,
@@ -72,8 +69,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'ScreenScaleMode',
-          description:
-            'Scale mode of screen settings, valid values are `fit` | `cover` | `stretch` | `fit-width` | `fit-height`',
           type: 'string',
           default: 'cover',
           options: {
@@ -94,7 +89,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'HDR',
-          description: 'If true, float point framebuffer will be used for rendering',
           type: 'bool',
           default: false,
           get(this: Camera, value) {
@@ -106,7 +100,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'HiZ',
-          description: 'If true, HiZ rendering pass will be enabled',
           type: 'bool',
           default: false,
           get(this: Camera, value) {
@@ -118,8 +111,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'OITMode',
-          description:
-            'Which OIT mode should be used for transparent rendering, valid values are `none` | `weighted` | `abuffer`',
           type: 'string',
           default: 'none',
           options: {
@@ -139,7 +130,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'ABufferLayers',
-          description: 'Maximum layers for abuffer OIT',
           type: 'int',
           default: 20,
           options: {
@@ -159,7 +149,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'ToneMapEnabled',
-          description: 'If true, tonemap post-processing will be enabled',
           type: 'bool',
           phase: 0,
           default: true,
@@ -176,7 +165,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'ToneMapExposure',
-          description: 'Exposure value for tonemapping',
           type: 'float',
           options: { minValue: 0, maxValue: 8, label: 'Exposure', group: 'PostProcessing/ToneMap' },
           phase: 0,
@@ -190,7 +178,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'ColorAdjustEnabled',
-          description: `If true, color adjust post-processing will be enabled`,
           type: 'bool',
           phase: 0,
           default: false,
@@ -207,7 +194,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'ColorAdjustSaturation',
-          description: 'Saturation value for color adjust post-processing',
           type: 'float',
           phase: 1,
           default: 1,
@@ -230,7 +216,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'ColorAdjustContrast',
-          description: 'Contrast value for color adjust post-processing',
           type: 'float',
           phase: 1,
           default: 1,
@@ -253,7 +238,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'ColorAdjustHue',
-          description: 'Hue value for color adjust post-processing',
           type: 'float',
           phase: 1,
           default: 0,
@@ -276,7 +260,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'Sharpen',
-          description: 'Sharpen value for color adjust post-processing',
           type: 'float',
           phase: 1,
           default: 0,
@@ -299,7 +282,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'BloomEnabled',
-          description: 'If true, bloom post-processing will be enabled',
           type: 'bool',
           phase: 0,
           default: true,
@@ -316,7 +298,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'BloomMaxDownsampleLevels',
-          description: 'Maximum downsample levels for bloom post-processing',
           type: 'int',
           options: { minValue: 0, maxValue: 8, label: 'MaxDownsampleLevels', group: 'PostProcessing/Bloom' },
           phase: 0,
@@ -330,7 +311,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'BloomDownsampleLimit',
-          description: 'Minimum downsample framebuffer resolution for bloom post-processing',
           type: 'int',
           options: { minValue: 2, maxValue: 64, label: 'DownsampleLimit', group: 'PostProcessing/Bloom' },
           phase: 0,
@@ -344,7 +324,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'BloomThreshold',
-          description: 'Color threshold for bloom post-processing',
           type: 'float',
           options: {
             animatable: true,
@@ -364,7 +343,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'BloomThresholdKnee',
-          description: 'Color threshold-knee value for bloom post-processing',
           type: 'float',
           options: {
             animatable: true,
@@ -384,7 +362,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'BloomIntensity',
-          description: 'Intensity value for bloom post-processing',
           type: 'float',
           options: {
             animatable: true,
@@ -404,7 +381,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'FXAAEnabled',
-          description: 'If true, FXAA post-processing will be enabled',
           type: 'bool',
           phase: 0,
           default: true,
@@ -421,7 +397,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'TAAEnabled',
-          description: 'If true, TAA post-processing will be enabled',
           type: 'bool',
           phase: 0,
           default: false,
@@ -438,7 +413,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'TAADebug',
-          description: 'Debug channel for TAA post-processing',
           type: 'int',
           phase: 1,
           options: {
@@ -480,7 +454,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'MotionBlurEnabled',
-          description: 'If true, motion blur post-processing will be enabled',
           type: 'bool',
           phase: 0,
           default: false,
@@ -497,7 +470,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'MotionBlurStrength',
-          description: 'Strength value for motion blur post-processing',
           type: 'float',
           phase: 1,
           default: 1,
@@ -520,7 +492,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSREnabled',
-          description: 'If true, SSR post-processing will be enabled',
           type: 'bool',
           phase: 0,
           default: false,
@@ -537,7 +508,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSRMaxRoughness',
-          description: 'Maximum roughness value for SSR post-processing',
           type: 'float',
           phase: 1,
           default: 0.8,
@@ -559,7 +529,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSRRoughnessFactor',
-          description: 'Global roughness multiplier for debugging',
           type: 'float',
           phase: 1,
           default: 1.0,
@@ -581,7 +550,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSRStride',
-          description: 'How many pixels per step for screen-space ray tracing, no effect if HiZ is enabled',
           type: 'int',
           phase: 1,
           default: 2,
@@ -603,7 +571,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSRMaxDistance',
-          description: 'Maximum distance in pixels for screen-space ray tracing',
           type: 'float',
           phase: 1,
           default: 100,
@@ -625,7 +592,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSRMaxSteps',
-          description: 'Maximum steps for screen-space ray tracing',
           type: 'int',
           phase: 1,
           default: 120,
@@ -647,7 +613,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSRThickness',
-          description: 'Thickness value for screen-space ray tracing',
           type: 'float',
           phase: 1,
           default: 0.5,
@@ -669,7 +634,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSRBlurScale',
-          description: 'Scale value of bilateral blur for SSR post-processing',
           phase: 1,
           type: 'float',
           default: 0.01,
@@ -691,7 +655,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSRBlurDepthCutoff',
-          description: 'Depth cutoff of bilateral blur for SSR post-processing',
           phase: 1,
           type: 'float',
           default: 2,
@@ -713,7 +676,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSRBlurKernelSize',
-          description: 'Kernel size of bilateral blur for SSR post-processing',
           type: 'int',
           phase: 1,
           default: 10,
@@ -735,7 +697,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSRBlurStdDev',
-          description: 'Stddev of bilateral blur for SSR post-processing',
           type: 'float',
           phase: 1,
           default: 10,
@@ -757,7 +718,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSRCalcThickness',
-          description: 'If true, automatically calculate thickness for screen-space ray tracing',
           type: 'bool',
           phase: 1,
           default: false,
@@ -776,8 +736,305 @@ export function getCameraClass(): SerializableClass {
           }
         },
         {
+          name: 'SSRHiZFallback',
+          type: 'bool',
+          phase: 1,
+          default: true,
+          options: {
+            label: 'HiZFallback',
+            group: 'PostProcessing/SSR'
+          },
+          get(this: Camera, value) {
+            value.bool[0] = this.ssrHiZFallback;
+          },
+          set(this: Camera, value) {
+            this.ssrHiZFallback = value.bool[0];
+          },
+          isValid(this: Camera) {
+            return this.SSR && this.HiZ;
+          }
+        },
+        {
+          name: 'SSRHiZFallbackSteps',
+          type: 'int',
+          phase: 1,
+          default: 24,
+          options: {
+            label: 'FallbackSteps',
+            group: 'PostProcessing/SSR',
+            minValue: 1,
+            maxValue: 512
+          },
+          get(this: Camera, value) {
+            value.num[0] = this.ssrHiZFallbackSteps;
+          },
+          set(this: Camera, value) {
+            this.ssrHiZFallbackSteps = value.num[0];
+          },
+          isValid(this: Camera) {
+            return this.SSR && this.HiZ && this.ssrHiZFallback;
+          }
+        },
+        {
+          name: 'SSRHiZFallbackStride',
+          type: 'float',
+          phase: 1,
+          default: 1,
+          options: {
+            label: 'FallbackStride',
+            group: 'PostProcessing/SSR',
+            minValue: 1,
+            maxValue: 8
+          },
+          get(this: Camera, value) {
+            value.num[0] = this.ssrHiZFallbackStride;
+          },
+          set(this: Camera, value) {
+            this.ssrHiZFallbackStride = value.num[0];
+          },
+          isValid(this: Camera) {
+            return this.SSR && this.HiZ && this.ssrHiZFallback;
+          }
+        },
+        {
+          name: 'SSRTemporal',
+          type: 'bool',
+          phase: 1,
+          default: true,
+          options: {
+            label: 'Temporal',
+            group: 'PostProcessing/SSR'
+          },
+          get(this: Camera, value) {
+            value.bool[0] = this.ssrTemporal;
+          },
+          set(this: Camera, value) {
+            this.ssrTemporal = value.bool[0];
+          },
+          isValid(this: Camera) {
+            return this.SSR;
+          }
+        },
+        {
+          name: 'SSRTemporalWeight',
+          type: 'float',
+          phase: 1,
+          default: 0.85,
+          options: {
+            label: 'TemporalWeight',
+            group: 'PostProcessing/SSR',
+            minValue: 0,
+            maxValue: 1
+          },
+          get(this: Camera, value) {
+            value.num[0] = this.ssrTemporalWeight;
+          },
+          set(this: Camera, value) {
+            this.ssrTemporalWeight = value.num[0];
+          },
+          isValid(this: Camera) {
+            return this.SSR && this.ssrTemporal;
+          }
+        },
+        {
+          name: 'SSSEnabled',
+          type: 'bool',
+          phase: 0,
+          default: false,
+          options: {
+            label: 'Enabled',
+            group: 'PostProcessing/SSS'
+          },
+          get(this: Camera, value) {
+            value.bool[0] = this.SSS;
+          },
+          set(this: Camera, value) {
+            this.SSS = value.bool[0];
+          }
+        },
+        {
+          name: 'SSSQualityPreset',
+          type: 'string',
+          phase: 0,
+          default: 'balanced',
+          options: {
+            label: 'QualityPreset',
+            group: 'PostProcessing/SSS',
+            enum: {
+              labels: ['Quality', 'Balanced', 'Performance'],
+              values: ['quality', 'balanced', 'performance']
+            }
+          },
+          get(this: Camera, value) {
+            value.str[0] = this.sssQualityPreset;
+          },
+          set(this: Camera, value) {
+            this.sssQualityPreset = value.str[0] as SSSQualityPreset;
+          },
+          isValid(this: Camera) {
+            return this.SSS;
+          }
+        },
+        {
+          name: 'SSSBlurScale',
+          type: 'float',
+          phase: 0,
+          default: 11,
+          options: {
+            label: 'BlurScale',
+            group: 'PostProcessing/SSS',
+            minValue: 0,
+            maxValue: 64
+          },
+          get(this: Camera, value) {
+            value.num[0] = this.sssBlurScale;
+          },
+          set(this: Camera, value) {
+            this.sssBlurScale = value.num[0];
+          },
+          isValid(this: Camera) {
+            return this.SSS;
+          }
+        },
+        {
+          name: 'SSSStrength',
+          type: 'float',
+          phase: 0,
+          default: 0.65,
+          options: {
+            label: 'Strength',
+            group: 'PostProcessing/SSS',
+            minValue: 0,
+            maxValue: 4
+          },
+          get(this: Camera, value) {
+            value.num[0] = this.sssStrength;
+          },
+          set(this: Camera, value) {
+            this.sssStrength = value.num[0];
+          },
+          isValid(this: Camera) {
+            return this.SSS;
+          }
+        },
+        {
+          name: 'SSSTransmissionStrength',
+          type: 'float',
+          phase: 0,
+          default: 0.18,
+          options: {
+            label: 'Transmission',
+            group: 'PostProcessing/SSS',
+            minValue: 0,
+            maxValue: 4
+          },
+          get(this: Camera, value) {
+            value.num[0] = this.sssTransmissionStrength;
+          },
+          set(this: Camera, value) {
+            this.sssTransmissionStrength = value.num[0];
+          },
+          isValid(this: Camera) {
+            return this.SSS;
+          }
+        },
+        {
+          name: 'SSSTransmissionPower',
+          type: 'float',
+          phase: 0,
+          default: 2.1,
+          options: {
+            label: 'TransmissionPower',
+            group: 'PostProcessing/SSS',
+            minValue: 0.1,
+            maxValue: 8
+          },
+          get(this: Camera, value) {
+            value.num[0] = this.sssTransmissionPower;
+          },
+          set(this: Camera, value) {
+            this.sssTransmissionPower = value.num[0];
+          },
+          isValid(this: Camera) {
+            return this.SSS;
+          }
+        },
+        {
+          name: 'SSSMultiScatter',
+          type: 'float',
+          phase: 0,
+          default: 0.08,
+          options: {
+            label: 'MultiScatter',
+            group: 'PostProcessing/SSS',
+            minValue: 0,
+            maxValue: 2
+          },
+          get(this: Camera, value) {
+            value.num[0] = this.sssMultiScatter;
+          },
+          set(this: Camera, value) {
+            this.sssMultiScatter = value.num[0];
+          },
+          isValid(this: Camera) {
+            return this.SSS;
+          }
+        },
+        {
+          name: 'SSSDebugView',
+          type: 'string',
+          phase: 0,
+          default: 'none',
+          options: {
+              label: 'DebugView',
+              group: 'PostProcessing/SSS',
+              enum: {
+              labels: [
+                'None',
+                'ScatterMask',
+                'ScatterSoftness',
+                'ScatterRadius',
+                'ScatterFalloff',
+                'ProfileEnergy',
+                'ProfileTransmission',
+                'ProfileBoundary',
+                'Diffuse',
+                'Blur',
+                'ScreenThinness',
+                'ThinTransmissionMask',
+                'ThinLighting',
+                'TransmissionShadow'
+              ],
+              values: [
+                'none',
+                'scatter_mask',
+                'scatter_softness',
+                'scatter_radius',
+                'scatter_falloff',
+                'profile_energy',
+                'profile_transmission',
+                'profile_boundary',
+                'diffuse',
+                'blur',
+                'screen_thinness',
+                'thin_transmission_mask',
+                'thin_lighting',
+                'transmission_shadow'
+              ]
+              }
+            },
+          get(this: Camera, value) {
+            value.str[0] = this.sssDebugView;
+          },
+          set(this: Camera, value) {
+            this.sssDebugView = value.str[0] as SSSDebugView;
+          },
+          isValid(this: Camera) {
+            return this.SSS;
+          }
+        },
+        {
           name: 'SSAOEnabled',
-          description: 'If true, SAO post-processing will be enabled',
           type: 'bool',
           phase: 0,
           default: false,
@@ -794,7 +1051,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSAOScale',
-          description: 'Scale value for SAO post-processing',
           type: 'float',
           phase: 0,
           default: 10,
@@ -811,7 +1067,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSAOBias',
-          description: 'Bias value for SAO post-processing',
           type: 'float',
           phase: 0,
           default: 1,
@@ -828,7 +1083,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSAORadius',
-          description: 'Radius value for SAO post-processing',
           type: 'float',
           phase: 0,
           default: 100,
@@ -845,7 +1099,6 @@ export function getCameraClass(): SerializableClass {
         },
         {
           name: 'SSAOIntensity',
-          description: 'Intensity value for SAO post-processing',
           type: 'float',
           phase: 0,
           default: 2.5,
@@ -880,7 +1133,6 @@ export function getPerspectiveCameraClass(): SerializableClass {
       return defineProps([
         {
           name: 'FovVertical',
-          description: 'Vertical FOV in radians',
           type: 'float',
           default: Math.PI / 3,
           options: {
@@ -896,7 +1148,6 @@ export function getPerspectiveCameraClass(): SerializableClass {
         },
         {
           name: 'Near',
-          description: 'Near clip plane',
           type: 'float',
           default: 1,
           get(this: PerspectiveCamera, value) {
@@ -908,7 +1159,6 @@ export function getPerspectiveCameraClass(): SerializableClass {
         },
         {
           name: 'Far',
-          description: 'Far clip plane',
           type: 'float',
           default: 1000,
           get(this: PerspectiveCamera, value) {
@@ -920,7 +1170,6 @@ export function getPerspectiveCameraClass(): SerializableClass {
         },
         {
           name: 'AutoAspect',
-          description: 'If true, automatically determine aspect ratio',
           type: 'bool',
           default: true,
           get(this: PerspectiveCamera, value) {
@@ -950,7 +1199,6 @@ export function getOrthoCameraClass(): SerializableClass {
       return defineProps([
         {
           name: 'Left',
-          description: 'Left clip plane',
           type: 'float',
           default: -1,
           get(this: OrthoCamera, value) {
@@ -962,7 +1210,6 @@ export function getOrthoCameraClass(): SerializableClass {
         },
         {
           name: 'Right',
-          description: 'Right clip plane',
           type: 'float',
           default: 1,
           get(this: OrthoCamera, value) {
@@ -974,7 +1221,6 @@ export function getOrthoCameraClass(): SerializableClass {
         },
         {
           name: 'Bottom',
-          description: 'Bottom clip plane',
           type: 'float',
           default: -1,
           get(this: OrthoCamera, value) {
@@ -986,7 +1232,6 @@ export function getOrthoCameraClass(): SerializableClass {
         },
         {
           name: 'Top',
-          description: 'Top clip plane',
           type: 'float',
           default: 1,
           get(this: OrthoCamera, value) {
@@ -998,7 +1243,6 @@ export function getOrthoCameraClass(): SerializableClass {
         },
         {
           name: 'Near',
-          description: 'Near clip plane',
           type: 'float',
           default: -1,
           get(this: OrthoCamera, value) {
@@ -1010,7 +1254,6 @@ export function getOrthoCameraClass(): SerializableClass {
         },
         {
           name: 'Far',
-          description: 'Far clip plane',
           type: 'float',
           default: 1,
           get(this: OrthoCamera, value) {
