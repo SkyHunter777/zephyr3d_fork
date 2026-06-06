@@ -3,7 +3,7 @@ import { hasDepthChannel } from '@zephyr3d/device';
 import { LIGHT_TYPE_DIRECTIONAL, LIGHT_TYPE_POINT, LIGHT_TYPE_RECT, LIGHT_TYPE_SPOT } from '../values';
 import { decode2HalfFromRGBA, decodeNormalizedFloatFromRGBA, encodeNormalizedFloatToRGBA } from './misc';
 import { ShaderHelper } from '../material/shader/helper';
-import { interleavedGradientNoise } from './noise';
+import { smoothNoise3D } from './noise';
 import { getDevice } from '../app/api';
 
 /*
@@ -211,15 +211,15 @@ export function computeReceiverPlaneDepthBias(scope: PBInsideFunctionScope, texC
   return pb.getGlobalScope()[funcNameComputeReceiverPlaneDepthBias](texCoord) as PBShaderExp;
 }
 
-function getRandomRotationMatrix(scope: PBInsideFunctionScope, fragCoord: PBShaderExp) {
+function getRandomRotationMatrix(scope: PBInsideFunctionScope, sampleCoord: PBShaderExp) {
   const funcNameGetRandomRotationMatrix = 'lib_getRandomRotationMatrix';
   const pb = scope.$builder;
-  pb.func(funcNameGetRandomRotationMatrix, [pb.vec2('fragCoord')], function () {
-    this.$l.randomAngle = pb.mul(interleavedGradientNoise(this, fragCoord), 2 * Math.PI);
+  pb.func(funcNameGetRandomRotationMatrix, [pb.vec2('sampleCoord')], function () {
+    this.$l.randomAngle = pb.mul(smoothNoise3D(this, pb.vec3(pb.mul(this.sampleCoord, 0.35), 0)), 2 * Math.PI);
     this.$l.randomBase = pb.vec2(pb.cos(this.randomAngle), pb.sin(this.randomAngle));
     this.$return(pb.mat2(this.randomBase.x, this.randomBase.y, pb.neg(this.randomBase.y), this.randomBase.x));
   });
-  return pb.getGlobalScope()[funcNameGetRandomRotationMatrix](fragCoord) as PBShaderExp;
+  return pb.getGlobalScope()[funcNameGetRandomRotationMatrix](sampleCoord) as PBShaderExp;
 }
 
 function getPoissonDiscSampleRadius(scope: PBInsideFunctionScope) {
@@ -234,7 +234,7 @@ function sampleShadowMapPCF(
   depth: PBShaderExp,
   cascade?: PBShaderExp
 ) {
-  const funcName = cascade ? 'lib_sampleShadowMapCascadePCF' : 'lib_sampleShadowMapPCF';
+  const funcName = `${cascade ? 'lib_sampleShadowMapCascadePCF' : 'lib_sampleShadowMapPCF'}_${shadowMapFormat}`;
   const pb = scope.$builder;
   const nativeShadowMap = hasDepthChannel(shadowMapFormat);
   pb.func(
@@ -277,7 +277,7 @@ function sampleShadowMap(
   depth: PBShaderExp,
   cascade?: PBShaderExp
 ) {
-  const funcNameSampleShadowMap = 'lib_sampleShadowMap';
+  const funcNameSampleShadowMap = `lib_sampleShadowMap_${lightType}_${shadowMapFormat}_${cascade ? 1 : 0}`;
   const pb = scope.$builder;
   const nativeShadowMap = hasDepthChannel(shadowMapFormat);
   pb.func(
@@ -329,6 +329,59 @@ function sampleShadowMap(
     cascade
       ? pb.getGlobalScope()[funcNameSampleShadowMap](pos, depth, cascade)
       : pb.getGlobalScope()[funcNameSampleShadowMap](pos, depth)
+  ) as PBShaderExp;
+}
+
+function sampleShadowMapPoissonTap(
+  scope: PBInsideFunctionScope,
+  lightType: number,
+  shadowMapFormat: TextureFormat,
+  pos: PBShaderExp,
+  depth: PBShaderExp,
+  filterRadius: PBShaderExp,
+  cascade?: PBShaderExp
+) {
+  const funcName = `lib_sampleShadowMapPoissonTap_${lightType}_${shadowMapFormat}_${cascade ? 1 : 0}`;
+  const pb = scope.$builder;
+  pb.func(
+    funcName,
+    [pb.vec2('coords'), pb.float('z'), pb.float('filterRadius'), ...(cascade ? [pb.int('cascade')] : [])],
+    function () {
+      this.$l.tap = pb.float(0);
+      this.$l.tapCoord = pb.vec2();
+      this.$l.tapInside = pb.bool();
+      const offsets = [
+        [-0.375, -0.375],
+        [0.375, -0.375],
+        [-0.375, 0.375],
+        [0.375, 0.375]
+      ];
+      for (const [ox, oy] of offsets) {
+        this.tapCoord = pb.add(this.coords, pb.mul(pb.vec2(ox, oy), this.filterRadius));
+        this.tapInside = pb.all(
+          pb.bvec4(
+            pb.greaterThanEqual(this.tapCoord.x, 0),
+            pb.lessThanEqual(this.tapCoord.x, 1),
+            pb.greaterThanEqual(this.tapCoord.y, 0),
+            pb.lessThanEqual(this.tapCoord.y, 1)
+          )
+        );
+        this.$if(this.tapInside, function () {
+          this.tap = pb.add(
+            this.tap,
+            sampleShadowMap(this, lightType, shadowMapFormat, this.tapCoord, this.z, this.cascade)
+          );
+        }).$else(function () {
+          this.tap = pb.add(this.tap, 1);
+        });
+      }
+      this.$return(pb.mul(this.tap, 0.25));
+    }
+  );
+  return (
+    cascade
+      ? pb.getGlobalScope()[funcName](pos, depth, filterRadius, cascade)
+      : pb.getGlobalScope()[funcName](pos, depth, filterRadius)
   ) as PBShaderExp;
 }
 
@@ -1002,7 +1055,7 @@ export function filterShadowPoissonDisc(
   receiverPlaneDepthBias?: PBShaderExp,
   cascade?: PBShaderExp
 ) {
-  const funcNameFilterShadowPoissonDisc = 'lib_filterShadowPoissonDisc';
+  const funcNameFilterShadowPoissonDisc = `lib_filterShadowPoissonDisc_${lightType}_${shadowMapFormat}_${tapCount}_${receiverPlaneDepthBias ? 1 : 0}_${cascade ? 1 : 0}`;
   const pb = scope.$builder;
   pb.func(
     funcNameFilterShadowPoissonDisc,
@@ -1017,28 +1070,48 @@ export function filterShadowPoissonDisc(
         this.lightDepth = pb.sub(this.lightDepth, this.receiverPlaneDepthBias.z);
       }
       this.$l.duv = pb.vec2();
+      this.$l.sampleCoord = pb.vec2();
+      this.$l.sampleInside = pb.bool();
+      this.$l.tapFilterRadius = pb.mul(getShadowMapTexelSize(this), 0.85);
       this.$l.filterRadius = pb.mul(getShadowMapTexelSize(this), getPoissonDiscSampleRadius(this));
-      this.$l.matrix = getRandomRotationMatrix(this, this.$builtins.fragCoord.xy);
+      this.$l.matrix = getRandomRotationMatrix(
+        this,
+        pb.mul(this.texCoord.xy, pb.vec2(getShadowMapSize(this)))
+      );
       this.$l.shadow = pb.float(0);
       for (let i = 0; i < tapCount; i++) {
         this.duv = pb.mul(
           this.matrix,
           pb.mul(pb.vec2(PCF_POISSON_DISC[i][0], PCF_POISSON_DISC[i][1]), this.filterRadius)
         );
-        const sampleDepth = receiverPlaneDepthBias
-          ? pb.add(this.lightDepth, pb.dot(this.duv, this.receiverPlaneDepthBias.xy))
-          : this.lightDepth;
-        this.shadow = pb.add(
-          this.shadow,
-          sampleShadowMap(
-            this,
-            lightType,
-            shadowMapFormat,
-            pb.add(this.texCoord.xy, this.duv),
-            sampleDepth,
-            this.cascade
+        this.sampleCoord = pb.add(this.texCoord.xy, this.duv);
+        this.sampleInside = pb.all(
+          pb.bvec4(
+            pb.greaterThanEqual(this.sampleCoord.x, 0),
+            pb.lessThanEqual(this.sampleCoord.x, 1),
+            pb.greaterThanEqual(this.sampleCoord.y, 0),
+            pb.lessThanEqual(this.sampleCoord.y, 1)
           )
         );
+        this.$if(this.sampleInside, function () {
+          const sampleDepth = receiverPlaneDepthBias
+            ? pb.add(this.lightDepth, pb.dot(this.duv, this.receiverPlaneDepthBias.xy))
+            : this.lightDepth;
+          this.shadow = pb.add(
+            this.shadow,
+            sampleShadowMapPoissonTap(
+              this,
+              lightType,
+              shadowMapFormat,
+              this.sampleCoord.xy,
+              sampleDepth,
+              this.tapFilterRadius,
+              this.cascade
+            )
+          );
+        }).$else(function () {
+          this.shadow = pb.add(this.shadow, 1);
+        });
       }
       this.shadow = pb.div(this.shadow, tapCount);
       this.$return(this.shadow);

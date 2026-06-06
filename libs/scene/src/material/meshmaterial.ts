@@ -124,6 +124,7 @@ export type InstanceUniformType = 'float' | 'vec2' | 'vec3' | 'vec4' | 'rgb' | '
  * @public
  */
 export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
+  private static readonly SHADER_VERSION = 3;
   /**
    * Registered instance uniforms for this material class.
    *
@@ -780,7 +781,9 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
    * @internal
    */
   protected _createHash() {
-    return this._featureStates.map((val) => (val === undefined ? '' : val)).join('|');
+    return `${MeshMaterial.SHADER_VERSION}|${this._featureStates
+      .map((val) => (val === undefined ? '' : val))
+      .join('|')}`;
   }
   /**
    * Apply material uniforms to the bind group (set 2).
@@ -942,7 +945,39 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
     const funcName = 'Z_outputFragmentColor';
     const alphaClipFuncName = 'Z_shouldDiscardAlpha';
     pb.func(alphaClipFuncName, [pb.float('alpha'), pb.float('cutoff')], function () {
-      if (that.featureUsed<boolean>(FEATURE_ALPHADITHER) && !that.isTransparentPass(that.pass)) {
+      const shadowAlphaClip =
+        that.drawContext.renderPass!.type === RENDER_PASS_TYPE_SHADOWMAP && !that.isTransparentPass(that.pass);
+      if (shadowAlphaClip) {
+        if (!pb.getGlobalScope().Z_shadowDither4x4) {
+          pb.getGlobalScope().Z_shadowDither4x4 = [
+            pb.float(0 / 16),
+            pb.float(8 / 16),
+            pb.float(2 / 16),
+            pb.float(10 / 16),
+            pb.float(12 / 16),
+            pb.float(4 / 16),
+            pb.float(14 / 16),
+            pb.float(6 / 16),
+            pb.float(3 / 16),
+            pb.float(11 / 16),
+            pb.float(1 / 16),
+            pb.float(9 / 16),
+            pb.float(15 / 16),
+            pb.float(7 / 16),
+            pb.float(13 / 16),
+            pb.float(5 / 16)
+          ];
+        }
+        this.$l.alphaWidth = pb.max(pb.fwidth(this.alpha), 1e-4);
+        this.$l.coverage = pb.clamp(
+          pb.add(pb.div(pb.sub(this.alpha, this.cutoff), this.alphaWidth), 0.5),
+          0,
+          1
+        );
+        this.$l.pixel = pb.mod(pb.floor(this.$builtins.fragCoord.xy), pb.vec2(4));
+        this.$l.noise = this.Z_shadowDither4x4.at(pb.uint(pb.add(pb.mul(this.pixel.y, 4), this.pixel.x)));
+        this.$return(pb.lessThan(this.coverage, this.noise));
+      } else if (that.featureUsed<boolean>(FEATURE_ALPHADITHER) && !that.isTransparentPass(that.pass)) {
         this.$l.frame = pb.float(ShaderHelper.getFramestamp(this));
         this.$l.phase = pb.add(
           this.$builtins.fragCoord.xy,

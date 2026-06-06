@@ -147,12 +147,12 @@ export class ShadowMapper {
       nearClip: 1
     };
     this._resourceDirty = true;
-    this._shadowMode = 'hard';
+    this._shadowMode = 'pcf-pd';
     this._shadowDistance = 2000;
     this._impl = null;
-    this._pdSampleCount = 12;
-    this._pdSampleRadius = 4;
-    this._pcfKernelSize = 5;
+    this._pdSampleCount = 24;
+    this._pdSampleRadius = 3;
+    this._pcfKernelSize = 7;
     this._vsmBlurKernelSize = 5;
     this._vsmBlurRadius = 4;
     this._vsmDarkness = 0.3;
