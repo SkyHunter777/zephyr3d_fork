@@ -3,7 +3,12 @@ import { Vector3, Vector4, DWeakRef } from '@zephyr3d/base';
 import { GraphNode } from './graph_node';
 import { BoundingBox } from '../utility/bounding_volume';
 import { ShadowMapper } from '../shadow/shadowmapper';
-import { LIGHT_TYPE_DIRECTIONAL, LIGHT_TYPE_POINT, LIGHT_TYPE_SPOT, LIGHT_TYPE_RECT } from '../values';
+import {
+  LIGHT_TYPE_DIRECTIONAL,
+  LIGHT_TYPE_POINT,
+  LIGHT_TYPE_SPOT,
+  LIGHT_TYPE_RECT
+} from '../values';
 import type { Scene } from './scene';
 
 /**
@@ -173,11 +178,11 @@ export abstract class AmbientLight extends BaseLight {
  */
 export class PunctualLight extends BaseLight {
   /** @internal */
-  protected _color: Vector4;
+  protected _color!: Vector4;
   /** @internal */
-  protected _castShadow: boolean;
+  protected _castShadow!: boolean;
   /** @internal */
-  protected _shadowMapper: ShadowMapper;
+  protected _shadowMapper!: ShadowMapper;
   /**
    * Creates an instance of punctual light
    * @param scene - The scene to which the punctual light belongs
@@ -185,12 +190,23 @@ export class PunctualLight extends BaseLight {
    */
   constructor(scene: Scene, type: number) {
     super(scene, type);
-    this._color = Vector4.one();
-    this._castShadow = false;
-    this._shadowMapper = new ShadowMapper(this);
+    this.ensurePunctualState();
+  }
+  /** @internal */
+  protected ensurePunctualState() {
+    if (!this._color) {
+      this._color = Vector4.one();
+    }
+    if (this._castShadow == null) {
+      this._castShadow = false;
+    }
+    if (!this._shadowMapper) {
+      this._shadowMapper = new ShadowMapper(this);
+    }
   }
   /** Color of the light */
   get color() {
+    this.ensurePunctualState();
     return this._color.clone();
   }
   set color(color) {
@@ -202,12 +218,14 @@ export class PunctualLight extends BaseLight {
    * @returns self
    */
   setColor(color: Vector4 | Vector3) {
+    this.ensurePunctualState();
     this._color.set(color);
     this.invalidateUniforms();
     return this;
   }
   /** Whether this light casts shadows */
   get castShadow() {
+    this.ensurePunctualState();
     return this._castShadow;
   }
   set castShadow(b) {
@@ -218,7 +236,8 @@ export class PunctualLight extends BaseLight {
    * @param b - true if the light casts shadows
    * @returns self
    */
-  setCastShadow(b: boolean): this {
+  setCastShadow(b: boolean) {
+    this.ensurePunctualState();
     if (this._castShadow !== !!b) {
       this._castShadow = !!b;
       if (this._castShadow && this.isDirectionLight() && !this.shadow.shadowRegion) {
@@ -229,6 +248,7 @@ export class PunctualLight extends BaseLight {
   }
   /** The shadow mapper for this light */
   get shadow() {
+    this.ensurePunctualState();
     return this._shadowMapper;
   }
   /**
@@ -626,12 +646,7 @@ export class PointLight extends PunctualLight {
     this._positionRange = new Vector4(a.x, a.y, a.z, this.range);
     this._directionCutoff = new Vector4(b.x, b.y, b.z, -1);
     this._diffuseIntensity = new Vector4(this.color.x, this.color.y, this.color.z, this.intensity);
-    this._extraParams = new Vector4(
-      this._diffuseScale,
-      this._specularScale,
-      this._sourceRadius,
-      this.lightType
-    );
+    this._extraParams = new Vector4(this._diffuseScale, this._specularScale, this._sourceRadius, this.lightType);
   }
 }
 
@@ -829,14 +844,8 @@ export class RectLight extends PunctualLight {
   /** @internal */
   computeUniforms() {
     const pos = this.worldMatrix.getRow(3);
-    const axisX = this.worldMatrix
-      .getRow(0)
-      .inplaceNormalize()
-      .scaleBy(this._width * 0.5);
-    const axisY = this.worldMatrix
-      .getRow(1)
-      .inplaceNormalize()
-      .scaleBy(this._height * 0.5);
+    const axisX = this.worldMatrix.getRow(0).inplaceNormalize().scaleBy(this._width * 0.5);
+    const axisY = this.worldMatrix.getRow(1).inplaceNormalize().scaleBy(this._height * 0.5);
     this._positionRange = new Vector4(pos.x, pos.y, pos.z, this.range);
     this._directionCutoff = new Vector4(axisX.x, axisX.y, axisX.z, 0);
     this._diffuseIntensity = new Vector4(this.color.x, this.color.y, this.color.z, this.intensity);

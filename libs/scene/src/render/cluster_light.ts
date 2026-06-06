@@ -1,5 +1,6 @@
 import type { Nullable } from '@zephyr3d/base';
 import { Vector4 } from '@zephyr3d/base';
+import { MAX_CLUSTERED_LIGHTS } from '../values';
 import type {
   AbstractDevice,
   BindGroup,
@@ -35,7 +36,7 @@ export class ClusteredLight {
     this._tileCountX = 16;
     this._tileCountY = 16;
     this._tileCountZ = 32;
-    this._lights = new Float32Array(16 * (ShaderHelper.getMaxClusteredLightCount() + 1));
+    this._lights = new Float32Array(16 * (MAX_CLUSTERED_LIGHTS + 1));
     this._lightIndexTexture = null;
     this._lightIndexFramebuffer = null;
     this._lightIndexProgram = null;
@@ -101,7 +102,7 @@ export class ClusteredLight {
         this.sizeParam = pb.vec4().uniform(0);
         this.countParam = pb.ivec4().uniform(0);
         this[ShaderHelper.getLightBufferUniformName()] =
-          pb.vec4[(ShaderHelper.getMaxClusteredLightCount() + 1) * 4]().uniformBuffer(0);
+          pb.vec4[(MAX_CLUSTERED_LIGHTS + 1) * 4]().uniformBuffer(0);
         pb.func('lineIntersectionToZPlane', [pb.vec3('a'), pb.vec3('b'), pb.float('zDistance')], function () {
           this.$l.normal = pb.vec3(0, 0, 1);
           this.$l.ab = pb.sub(this.b, this.a);
@@ -365,8 +366,8 @@ export class ClusteredLight {
     this._countParam[1] = this._tileCountY;
     this._countParam[2] = this._tileCountZ;
     // countParam.w stores light count + 1 because clustered indices start from 1.
-    // Keep it valid even when there are no unshadowed punctual lights so deferred
-    // passes can still evaluate emissive / env lighting without invalid cluster math.
+    // Keep it valid even when there are no unshadowed punctual lights so clustered
+    // shading math stays well-defined for emissive and environment lighting paths.
     this._countParam[3] = numLights + 1;
     device.pushDeviceStates();
     device.setFramebuffer(this._lightIndexFramebuffer);
@@ -393,7 +394,7 @@ export class ClusteredLight {
     device.popDeviceStates();
   }
   private getVisibleLights(renderQueue: RenderQueue, lights: Float32Array) {
-    const numLights = Math.min(renderQueue.unshadowedLights.length, ShaderHelper.getMaxClusteredLightCount());
+    const numLights = Math.min(renderQueue.unshadowedLights.length, MAX_CLUSTERED_LIGHTS);
     for (let i = 1; i <= numLights; i++) {
       const light = renderQueue.unshadowedLights[i - 1];
       const offset = i * 16;

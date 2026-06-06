@@ -120,6 +120,8 @@ export abstract class RenderPass extends Disposable {
     }
     renderQueue.end(cullCamera);
     ctx.sunLight = renderQueue.sunLight;
+    ctx.primaryDirectionalLight = renderQueue.primaryDirectionalLight;
+    ctx.primaryTransmissionLight = renderQueue.primaryTransmissionLight;
     return renderQueue;
   }
   /** @internal */
@@ -132,7 +134,8 @@ export abstract class RenderPass extends Disposable {
     hash: string
   ) {
     let recording = false;
-    if (renderBundle && ctx.camera.commandBufferReuse && !this.shouldDisableRenderBundles(ctx)) {
+    const disableRenderBundles = this.shouldDisableRenderBundles(ctx);
+    if (renderBundle && ctx.camera.commandBufferReuse && !disableRenderBundles) {
       const bundle = renderBundle.getRenderBundle(hash);
       if (bundle) {
         ctx.device.executeRenderBundle(bundle);
@@ -156,19 +159,19 @@ export abstract class RenderPass extends Disposable {
           hash
         );
       }
-      item.drawable.draw(ctx, renderQueue, recording ? undefined : hash);
+      item.drawable.draw(ctx, renderQueue, recording || disableRenderBundles ? undefined : hash);
       if (reverse) {
         ctx.device.reverseVertexWindingOrder(!ctx.device.isWindingOrderReversed());
       }
     }
-    if (renderBundle && ctx.camera.commandBufferReuse && !this.shouldDisableRenderBundles(ctx)) {
+    if (renderBundle && ctx.camera.commandBufferReuse && !disableRenderBundles) {
       renderBundle.endRenderBundle(hash);
     }
   }
   private shouldDisableRenderBundles(ctx: DrawContext) {
     return (
       (ctx.renderPass?.type === RENDER_PASS_TYPE_LIGHT &&
-        (!!ctx.currentShadowLight || !!ctx.lightBlending)) ||
+        (!!ctx.SSS || !!ctx.currentShadowLight || !!ctx.lightBlending)) ||
       false
     );
   }

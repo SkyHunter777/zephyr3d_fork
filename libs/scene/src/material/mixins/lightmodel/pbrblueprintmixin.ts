@@ -29,7 +29,8 @@ export type IMixinPBRBluePrint = {
     worldPos: PBShaderExp,
     viewVec: PBShaderExp,
     commonData: PBShaderExp,
-    outRoughness?: PBShaderExp
+    outRoughness?: PBShaderExp,
+    outSSSDiffuse?: PBShaderExp
   ): PBShaderExp;
   getCommonDatasStruct(scope: PBInsideFunctionScope): ShaderTypeFunc;
   getCommonData(
@@ -65,14 +66,16 @@ export type IMixinPBRBluePrint = {
     diffuseScale: PBShaderExp,
     specularScale: PBShaderExp,
     sourceRadiusFactor: PBShaderExp,
-    outColor: PBShaderExp
+    outColor: PBShaderExp,
+    outDiffuseColor?: PBShaderExp
   ): void;
   indirectLighting(
     scope: PBInsideFunctionScope,
     viewVec: PBShaderExp,
     commonData: PBShaderExp,
     outColor: PBShaderExp,
-    outRoughness?: PBShaderExp
+    outRoughness?: PBShaderExp,
+    outDiffuseColor?: PBShaderExp
   ): void;
 } & IMixinPBRBRDF &
   IMixinLight;
@@ -143,7 +146,8 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
       worldPos: PBShaderExp,
       viewVec: PBShaderExp,
       commonData: PBShaderExp,
-      outRoughness?: PBShaderExp
+      outRoughness?: PBShaderExp,
+      outSSSDiffuse?: PBShaderExp
     ) {
       const pb = scope.$builder;
       const funcName = 'Z_PBRBluePrintLight';
@@ -155,14 +159,34 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
           that.getCommonDatasStruct(scope)('pbrData'),
           pb.vec3('viewVec'),
           pb.vec3('worldPos'),
-          ...(outRoughness ? [pb.vec4('outRoughness').out()] : [])
+          ...(outRoughness ? [pb.vec4('outRoughness').out()] : []),
+          ...(outSSSDiffuse ? [pb.vec4('outSSSDiffuse').out()] : [])
         ],
         function () {
           this.$l.lightingColor = pb.vec3(0);
+          this.$l.sssDiffuseColor = pb.vec3(0);
           this.$l.emissiveColor = baseLightPass ? this.pbrData.emissive : pb.vec3(0);
           if (baseLightPass) {
-            if (outRoughness) {
+            if (outRoughness && outSSSDiffuse) {
+              that.indirectLighting(
+                this,
+                this.viewVec,
+                this.pbrData,
+                this.lightingColor,
+                this.outRoughness,
+                this.sssDiffuseColor
+              );
+            } else if (outRoughness) {
               that.indirectLighting(this, this.viewVec, this.pbrData, this.lightingColor, this.outRoughness);
+            } else if (outSSSDiffuse) {
+              that.indirectLighting(
+                this,
+                this.viewVec,
+                this.pbrData,
+                this.lightingColor,
+                undefined,
+                this.sssDiffuseColor
+              );
             } else {
               that.indirectLighting(this, this.viewVec, this.pbrData, this.lightingColor);
             }
@@ -194,7 +218,10 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
                 const sample = (u: number, v: number) => {
                   this.samplePos = pb.add(
                     this.center,
-                    pb.add(pb.mul(this.ax, pb.sub(pb.mul(u, 2), 1)), pb.mul(this.ay, pb.sub(pb.mul(v, 2), 1)))
+                    pb.add(
+                      pb.mul(this.ax, pb.sub(pb.mul(u, 2), 1)),
+                      pb.mul(this.ay, pb.sub(pb.mul(v, 2), 1))
+                    )
                   );
                   this.Lvec = pb.sub(this.samplePos, this.worldPos);
                   this.dist = pb.length(this.Lvec);
@@ -214,17 +241,32 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
                     }
                     this.atten = pb.mul(this.invDist2, this.NoL_light, this.falloff);
                     this.lightColor = pb.mul(this.baseColor, this.atten, this.NoL, this.sampleShadow);
-                    that.directLighting(
-                      this,
-                      this.L,
-                      this.lightColor,
-                      this.viewVec,
-                      this.pbrData,
-                      pb.float(1),
-                      pb.float(1),
-                      pb.float(0),
-                      this.lightingColor
-                    );
+                    if (outSSSDiffuse) {
+                      that.directLighting(
+                        this,
+                        this.L,
+                        this.lightColor,
+                        this.viewVec,
+                        this.pbrData,
+                        pb.float(1),
+                        pb.float(1),
+                        pb.float(0),
+                        this.lightingColor,
+                        this.sssDiffuseColor
+                      );
+                    } else {
+                      that.directLighting(
+                        this,
+                        this.L,
+                        this.lightColor,
+                        this.viewVec,
+                        this.pbrData,
+                        pb.float(1),
+                        pb.float(1),
+                        pb.float(0),
+                        this.lightingColor
+                      );
+                    }
                   });
                 };
 
@@ -258,31 +300,50 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
               this.$l.NoL = pb.clamp(pb.dot(this.pbrData.normal, this.lightDir), 0, 1);
               this.$l.lightColor = pb.mul(colorIntensity.rgb, colorIntensity.a, this.lightAtten, this.NoL);
               if (shadow) {
-                this.lightColor = pb.mul(
+                this.lightColor = pb.mul(this.lightColor, that.calculateShadow(this, this.worldPos, this.NoL));
+              }
+              if (outSSSDiffuse) {
+                that.directLighting(
+                  this,
+                  this.lightDir,
                   this.lightColor,
-                  that.calculateShadow(this, this.worldPos, this.NoL)
+                  this.viewVec,
+                  this.pbrData,
+                  this.diffuseScale,
+                  this.specularScale,
+                  this.sourceRadiusFactor,
+                  this.lightingColor,
+                  this.sssDiffuseColor
+                );
+              } else {
+                that.directLighting(
+                  this,
+                  this.lightDir,
+                  this.lightColor,
+                  this.viewVec,
+                  this.pbrData,
+                  this.diffuseScale,
+                  this.specularScale,
+                  this.sourceRadiusFactor,
+                  this.lightingColor
                 );
               }
-              that.directLighting(
-                this,
-                this.lightDir,
-                this.lightColor,
-                this.viewVec,
-                this.pbrData,
-                this.diffuseScale,
-                this.specularScale,
-                this.sourceRadiusFactor,
-                this.lightingColor
-              );
             });
           });
+          if (outSSSDiffuse) {
+            this.outSSSDiffuse = pb.vec4(this.sssDiffuseColor, this.pbrData.albedo.a);
+          }
           this.$return(pb.vec4(pb.add(this.lightingColor, this.emissiveColor), this.pbrData.albedo.a));
         }
       );
       return (
-        outRoughness
-          ? pb.getGlobalScope()[funcName](commonData, viewVec, worldPos, outRoughness)
-          : pb.getGlobalScope()[funcName](commonData, viewVec, worldPos)
+        outRoughness && outSSSDiffuse
+          ? pb.getGlobalScope()[funcName](commonData, viewVec, worldPos, outRoughness, outSSSDiffuse)
+          : outRoughness
+            ? pb.getGlobalScope()[funcName](commonData, viewVec, worldPos, outRoughness)
+            : outSSSDiffuse
+              ? pb.getGlobalScope()[funcName](commonData, viewVec, worldPos, outSSSDiffuse)
+              : pb.getGlobalScope()[funcName](commonData, viewVec, worldPos)
       ) as PBShaderExp;
     }
     vertexShader(scope: PBFunctionScope) {
@@ -403,7 +464,8 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
       diffuseScale: PBShaderExp,
       specularScale: PBShaderExp,
       sourceRadiusFactor: PBShaderExp,
-      outColor: PBShaderExp
+      outColor: PBShaderExp,
+      outDiffuseColor?: PBShaderExp
     ) {
       const pb = scope.$builder;
       const that = this;
@@ -418,7 +480,8 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
           pb.float('diffuseScale'),
           pb.float('specularScale'),
           pb.float('sourceRadiusFactor'),
-          pb.vec3('outColor').inout()
+          pb.vec3('outColor').inout(),
+          ...(outDiffuseColor ? [pb.vec3('outDiffuseColor').inout()] : [])
         ],
         function () {
           this.$l.reflectionMode = this.zReflectionMode;
@@ -483,32 +546,46 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
             });
             this.outColor = pb.add(this.outColor, this.specular);
             this.$l.diffuseBRDF = pb.mul(pb.sub(pb.vec3(1), this.F), pb.div(this.data.diffuse.rgb, Math.PI));
-            this.$l.diffuse = pb.mul(
-              this.lightColor,
-              pb.max(this.diffuseBRDF, pb.vec3(0)),
-              this.diffuseScale
-            );
+            this.$l.diffuse = pb.mul(this.lightColor, pb.max(this.diffuseBRDF, pb.vec3(0)), this.diffuseScale);
             this.outColor = pb.add(this.outColor, this.diffuse);
+            if (outDiffuseColor) {
+              this.outDiffuseColor = pb.add(this.outDiffuseColor, this.diffuse);
+            }
           });
         }
       );
-      scope.$g[funcName](
-        lightDir,
-        lightColor,
-        viewVec,
-        commonData,
-        diffuseScale,
-        specularScale,
-        sourceRadiusFactor,
-        outColor
-      );
+      if (outDiffuseColor) {
+        scope.$g[funcName](
+          lightDir,
+          lightColor,
+          viewVec,
+          commonData,
+          diffuseScale,
+          specularScale,
+          sourceRadiusFactor,
+          outColor,
+          outDiffuseColor
+        );
+      } else {
+        scope.$g[funcName](
+          lightDir,
+          lightColor,
+          viewVec,
+          commonData,
+          diffuseScale,
+          specularScale,
+          sourceRadiusFactor,
+          outColor
+        );
+      }
     }
     indirectLighting(
       scope: PBInsideFunctionScope,
       viewVec: PBShaderExp,
       commonData: PBShaderExp,
       outColor: PBShaderExp,
-      outRoughness?: PBShaderExp
+      outRoughness?: PBShaderExp,
+      outDiffuseColor?: PBShaderExp
     ) {
       const pb = scope.$builder;
       const that = this;
@@ -520,7 +597,8 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
           pb.vec3('viewVec'),
           that.getCommonDatasStruct(scope)('data'),
           pb.vec3('outColor').inout(),
-          ...(outRoughness ? [pb.vec4('outRoughness').out()] : [])
+          ...(outRoughness ? [pb.vec4('outRoughness').out()] : []),
+          ...(outDiffuseColor ? [pb.vec3('outDiffuseColor').inout()] : [])
         ],
         function () {
           if (
@@ -583,11 +661,18 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
             this.$l.k_D = pb.mul(this.data.diffuse.rgb, pb.add(pb.sub(pb.vec3(1), this.FssEss), this.FmsEms));
             this.$l.iblDiffuse = pb.mul(pb.add(this.FmsEms, this.k_D), this.irradiance, this.occlusion);
             this.outColor = pb.add(this.outColor, this.iblDiffuse);
+            if (outDiffuseColor) {
+              this.outDiffuseColor = pb.add(this.outDiffuseColor, this.iblDiffuse);
+            }
           }
         }
       );
-      if (outRoughness) {
+      if (outRoughness && outDiffuseColor) {
+        scope.$g[funcName](viewVec, commonData, outColor, outRoughness, outDiffuseColor);
+      } else if (outRoughness) {
         scope.$g[funcName](viewVec, commonData, outColor, outRoughness);
+      } else if (outDiffuseColor) {
+        scope.$g[funcName](viewVec, commonData, outColor, outDiffuseColor);
       } else {
         scope.$g[funcName](viewVec, commonData, outColor);
       }

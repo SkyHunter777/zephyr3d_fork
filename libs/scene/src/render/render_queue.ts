@@ -169,6 +169,10 @@ export class RenderQueue extends Disposable {
   /** @internal */
   private _sunLight: Nullable<DirectionalLight>;
   /** @internal */
+  private _primaryDirectionalLight: Nullable<DirectionalLight>;
+  /** @internal */
+  private _primaryTransmissionLight: Nullable<PunctualLight>;
+  /** @internal */
   private readonly _bindGroupAllocator: InstanceBindGroupAllocator;
   /** @internal */
   private readonly _ref: RenderQueueRef;
@@ -194,6 +198,8 @@ export class RenderQueue extends Disposable {
     this._shadowedLightList = [];
     this._unshadowedLightList = [];
     this._sunLight = null;
+    this._primaryDirectionalLight = null;
+    this._primaryTransmissionLight = null;
     this._ref = { ref: this };
     this._instanceInfo = new Map();
     this._needSceneColor = false;
@@ -208,6 +214,31 @@ export class RenderQueue extends Disposable {
   }
   set sunLight(light) {
     this._sunLight = light;
+  }
+  /** Primary directional light used by effects that need a main light direction. */
+  get primaryDirectionalLight() {
+    return this._primaryDirectionalLight;
+  }
+  set primaryDirectionalLight(light) {
+    this._primaryDirectionalLight = light;
+  }
+  /** Primary punctual light used by thin-transmission effects when there is no main directional light. */
+  get primaryTransmissionLight() {
+    return this._primaryTransmissionLight;
+  }
+  set primaryTransmissionLight(light) {
+    this._primaryTransmissionLight = light;
+  }
+  /** @internal */
+  private getTransmissionLightScore(light: PunctualLight) {
+    if (light.isDirectionLight()) {
+      return -1;
+    }
+    const color = light.diffuseAndIntensity;
+    const luma = color.x * 0.2126 + color.y * 0.7152 + color.z * 0.0722;
+    const range = Math.max(1, light.positionAndRange.w);
+    const typeWeight = light.isSpotLight() ? 1.2 : light.isPointLight() ? 1.08 : light.isRectLight() ? 1.02 : 1;
+    return Math.max(color.w, 0) * Math.max(luma, 0) * Math.sqrt(range) * typeWeight;
   }
   /** @internal */
   needSceneColor() {
@@ -280,8 +311,21 @@ export class RenderQueue extends Disposable {
     } else {
       this._unshadowedLightList.push(light);
     }
-    if (light.isDirectionLight() && light.sunLight) {
-      this.sunLight = light;
+    if (light.isDirectionLight()) {
+      if (
+        !this._primaryDirectionalLight ||
+        light.intensity > this._primaryDirectionalLight.intensity
+      ) {
+        this._primaryDirectionalLight = light;
+      }
+      if (light.sunLight) {
+        this.sunLight = light;
+      }
+    } else if (
+      !this._primaryTransmissionLight ||
+      this.getTransmissionLightScore(light) > this.getTransmissionLightScore(this._primaryTransmissionLight)
+    ) {
+      this._primaryTransmissionLight = light;
     }
   }
   /**
@@ -308,6 +352,21 @@ export class RenderQueue extends Disposable {
     this._needSceneDepth ||= queue._needSceneDepth;
     this._needSceneColorWithDepth ||= queue._needSceneColorWithDepth;
     this._drawTransparent ||= queue._drawTransparent;
+    this._sunLight ||= queue._sunLight;
+    if (
+      queue._primaryDirectionalLight &&
+      (!this._primaryDirectionalLight || queue._primaryDirectionalLight.intensity > this._primaryDirectionalLight.intensity)
+    ) {
+      this._primaryDirectionalLight = queue._primaryDirectionalLight;
+    }
+    if (
+      queue._primaryTransmissionLight &&
+      (!this._primaryTransmissionLight ||
+        this.getTransmissionLightScore(queue._primaryTransmissionLight) >
+          this.getTransmissionLightScore(this._primaryTransmissionLight))
+    ) {
+      this._primaryTransmissionLight = queue._primaryTransmissionLight;
+    }
     this._objectColorMaps.push(...queue._objectColorMaps);
   }
   /**
@@ -447,6 +506,8 @@ export class RenderQueue extends Disposable {
     this._shadowedLightList = [];
     this._unshadowedLightList = [];
     this._sunLight = null;
+    this._primaryDirectionalLight = null;
+    this._primaryTransmissionLight = null;
     this._needSceneColor = false;
     this._needSceneDepth = false;
     this._needSceneColorWithDepth = false;

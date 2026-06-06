@@ -585,7 +585,8 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
   }
   /**
    * Whether transparent visible materials cast shadow through a masked shadow-only path.
-   * Visible rendering stays blended while shadow-map rendering becomes cutout.
+   * - Visible rendering stays blended.
+   * - Shadow-map rendering is treated like a cutout material using `shadowAlphaCutoff`.
    */
   get transparentShadowCaster() {
     return this._transparentShadowCaster;
@@ -660,6 +661,7 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
   }
   /**
    * Returns the effective blend mode for the current pass.
+   * Transparent-shadow-caster materials stay blended in visible passes, but become masked in shadow passes.
    */
   protected getEffectiveBlendMode(pass: number, ctx?: DrawContext): BlendMode {
     if (
@@ -701,6 +703,8 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
   }
   /**
    * Whether this pass needs fragment color inputs.
+   * This stays aligned with the historical meaning of `needFragmentColor`,
+   * but also allows shadow-only transparent casters to fetch alpha sources.
    */
   needFragmentColorInput(ctx?: DrawContext) {
     const drawContext = ctx ?? this.drawContext;
@@ -984,7 +988,19 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
           this.$outputs.zFragmentOutput = pb.vec4();
           if (ctx.materialFlags & MaterialVaryingFlags.SSR_STORE_ROUGHNESS) {
             this.$outputs.zSSRRoughness = pb.vec4();
+          }
+          if (ctx.materialFlags & (MaterialVaryingFlags.SSR_STORE_ROUGHNESS | MaterialVaryingFlags.SSS_STORE_NORMAL)) {
             this.$outputs.zSSRNormal = pb.vec4();
+          }
+          if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE) {
+            this.$outputs.zSSSProfile = pb.vec4();
+            this.$outputs.zSSSParams = pb.vec4();
+          }
+          if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_DIFFUSE) {
+            this.$outputs.zSSSDiffuse = pb.vec4();
+          }
+          if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_TRANSMISSION) {
+            this.$outputs.zSSSTransmission = pb.vec4();
           }
           if (ctx.renderPass!.type === RENDER_PASS_TYPE_DEPTH && ctx.motionVectors) {
             this.$outputs.zMotionVector = pb.vec4();
@@ -1017,6 +1033,11 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
    * @param color - Lit fragment color expression; may be undefined for depth-only paths.
    * @param ssrRoughness - Optional SSR roughness output expression.
    * @param ssrNormal - Optional SSR normal output expression.
+   * @param sssProfile - Optional SSS profile output expression.
+   * @param sssParams - Optional SSS packed params output expression.
+   * @param sssProfileEnabled - True only when this material should write SSS profile data.
+   * @param sssDiffuse - Optional diffuse-only lighting color for SSS composition.
+   * @param sssTransmission - Optional thin-shell transmission lighting color for SSS composition.
    * @returns void
    */
   outputFragmentColor(
@@ -1024,7 +1045,13 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
     worldPos: PBShaderExp,
     color: Nullable<PBShaderExp>,
     ssrRoughness?: PBShaderExp,
-    ssrNormal?: PBShaderExp
+    ssrNormal?: PBShaderExp,
+    sssProfile?: PBShaderExp,
+    sssParams?: PBShaderExp,
+    sssDiffuse?: PBShaderExp,
+    sssTransmission?: PBShaderExp,
+    sssProfileEnabled = false,
+    gbufferExtra?: PBShaderExp
   ) {
     const pb = scope.$builder;
     const that = this;
@@ -1082,7 +1109,9 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
           this.$builtins.fragCoord.xy,
           pb.vec2(this.frame, pb.mul(this.frame, 0.754877666))
         );
-        this.$l.noise = pb.fract(pb.mul(pb.sin(pb.dot(this.phase, pb.vec2(12.9898, 78.233))), 43758.5453));
+        this.$l.noise = pb.fract(
+          pb.mul(pb.sin(pb.dot(this.phase, pb.vec2(12.9898, 78.233))), 43758.5453)
+        );
         this.$l.coverage = pb.clamp(
           pb.div(pb.sub(this.alpha, this.cutoff), pb.max(pb.sub(1, this.cutoff), 1e-4)),
           0,
@@ -1093,7 +1122,10 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
         this.$return(pb.lessThan(this.alpha, this.cutoff));
       }
     });
-    pb.func(funcName, color ? [pb.vec3('worldPos'), pb.vec4('color')] : [pb.vec3('worldPos')], function () {
+    pb.func(
+      funcName,
+      color ? [pb.vec3('worldPos'), pb.vec4('color')] : [pb.vec3('worldPos')],
+      function () {
       this.$l.outColor = color ? this.color : pb.vec4();
       if (that.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
         let output = true;
@@ -1222,13 +1254,48 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
         scope.$outputs.zSSRRoughness = pb.vec4(0, 0, 0, 1);
         scope.$outputs.zSSRNormal = pb.vec4(0);
       } else {
-        scope.$outputs.zSSRRoughness = ssrRoughness ?? pb.vec4(1, 0, 0, 1);
+        scope.$outputs.zSSRRoughness = ssrRoughness ?? pb.vec4(1, 1, 0, 1);
         scope.$outputs.zSSRNormal = ssrNormal
+          ? ssrNormal
+            : scope.$inputs.wNorm
+              ? pb.vec4(pb.add(pb.mul(pb.normalize(scope.$inputs.wNorm), 0.5), pb.vec3(0.5)), 1)
+              : pb.vec4(0.5, 0.5, 1, 1);
+      }
+    } else if (that.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_NORMAL) {
+      const disableNormal =
+        that.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT &&
+        ((that.isTransparentPass(that.pass, that.drawContext) && !that.alphaToCoverage) ||
+          that.needSceneColor());
+      scope.$outputs.zSSRNormal = disableNormal
+        ? pb.vec4(0)
+        : ssrNormal
           ? ssrNormal
           : scope.$inputs.wNorm
             ? pb.vec4(pb.add(pb.mul(pb.normalize(scope.$inputs.wNorm), 0.5), pb.vec3(0.5)), 1)
             : pb.vec4(0.5, 0.5, 1, 1);
-      }
+    }
+    if (that.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE) {
+      const disableSSS =
+        that.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT &&
+        ((that.isTransparentPass(that.pass, that.drawContext) && !that.alphaToCoverage) ||
+          that.needSceneColor());
+      const writeSSSProfile = sssProfileEnabled && !disableSSS;
+      scope.$outputs.zSSSProfile = writeSSSProfile ? sssProfile ?? pb.vec4(0) : pb.vec4(0);
+      scope.$outputs.zSSSParams = writeSSSProfile ? sssParams ?? pb.vec4(0) : pb.vec4(0);
+    }
+    if (that.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_DIFFUSE) {
+      const disableSSS =
+        that.drawContext.renderPass!.type !== RENDER_PASS_TYPE_LIGHT ||
+        (that.isTransparentPass(that.pass, that.drawContext) && !that.alphaToCoverage) ||
+        that.needSceneColor();
+      scope.$outputs.zSSSDiffuse = disableSSS ? pb.vec4(0) : sssDiffuse ?? pb.vec4(0);
+    }
+    if (that.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_TRANSMISSION) {
+      const disableSSS =
+        that.drawContext.renderPass!.type !== RENDER_PASS_TYPE_LIGHT ||
+        (that.isTransparentPass(that.pass, that.drawContext) && !that.alphaToCoverage) ||
+        that.needSceneColor();
+      scope.$outputs.zSSSTransmission = disableSSS ? pb.vec4(0) : sssTransmission ?? pb.vec4(0);
     }
   }
 }

@@ -2,6 +2,7 @@ import { Vector2, Vector3, Vector4 } from '@zephyr3d/base';
 import type { DrawContext } from '../../render/drawable';
 import {
   MaterialVaryingFlags,
+  MAX_CLUSTERED_LIGHTS,
   MORPH_ATTRIBUTE_VECTOR_COUNT,
   MORPH_TARGET_NORMAL,
   MORPH_TARGET_POSITION,
@@ -201,6 +202,7 @@ export class ShaderHelper {
       pb.vec2('renderSize'),
       pb.vec2('jitterValue'),
       pb.float('roughnessFactor'),
+      pb.float('shadowDebugCascades'),
       pb.float('frameDeltaTime'),
       pb.float('elapsedTime'),
       pb.int('framestamp')
@@ -263,8 +265,7 @@ export class ShaderHelper {
       scope.camera = cameraStruct().uniform(0);
       scope.light = lightStruct().uniform(0);
       if (useClusteredLighting) {
-        scope[UNIFORM_NAME_LIGHT_BUFFER] =
-          pb.vec4[(this.getMaxClusteredLightCount() + 1) * 4]().uniformBuffer(0);
+        scope[UNIFORM_NAME_LIGHT_BUFFER] = pb.vec4[(MAX_CLUSTERED_LIGHTS + 1) * 4]().uniformBuffer(0);
         scope[UNIFORM_NAME_LIGHT_INDEX_TEXTURE] = (
           pb.getDevice().type === 'webgl' ? pb.tex2D() : pb.utex2D()
         ).uniform(0);
@@ -804,6 +805,7 @@ export class ShaderHelper {
       worldMatrix: camera.worldMatrix,
       params: new Vector4(camera.getNearPlane(), camera.getFarPlane(), ctx.flip ? -1 : 1, linear ? 0 : 1),
       roughnessFactor: camera.SSR ? camera.ssrRoughnessFactor : 1,
+      shadowDebugCascades: camera.shadowDebugCascades ? 1 : 0,
       frameDeltaTime: ctx.device.frameInfo.elapsedFrame * 0.001,
       elapsedTime: ctx.device.frameInfo.elapsedOverall * 0.001,
       framestamp: ctx.device.frameInfo.frameCounter
@@ -1272,7 +1274,10 @@ export class ShaderHelper {
     return scope[UNIFORM_NAME_LIGHT_BUFFER].at(scope.$builder.add(scope.$builder.mul(lightIndex, 4), 2));
   }
   /** @internal */
-  static getLightExtra(scope: PBInsideFunctionScope, lightIndex: PBShaderExp | number): PBShaderExp {
+  static getLightExtra(
+    scope: PBInsideFunctionScope,
+    lightIndex: PBShaderExp | number
+  ): PBShaderExp {
     return scope[UNIFORM_NAME_LIGHT_BUFFER].at(scope.$builder.add(scope.$builder.mul(lightIndex, 4), 3));
   }
   /**
@@ -1375,6 +1380,9 @@ export class ShaderHelper {
         );
         this.shadow = pb.mix(1, this.shadow, this.light.shadowStrength);
         this.shadow = pb.clamp(this.shadow, 0, 1);
+        this.$if(pb.greaterThan(this.camera.shadowDebugCascades, 0.5), function () {
+          this.shadow = pb.add(pb.mul(pb.float(this.split), 0.2), 0.2);
+        });
         this.$return(this.shadow);
       } else {
         this.$l.shadowVertex = that.calculateShadowSpaceVertex(this, pb.vec4(this.worldPos, 1));
@@ -1427,10 +1435,7 @@ export class ShaderHelper {
           this[UNIFORM_NAME_AERIALPERSPECTIVE_LUT],
           this[UNIFORM_NAME_SKYDISTANTLIGHT_LUT]
         );
-        this.color = pb.vec4(
-          pb.add(pb.mul(this.color.rgb, this.fogging.a), pb.mul(this.fogging.rgb, this.color.a)),
-          this.color.a
-        );
+        this.color = pb.vec4(pb.add(pb.mul(this.color.rgb, this.fogging.a), this.fogging.rgb), this.color.a);
         //this.color = pb.vec4(pb.vec3(pb.mix(this.u0, this.u1, this.factor)), this.color.a);
       });
       scope[funcName](worldPos, color);
@@ -1451,15 +1456,9 @@ export class ShaderHelper {
   ): PBShaderExp {
     const pb = scope.$builder;
     nearFar = nearFar ?? this.getCameraParams(scope);
-    return pb.add(
-      pb.mul(
-        pb.div(
-          pb.sub(pb.add(nearFar.x, nearFar.y), pb.div(pb.mul(nearFar.x, nearFar.y, 2), depth)),
-          pb.sub(nearFar.y, nearFar.x)
-        ),
-        0.5
-      ),
-      0.5
+    return pb.div(
+      pb.sub(nearFar.y, pb.div(pb.mul(nearFar.x, nearFar.y), depth)),
+      pb.sub(nearFar.y, nearFar.x)
     );
   }
   /**
@@ -1477,11 +1476,7 @@ export class ShaderHelper {
   ): PBShaderExp {
     const pb = scope.$builder;
     nearFar = nearFar ?? this.getCameraParams(scope);
-    return pb.div(
-      pb.mul(nearFar.x, nearFar.y, 2),
-      pb.add(nearFar.x, nearFar.y, pb.mul(pb.sub(nearFar.x, nearFar.y), pb.sub(pb.mul(depth, 2), 1)))
-    );
-    //return pb.div(pb.mul(nearFar.x, nearFar.y), pb.mix(nearFar.y, nearFar.x, depth));
+    return pb.div(pb.mul(nearFar.x, nearFar.y), pb.mix(nearFar.y, nearFar.x, depth));
   }
   /**
    * Calculates the normalized linear depth from non-linear depth
@@ -1498,11 +1493,7 @@ export class ShaderHelper {
   ): PBShaderExp {
     const pb = scope.$builder;
     nearFar = nearFar ?? this.getCameraParams(scope);
-    //return pb.div(nearFar.x, pb.mix(nearFar.y, nearFar.x, depth));
-    return pb.div(
-      pb.sub(this.nonLinearDepthToLinear(scope, depth, nearFar), nearFar.x),
-      pb.sub(nearFar.y, nearFar.x)
-    );
+    return pb.div(nearFar.x, pb.mix(nearFar.y, nearFar.x, depth));
   }
   /**
    * Sample linear depth from linear depth texture
@@ -1588,8 +1579,5 @@ export class ShaderHelper {
       });
     });
     return pb.getGlobalScope()[funcName](outputColor);
-  }
-  static getMaxClusteredLightCount() {
-    return getDevice().type === 'webgl' ? 127 : 255;
   }
 }

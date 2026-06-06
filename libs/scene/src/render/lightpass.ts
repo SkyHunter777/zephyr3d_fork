@@ -18,6 +18,10 @@ export class LightPass extends RenderPass {
   protected _shadowMapHash: Nullable<string>;
   /** @internal */
   protected _transmission: boolean;
+  /** @internal */
+  protected _renderOpaque: boolean;
+  /** @internal */
+  protected _renderTransparent: boolean;
   /**
    * Creates an instance of ForwardRenderPass
    */
@@ -25,6 +29,8 @@ export class LightPass extends RenderPass {
     super(RENDER_PASS_TYPE_LIGHT);
     this._shadowMapHash = null;
     this._transmission = false;
+    this._renderOpaque = true;
+    this._renderTransparent = true;
     this._clearColor = Vector4.zero();
   }
   /** @internal */
@@ -35,18 +41,45 @@ export class LightPass extends RenderPass {
     this._transmission = val;
   }
   /** @internal */
+  get renderOpaque() {
+    return this._renderOpaque;
+  }
+  set renderOpaque(val: boolean) {
+    this._renderOpaque = !!val;
+  }
+  /** @internal */
+  get renderTransparent() {
+    return this._renderTransparent;
+  }
+  set renderTransparent(val: boolean) {
+    this._renderTransparent = !!val;
+  }
+  /** @internal */
   protected getAdditiveLightPassColorAttachments(ctx: DrawContext) {
     const framebuffer = ctx.device.getFramebuffer();
     if (!framebuffer) {
       return null;
     }
-    return framebuffer.getColorAttachments()[0];
+    const attachments: any[] = [framebuffer.getColorAttachments()[0]];
+    if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_DIFFUSE) {
+      attachments.push(ctx.SSSDiffuseTexture!);
+    }
+    if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_TRANSMISSION) {
+      attachments.push(ctx.SSSTransmissionTexture!);
+    }
+    return attachments.length === 1 ? attachments[0] : attachments;
   }
   /** @internal */
   protected selectTransparentOITShadowLight(ctx: DrawContext, renderQueue: RenderQueue) {
     const shadowMapInfo = ctx.shadowMapInfo;
     if (!shadowMapInfo || shadowMapInfo.size === 0) {
       return null;
+    }
+    if (renderQueue.primaryDirectionalLight && shadowMapInfo.has(renderQueue.primaryDirectionalLight)) {
+      return renderQueue.primaryDirectionalLight;
+    }
+    if (renderQueue.primaryTransmissionLight && shadowMapInfo.has(renderQueue.primaryTransmissionLight)) {
+      return renderQueue.primaryTransmissionLight;
     }
     for (const light of renderQueue.shadowedLights) {
       if (shadowMapInfo.has(light)) {
@@ -57,11 +90,13 @@ export class LightPass extends RenderPass {
   }
   /** @internal */
   protected _getGlobalBindGroupHash(ctx: DrawContext, camera: Camera) {
-    return `${this._shadowMapHash}:${ctx.currentShadowLight?.runtimeId ?? 0}:${ctx.lightBlending ? 1 : 0}:${
-      camera.oit?.calculateHash() ?? ''
-    }:${ctx.env!.getHash(ctx)}:${ctx.materialFlags}:${ctx.linearDepthTexture?.uid ?? 0}:${
-      ctx.sceneColorTexture?.uid ?? 0
-    }:${ctx.HiZTexture?.uid ?? 0}`;
+    return `${this._shadowMapHash}:${ctx.currentShadowLight?.runtimeId ?? 0}:${
+      ctx.lightBlending ? 1 : 0
+    }:${camera.oit?.calculateHash() ?? ''}:${
+      ctx.env!.getHash(ctx)
+    }:${ctx.materialFlags}:${ctx.linearDepthTexture?.uid ?? 0}:${ctx.sceneColorTexture?.uid ?? 0}:${
+      ctx.HiZTexture?.uid ?? 0
+    }`;
   }
   /** @internal */
   protected renderLightPass(
@@ -127,7 +162,15 @@ export class LightPass extends RenderPass {
     ctx.env = ctx.scene.env;
     ctx.drawEnvLight = false;
     ctx.flip = this.isAutoFlip(ctx);
-    const surfaceMRT = ctx.materialFlags & MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
+    const surfaceMRT =
+      ctx.materialFlags &
+      (
+        MaterialVaryingFlags.SSR_STORE_ROUGHNESS |
+        MaterialVaryingFlags.SSS_STORE_PROFILE |
+        MaterialVaryingFlags.SSS_STORE_DIFFUSE |
+        MaterialVaryingFlags.SSS_STORE_NORMAL |
+        MaterialVaryingFlags.SSS_STORE_TRANSMISSION
+      );
     const tmpFramebuffer = surfaceMRT
       ? ctx.device.pool.fetchTemporalFramebuffer(
           false,
@@ -155,6 +198,10 @@ export class LightPass extends RenderPass {
       : [items?.opaque, items?.transparent];
     const transparentPass = lists.length - 1;
     for (let i = 0; i < lists.length; i++) {
+      const isOpaquePass = i === 0;
+      if ((isOpaquePass && !this._renderOpaque) || (!isOpaquePass && !this._renderTransparent)) {
+        continue;
+      }
       if (lists[i]) {
         ctx.queue = i === 0 ? QUEUE_OPAQUE : QUEUE_TRANSPARENT;
         ctx.oit = i === 0 || !items ? null : oit;
@@ -182,49 +229,35 @@ export class LightPass extends RenderPass {
             }
           };
           let lightIndex = 0;
-          const singleTransparentOITPass =
-            !!ctx.oit && ctx.queue === QUEUE_TRANSPARENT && !isolateTransparentABufferLightPasses;
-          let renderedTransparentOITShadow = false;
           if (ctx.shadowMapInfo) {
-            if (singleTransparentOITPass) {
-              const shadowLight = this.selectTransparentOITShadowLight(ctx, renderQueue);
-              if (shadowLight) {
-                ctx.currentShadowLight = shadowLight;
-                ctx.lightBlending = false;
-                this._shadowMapHash = ctx.shadowMapInfo.get(shadowLight)!.shaderHash;
-                runLightPass([shadowLight]);
-                lightIndex = 1;
-                renderedTransparentOITShadow = true;
+            for (const k of ctx.shadowMapInfo.keys()) {
+              ctx.currentShadowLight = k;
+              ctx.lightBlending = lightIndex > 0;
+              this._shadowMapHash = ctx.shadowMapInfo.get(k)!.shaderHash;
+              if (ctx.lightBlending && tmpFramebuffer && !ctx.oit) {
+                ctx.materialFlags &= ~MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
+                ctx.materialFlags &= ~MaterialVaryingFlags.SSS_STORE_PROFILE;
+                ctx.materialFlags &= ~MaterialVaryingFlags.SSS_STORE_NORMAL;
+                ctx.device.pushDeviceStates();
+                ctx.device.setFramebuffer(tmpFramebuffer);
               }
-            } else {
-              for (const k of ctx.shadowMapInfo.keys()) {
-                ctx.currentShadowLight = k;
-                ctx.lightBlending = lightIndex > 0;
-                this._shadowMapHash = ctx.shadowMapInfo.get(k)!.shaderHash;
-                if (ctx.lightBlending && tmpFramebuffer && !ctx.oit) {
-                  ctx.materialFlags &= ~MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
-                  ctx.device.pushDeviceStates();
-                  ctx.device.setFramebuffer(tmpFramebuffer);
-                }
-                runLightPass([k]);
-                if (ctx.lightBlending && tmpFramebuffer && !ctx.oit) {
-                  ctx.materialFlags |= surfaceMRT;
-                  ctx.device.popDeviceStates();
-                }
-                lightIndex++;
+              runLightPass([k]);
+              if (ctx.lightBlending && tmpFramebuffer && !ctx.oit) {
+                ctx.materialFlags |= surfaceMRT;
+                ctx.device.popDeviceStates();
               }
+              lightIndex++;
             }
           }
-          if (
-            (!singleTransparentOITPass && (lightIndex === 0 || renderQueue.unshadowedLights.length > 0)) ||
-            (singleTransparentOITPass && !renderedTransparentOITShadow)
-          ) {
+          if (lightIndex === 0 || renderQueue.unshadowedLights.length > 0) {
             ctx.currentShadowLight = null;
             ctx.lightBlending = lightIndex > 0;
             this._shadowMapHash = '';
             const hasUnshadowedLights = renderQueue.unshadowedLights.length > 0;
             if (ctx.lightBlending && hasUnshadowedLights && tmpFramebuffer && !ctx.oit) {
               ctx.materialFlags &= ~MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
+              ctx.materialFlags &= ~MaterialVaryingFlags.SSS_STORE_PROFILE;
+              ctx.materialFlags &= ~MaterialVaryingFlags.SSS_STORE_NORMAL;
               ctx.device.pushDeviceStates();
               ctx.device.setFramebuffer(tmpFramebuffer);
             }
@@ -263,6 +296,9 @@ export class LightPass extends RenderPass {
             i === 0 ? PostEffectLayer.opaque : PostEffectLayer.transparent,
             ctx.linearDepthTexture!
           );
+          if (i === 0 && surfaceMRT && (ctx.device.getFramebuffer()?.getColorAttachments().length ?? 0) <= 1) {
+            ctx.materialFlags &= ~surfaceMRT;
+          }
         }
       }
     }

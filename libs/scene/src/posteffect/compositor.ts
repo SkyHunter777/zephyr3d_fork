@@ -124,19 +124,32 @@ export class Compositor {
         ? 'rgba16f'
         : 'rgba8unorm';
     this._finalFramebuffer = device.getFramebuffer();
-    const ssr = !!(ctx.materialFlags & MaterialVaryingFlags.SSR_STORE_ROUGHNESS);
     if (this._postEffects.every((list) => list.length === 0)) {
       return;
     }
     const depth = this._finalFramebuffer?.getDepthAttachment() as Texture2D;
     const w = depth ? depth.width : device.getDrawingBufferWidth();
     const h = depth ? depth.height : device.getDrawingBufferHeight();
-    //const fmt2: TextureFormat = ssr ? (device.type === 'webgl' ? format : 'rgba8unorm') : format;
+    const attachments: any[] = [this._textureFormat];
+    if (ctx.materialFlags & MaterialVaryingFlags.SSR_STORE_ROUGHNESS) {
+      attachments.push(ctx.SSRRoughnessTexture!, ctx.SSRNormalTexture!);
+    } else if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_NORMAL) {
+      attachments.push(ctx.SSRNormalTexture!);
+    }
+    if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE) {
+      attachments.push(ctx.SSSProfileTexture!, ctx.SSSParamTexture!);
+    }
+    if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_DIFFUSE) {
+      attachments.push(ctx.SSSDiffuseTexture!);
+    }
+    if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_TRANSMISSION) {
+      attachments.push(ctx.SSSTransmissionTexture!);
+    }
     const tmpFramebuffer = device.pool.fetchTemporalFramebuffer(
       true,
       w,
       h,
-      ssr ? [this._textureFormat, ctx.SSRRoughnessTexture, ctx.SSRNormalTexture] : this._textureFormat,
+      attachments.length === 1 ? attachments[0] : attachments,
       depth ?? ctx.depthFormat
     );
     device.setFramebuffer(tmpFramebuffer);

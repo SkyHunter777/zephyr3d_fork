@@ -2,13 +2,15 @@ import { MeshMaterial, applyMaterialMixins } from './meshmaterial';
 import type { BindGroup, PBFunctionScope, PBInsideFunctionScope, PBShaderExp } from '@zephyr3d/device';
 import { ShaderHelper } from './shader/helper';
 import { MaterialVaryingFlags, RENDER_PASS_TYPE_LIGHT } from '../values';
-import { DRef, Vector2, Vector3, Vector4, type Clonable, type Immutable } from '@zephyr3d/base';
+import { DRef, Vector2, Vector4, type Clonable, type Immutable } from '@zephyr3d/base';
 import { mixinPBRBluePrint } from './mixins/lightmodel/pbrblueprintmixin';
+import { mixinTextureProps } from './mixins/texture';
 import type { BluePrintUniformTexture, BluePrintUniformValue } from '../utility/blueprint/material/ir';
 import { MaterialBlueprintIR } from '../utility/blueprint/material/ir';
 import type { DrawContext } from '../render/drawable';
 import { PBRBlockNode, VertexBlockNode } from '../utility/blueprint/material/pbr';
 import type { PBRReflectionMode } from './mixins/lightmodel/pbrmetallicroughness';
+import { SubsurfaceProfile } from './subsurfaceprofile';
 
 const PBR_REFLECTION_MODE: Record<PBRReflectionMode, number> = {
   none: 0,
@@ -37,15 +39,13 @@ const PBR_REFLECTION_MODE: Record<PBRReflectionMode, number> = {
  * @public
  */
 export class PBRBluePrintMaterial
-  extends applyMaterialMixins(MeshMaterial, mixinPBRBluePrint)
+  extends applyMaterialMixins(MeshMaterial, mixinPBRBluePrint, mixinTextureProps('subsurface'))
   implements Clonable<PBRBluePrintMaterial>
 {
   /** @internal */
   private static readonly FEATURE_VERTEX_COLOR = this.defineFeature();
   /** @internal */
   private static readonly FEATURE_VERTEX_UV = this.defineFeature();
-  /** @internal */
-  private static readonly FEATURE_SUBSURFACE_SCATTERING = this.defineFeature();
   /** @internal */
   private _irFrag: MaterialBlueprintIR;
   /** @internal */
@@ -57,13 +57,9 @@ export class PBRBluePrintMaterial
   /** @internal */
   private _reflectionMode: PBRReflectionMode;
   /** @internal */
-  private readonly _subsurfaceColor: Vector3;
+  private readonly _subsurfaceProfileChanged: () => void;
   /** @internal */
-  private _subsurfaceScale: number;
-  /** @internal */
-  private _subsurfacePower: number;
-  /** @internal */
-  private _subsurfaceIntensity: number;
+  private _subsurfaceProfile: SubsurfaceProfile | null;
   /** @internal */
   private _anisotropy: number;
   /** @internal */
@@ -120,14 +116,11 @@ export class PBRBluePrintMaterial
     this._uniformValues = uniformValues ?? [];
     this._uniformTextures = uniformTextures ?? [];
     this._reflectionMode = 'ggx';
-    this._subsurfaceColor = new Vector3(1, 0.3, 0.2);
-    this._subsurfaceScale = 0.5;
-    this._subsurfacePower = 1.5;
-    this._subsurfaceIntensity = 0.5;
+    this._subsurfaceProfileChanged = () => this.uniformChanged();
+    this._subsurfaceProfile = null;
     this._anisotropy = 0.75;
     this._anisotropyDirection = 0;
     this._anisotropyDirectionScaleBias = new Vector2(1, 0);
-    this.useFeature(PBRBluePrintMaterial.FEATURE_SUBSURFACE_SCATTERING, false);
     this.useFeature(PBRBluePrintMaterial.FEATURE_VERTEX_COLOR, this._irVertex.behaviors.useVertexColor);
     this.useFeature(PBRBluePrintMaterial.FEATURE_VERTEX_UV, this._irVertex.behaviors.useVertexUV);
   }
@@ -140,46 +133,15 @@ export class PBRBluePrintMaterial
       this.uniformChanged();
     }
   }
-  get subsurfaceScattering() {
-    return this.featureUsed<boolean>(PBRBluePrintMaterial.FEATURE_SUBSURFACE_SCATTERING);
+  get subsurfaceProfile() {
+    return this._subsurfaceProfile;
   }
-  set subsurfaceScattering(val: boolean) {
-    this.useFeature(PBRBluePrintMaterial.FEATURE_SUBSURFACE_SCATTERING, !!val);
-  }
-  get subsurfaceColor(): Immutable<Vector3> {
-    return this._subsurfaceColor;
-  }
-  set subsurfaceColor(val: Immutable<Vector3>) {
-    if (!val.equalsTo(this._subsurfaceColor)) {
-      this._subsurfaceColor.set(val);
-      this.uniformChanged();
-    }
-  }
-  get subsurfaceScale() {
-    return this._subsurfaceScale;
-  }
-  set subsurfaceScale(val: number) {
-    if (val !== this._subsurfaceScale) {
-      this._subsurfaceScale = val;
-      this.uniformChanged();
-    }
-  }
-  get subsurfacePower() {
-    return this._subsurfacePower;
-  }
-  set subsurfacePower(val: number) {
-    if (val !== this._subsurfacePower) {
-      this._subsurfacePower = val;
-      this.uniformChanged();
-    }
-  }
-  get subsurfaceIntensity() {
-    return this._subsurfaceIntensity;
-  }
-  set subsurfaceIntensity(val: number) {
-    if (val !== this._subsurfaceIntensity) {
-      this._subsurfaceIntensity = val;
-      this.uniformChanged();
+  set subsurfaceProfile(val: SubsurfaceProfile | null) {
+    if (val !== this._subsurfaceProfile) {
+      this._subsurfaceProfile?.removeChangeListener(this._subsurfaceProfileChanged);
+      this._subsurfaceProfile = val ?? null;
+      this._subsurfaceProfile?.addChangeListener(this._subsurfaceProfileChanged);
+      this.optionChanged(true);
     }
   }
   get anisotropy() {
@@ -302,11 +264,7 @@ export class PBRBluePrintMaterial
   copyFrom(other: this) {
     super.copyFrom(other);
     this.reflectionMode = other.reflectionMode;
-    this.subsurfaceScattering = other.subsurfaceScattering;
-    this.subsurfaceColor = other.subsurfaceColor;
-    this.subsurfaceScale = other.subsurfaceScale;
-    this.subsurfacePower = other.subsurfacePower;
-    this.subsurfaceIntensity = other.subsurfaceIntensity;
+    this.subsurfaceProfile = other.subsurfaceProfile;
     this.anisotropy = other.anisotropy;
     this.anisotropyDirection = other.anisotropyDirection;
     this.anisotropyDirectionScaleBias = other.anisotropyDirectionScaleBias;
@@ -358,12 +316,6 @@ export class PBRBluePrintMaterial
       pb.cross(scope.$outputs.zVertexNormal, scope.$outputs.zVertexTangent),
       scope.oTangent.w
     );
-    for (const outputName of ['Output1', 'Output2', 'Output3', 'Output4']) {
-      const output = this.getOutput(outputs, outputName);
-      if (output) {
-        scope.$outputs[outputName] = output;
-      }
-    }
   }
   /**
    * Builds the fragment shader for this PBR blueprint material.
@@ -374,14 +326,14 @@ export class PBRBluePrintMaterial
     super.fragmentShader(scope);
     const pb = scope.$builder;
     if (
-      this.subsurfaceScattering &&
+      !!this._subsurfaceProfile &&
       this.needFragmentColor() &&
       this.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT
     ) {
-      scope.zSubsurfaceColor = pb.vec3().uniform(2);
-      scope.zSubsurfaceScale = pb.float().uniform(2);
-      scope.zSubsurfacePower = pb.float().uniform(2);
-      scope.zSubsurfaceIntensity = pb.float().uniform(2);
+      scope.zSubsurfaceProfileId = pb.float().uniform(2);
+      scope.zSubsurfaceProfileScale = pb.float().uniform(2);
+      scope.zSubsurfaceProfileStrength = pb.float().uniform(2);
+      scope.zSubsurfaceProfilePreset = pb.float().uniform(2);
     }
     if (this.needFragmentColor()) {
       scope.zAnisotropy = pb.float().uniform(2);
@@ -410,41 +362,79 @@ export class PBRBluePrintMaterial
       if (this.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
         if (this.drawContext.materialFlags & MaterialVaryingFlags.SSR_STORE_ROUGHNESS) {
           scope.$l.outRoughness = pb.vec4();
-          scope.$l.litColor = this.PBRLight(
-            scope,
-            scope.$inputs.worldPos,
-            scope.viewVec,
-            scope.commonData,
-            scope.outRoughness
-          );
-          if (this.subsurfaceScattering) {
-            scope.litColor = this.applySubsurfaceScattering(
+          const writeSSSDiffuse =
+            !!this._subsurfaceProfile &&
+            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_DIFFUSE);
+          if (writeSSSDiffuse) {
+            scope.$l.sssDiffuse = pb.vec4();
+            scope.$l.litColor = this.PBRLight(
               scope,
-              scope.litColor,
-              scope.commonData.albedo.rgb,
-              scope.commonData.normal,
-              scope.viewVec
+              scope.$inputs.worldPos,
+              scope.viewVec,
+              scope.commonData,
+              scope.outRoughness,
+              scope.sssDiffuse
+            );
+          } else {
+            scope.$l.litColor = this.PBRLight(
+              scope,
+              scope.$inputs.worldPos,
+              scope.viewVec,
+              scope.commonData,
+              scope.outRoughness
             );
           }
+          const writeSSSProfile =
+            !!this._subsurfaceProfile &&
+            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE);
+          scope.$l.sssProfile = writeSSSProfile ? this.buildSubsurfaceProfile(scope) : pb.vec4(0);
+          scope.$l.sssParams = writeSSSProfile ? scope.sssParams ?? pb.vec4(0) : pb.vec4(0);
           this.outputFragmentColor(
             scope,
             scope.$inputs.worldPos,
             scope.litColor,
             scope.outRoughness,
-            pb.vec4(pb.add(pb.mul(scope.commonData.normal, 0.5), pb.vec3(0.5)), 1)
+            pb.vec4(pb.add(pb.mul(scope.commonData.normal, 0.5), pb.vec3(0.5)), 1),
+            scope.sssProfile,
+            scope.sssParams,
+            writeSSSDiffuse ? scope.sssDiffuse : undefined,
+            undefined,
+            writeSSSProfile
           );
         } else {
-          scope.$l.litColor = this.PBRLight(scope, scope.$inputs.worldPos, scope.viewVec, scope.commonData);
-          if (this.subsurfaceScattering) {
-            scope.litColor = this.applySubsurfaceScattering(
+          const writeSSSDiffuse =
+            !!this._subsurfaceProfile &&
+            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_DIFFUSE);
+          if (writeSSSDiffuse) {
+            scope.$l.sssDiffuse = pb.vec4();
+            scope.$l.litColor = this.PBRLight(
               scope,
-              scope.litColor,
-              scope.commonData.albedo.rgb,
-              scope.commonData.normal,
-              scope.viewVec
+              scope.$inputs.worldPos,
+              scope.viewVec,
+              scope.commonData,
+              undefined,
+              scope.sssDiffuse
             );
+          } else {
+            scope.$l.litColor = this.PBRLight(scope, scope.$inputs.worldPos, scope.viewVec, scope.commonData);
           }
-          this.outputFragmentColor(scope, scope.$inputs.worldPos, scope.litColor);
+          const writeSSSProfile =
+            !!this._subsurfaceProfile &&
+            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE);
+          scope.$l.sssProfile = writeSSSProfile ? this.buildSubsurfaceProfile(scope) : pb.vec4(0);
+          scope.$l.sssParams = writeSSSProfile ? scope.sssParams ?? pb.vec4(0) : pb.vec4(0);
+          this.outputFragmentColor(
+            scope,
+            scope.$inputs.worldPos,
+            scope.litColor,
+            undefined,
+            undefined,
+            scope.sssProfile,
+            scope.sssParams,
+            writeSSSDiffuse ? scope.sssDiffuse : undefined,
+            undefined,
+            writeSSSProfile
+          );
         }
       } else {
         this.outputFragmentColor(scope, scope.$inputs.worldPos, scope.commonData.albedo);
@@ -472,21 +462,21 @@ export class PBRBluePrintMaterial
       bindGroup.setValue('zAnisotropy', this._anisotropy);
       bindGroup.setValue('zAnisotropyDirection', this._anisotropyDirection);
       bindGroup.setValue('zAnisotropyDirectionScaleBias', this._anisotropyDirectionScaleBias);
-      if (this.subsurfaceScattering && ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
-        bindGroup.setValue('zSubsurfaceColor', this._subsurfaceColor);
-        bindGroup.setValue('zSubsurfaceScale', this._subsurfaceScale);
-        bindGroup.setValue('zSubsurfacePower', this._subsurfacePower);
-        bindGroup.setValue('zSubsurfaceIntensity', this._subsurfaceIntensity);
-      }
-    }
-    for (const u of this._uniformValues) {
-      if (u.inVertexShader || this.needFragmentColor(ctx)) {
+      for (const u of this._uniformValues) {
         bindGroup.setValue(u.name, u.finalValue!);
       }
-    }
-    for (const u of this._uniformTextures) {
-      if (u.inVertexShader || this.needFragmentColor(ctx)) {
+      for (const u of this._uniformTextures) {
         bindGroup.setTexture(u.name, u.finalTexture!.get()!, u.finalSampler);
+      }
+      if (
+        !!this._subsurfaceProfile &&
+        ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT
+      ) {
+        const profile = this._subsurfaceProfile;
+        bindGroup.setValue('zSubsurfaceProfileId', profile?.slot ?? 0);
+        bindGroup.setValue('zSubsurfaceProfileScale', profile?.scale ?? 0);
+        bindGroup.setValue('zSubsurfaceProfileStrength', profile?.strength ?? 0);
+        bindGroup.setValue('zSubsurfaceProfilePreset', profile?.presetIndex ?? 0);
       }
     }
   }
@@ -504,7 +494,9 @@ export class PBRBluePrintMaterial
    * @returns A hash string that uniquely identifies this material configuration.
    */
   protected _createHash() {
-    return `${super._createHash()}:${this._irFrag.hash}:${this._irVertex.hash}`;
+    return `${super._createHash()}:${this._irFrag.hash}:${this._irVertex.hash}:${
+      this._subsurfaceProfile ? 1 : 0
+    }`;
   }
   /**
    * Creates the GPU program for this blueprint PBR material.
@@ -557,24 +549,54 @@ export class PBRBluePrintMaterial
   ) {
     return outputs.find((output) => output.name === name)?.exp;
   }
-  private applySubsurfaceScattering(
-    scope: PBInsideFunctionScope,
-    litColor: PBShaderExp,
-    albedoRGB: PBShaderExp,
-    normal: PBShaderExp,
-    viewVec: PBShaderExp
-  ) {
+  private buildSubsurfaceProfile(scope: PBInsideFunctionScope) {
     const pb = scope.$builder;
-    scope.$l.NoV = pb.clamp(pb.dot(normal, viewVec), 0, 1);
-    scope.$l.wrapNdotV = pb.clamp(
-      pb.div(pb.add(pb.sub(1, scope.NoV), scope.zSubsurfaceScale), pb.add(1, scope.zSubsurfaceScale)),
+    scope.$l.sssMask = pb.float(1);
+    scope.$l.sssScatterSoftness = pb.float(0);
+    scope.$l.sssTransmissionMask = pb.float(0);
+    if (this.subsurfaceTexture) {
+      scope.$l.sssTexel = this.sampleSubsurfaceTexture(scope);
+      scope.sssMask = pb.clamp(scope.sssTexel.r, 0, 1);
+      scope.sssScatterSoftness = pb.clamp(scope.sssTexel.g, 0, 1);
+    }
+    scope.$l.sssScatterStrengthMask = pb.clamp(
+      pb.add(pb.mul(scope.sssMask, 0.82), pb.mul(scope.sssScatterSoftness, 0.38)),
       0,
       1
     );
-    scope.$l.sssFactor = pb.mul(pb.pow(scope.wrapNdotV, scope.zSubsurfacePower), scope.zSubsurfaceIntensity);
+    scope.$l.sssScatterWidthMask = pb.clamp(
+      pb.max(scope.sssMask, pb.mul(scope.sssScatterSoftness, 0.9)),
+      0,
+      1
+    );
+    scope.$l.sssStrength = pb.mul(scope.zSubsurfaceProfileStrength, scope.sssScatterStrengthMask);
+    scope.$l.sssWidthBase = pb.mul(scope.zSubsurfaceProfileScale, scope.sssScatterWidthMask);
+    scope.$l.sssWidth = pb.clamp(
+      pb.div(scope.sssWidthBase, pb.add(scope.sssWidthBase, 1)),
+      0,
+      0.999
+    );
+    scope.sssTransmissionMask = pb.clamp(
+      pb.add(
+        pb.mul(scope.sssMask, 0.12),
+        pb.add(pb.mul(scope.sssStrength, 0.18), pb.mul(scope.sssWidth, 0.24))
+      ),
+      0,
+      0.42
+    );
+    scope.$l.sssSlotEncoded = pb.div(scope.zSubsurfaceProfileId, 255);
+    scope.$l.sssPresetEncoded = pb.div(scope.zSubsurfaceProfilePreset, 255);
+    scope.$l.sssParams = pb.vec4(
+      scope.sssSlotEncoded,
+      scope.sssWidth,
+      scope.sssPresetEncoded,
+      pb.add(0.75, pb.mul(scope.sssScatterSoftness, 0.25))
+    );
     return pb.vec4(
-      pb.add(litColor.rgb, pb.mul(albedoRGB, scope.zSubsurfaceColor, scope.sssFactor)),
-      litColor.a
+      scope.sssStrength,
+      scope.sssStrength,
+      scope.sssStrength,
+      scope.sssTransmissionMask
     );
   }
 }
