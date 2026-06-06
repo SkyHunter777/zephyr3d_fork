@@ -76,7 +76,6 @@ export class ShaderHelper {
   /** @internal */
   private static readonly _lightUniformShadow = {
     sunDir: new Vector3(),
-    envLightStrength: 1,
     shadowCascades: 1,
     positionAndRange: new Vector4(),
     directionAndCutoff: new Vector4(),
@@ -86,7 +85,8 @@ export class ShaderHelper {
     depthBiasValues: new Vector4(),
     shadowCameraParams: new Vector4(),
     depthBiasScales: new Vector4(),
-    shadowMatrices: new Float32Array(16 * 4)
+    shadowMatrices: new Float32Array(16 * 4),
+    envLightStrength: 1
   };
   /** @internal */
   private static readonly _fogUniforms = {
@@ -893,7 +893,6 @@ export class ShaderHelper {
     this._lightUniformShadow.sunDir = ctx.sunLight
       ? ctx.sunLight.directionAndCutoff.xyz().scaleBy(-1)
       : this.defaultSunDir;
-    this._lightUniformShadow.envLightStrength = ctx.env?.light.strength ?? 0;
     this._lightUniformShadow.shadowCascades = shadowMapParams.numShadowCascades;
     this._lightUniformShadow.positionAndRange.set(light.positionAndRange);
     this._lightUniformShadow.directionAndCutoff.set(light.directionAndCutoff);
@@ -904,6 +903,7 @@ export class ShaderHelper {
     this._lightUniformShadow.shadowCameraParams.set(shadowMapParams.cameraParams);
     this._lightUniformShadow.depthBiasScales.set(shadowMapParams.depthBiasScales);
     this._lightUniformShadow.shadowMatrices.set(shadowMapParams.shadowMatrices);
+    this._lightUniformShadow.envLightStrength = ctx.env?.light.strength ?? 0;
     bindGroup.setValue('light', this._lightUniformShadow);
     bindGroup.setTexture(
       UNIFORM_NAME_SHADOW_MAP,
@@ -1342,6 +1342,7 @@ export class ShaderHelper {
           this.NoL,
           this.split
         );
+        this.shadow = pb.clamp(this.shadow, 0, 1);
         this.$l.shadowDistance = that.getShadowCameraParams(scope).w;
         this.shadow = pb.mix(
           this.shadow,
@@ -1352,6 +1353,7 @@ export class ShaderHelper {
             pb.distance(that.getCameraPosition(this), this.worldPos)
           )
         );
+        this.shadow = pb.clamp(this.shadow, 0, 1);
         this.$return(this.shadow);
       } else {
         this.$l.shadowVertex = that.calculateShadowSpaceVertex(this, pb.vec4(this.worldPos, 1));
@@ -1362,6 +1364,7 @@ export class ShaderHelper {
           this.shadowVertex,
           this.NoL
         );
+        this.shadow = pb.clamp(this.shadow, 0, 1);
         this.$l.shadowDistance = that.getShadowCameraParams(scope).w;
         this.shadow = pb.mix(
           this.shadow,
@@ -1372,6 +1375,7 @@ export class ShaderHelper {
             pb.distance(that.getCameraPosition(this), this.worldPos)
           )
         );
+        this.shadow = pb.clamp(this.shadow, 0, 1);
         this.$return(this.shadow);
       }
     });
@@ -1383,6 +1387,9 @@ export class ShaderHelper {
     if (ctx.materialFlags & MaterialVaryingFlags.APPLY_FOG) {
       const funcName = 'Z_applyFog';
       pb.func(funcName, [pb.vec3('worldPos'), pb.vec4('color').inout()], function () {
+        this.$if(pb.notEqual(this.fog.additive, 0), function () {
+          this.$return();
+        });
         this.$l.uv = pb.div(pb.vec2(this.$builtins.fragCoord.xy), that.getRenderSize(this));
         this.$l.fogging = calculateFog(
           this,

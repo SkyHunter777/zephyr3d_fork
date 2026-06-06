@@ -35,12 +35,20 @@ export class LightPass extends RenderPass {
     this._transmission = val;
   }
   /** @internal */
+  protected getAdditiveLightPassColorAttachments(ctx: DrawContext) {
+    const framebuffer = ctx.device.getFramebuffer();
+    if (!framebuffer) {
+      return null;
+    }
+    return framebuffer.getColorAttachments()[0];
+  }
+  /** @internal */
   protected _getGlobalBindGroupHash(ctx: DrawContext, camera: Camera) {
-    return `${this._shadowMapHash}:${ctx.lightBlending ? 1 : 0}:${camera.oit?.calculateHash() ?? ''}:${ctx.env!.getHash(
-      ctx
-    )}:${ctx.materialFlags}:${ctx.linearDepthTexture?.uid ?? 0}:${ctx.sceneColorTexture?.uid ?? 0}:${
-      ctx.HiZTexture?.uid ?? 0
-    }`;
+    return `${this._shadowMapHash}:${ctx.currentShadowLight?.runtimeId ?? 0}:${ctx.lightBlending ? 1 : 0}:${
+      camera.oit?.calculateHash() ?? ''
+    }:${ctx.env!.getHash(ctx)}:${ctx.materialFlags}:${ctx.linearDepthTexture?.uid ?? 0}:${
+      ctx.sceneColorTexture?.uid ?? 0
+    }:${ctx.HiZTexture?.uid ?? 0}`;
   }
   /** @internal */
   protected renderLightPass(
@@ -112,7 +120,7 @@ export class LightPass extends RenderPass {
           false,
           ctx.device.getDrawingBufferWidth(),
           ctx.device.getDrawingBufferHeight(),
-          ctx.device.getFramebuffer()!.getColorAttachments()[0],
+          this.getAdditiveLightPassColorAttachments(ctx)!,
           ctx.device.getFramebuffer()!.getDepthAttachment()
         )
       : null;
@@ -161,13 +169,14 @@ export class LightPass extends RenderPass {
             ctx.currentShadowLight = null;
             ctx.lightBlending = lightIndex > 0;
             this._shadowMapHash = '';
-            if (ctx.lightBlending && tmpFramebuffer) {
+            const hasUnshadowedLights = renderQueue.unshadowedLights.length > 0;
+            if (ctx.lightBlending && hasUnshadowedLights && tmpFramebuffer) {
               ctx.materialFlags &= ~MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
               ctx.device.pushDeviceStates();
               ctx.device.setFramebuffer(tmpFramebuffer);
             }
             this.renderLightPass(ctx, camera, lists[i]!, renderQueue.unshadowedLights, flags);
-            if (ctx.lightBlending && tmpFramebuffer) {
+            if (ctx.lightBlending && hasUnshadowedLights && tmpFramebuffer) {
               ctx.materialFlags |= MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
               ctx.device.popDeviceStates();
             }

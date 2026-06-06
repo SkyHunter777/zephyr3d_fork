@@ -143,6 +143,7 @@ export function mixinBlinnPhong<T extends typeof MeshMaterial>(BaseCls: T) {
       const pb = scope.$builder;
       const funcName = 'Z_blinnPhongLight';
       const that = this;
+      const baseLightPass = !that.drawContext.lightBlending;
       pb.func(
         funcName,
         [
@@ -160,7 +161,7 @@ export function mixinBlinnPhong<T extends typeof MeshMaterial>(BaseCls: T) {
               that.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING
                 ? this.$inputs.zShininess
                 : this.zShininess;
-            if (that.needCalculateEnvLight() && !outRoughness) {
+            if (that.needCalculateEnvLight() && !outRoughness && baseLightPass) {
               this.$l.diffuseColor = that.getEnvLightIrradiance(this, this.normal);
             } else {
               this.$l.diffuseColor = pb.vec3(0);

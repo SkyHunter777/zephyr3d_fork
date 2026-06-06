@@ -1,5 +1,6 @@
 import type { PBInsideFunctionScope, PBShaderExp } from '@zephyr3d/device';
 import { ShaderHelper } from '../material';
+import { LIGHT_TYPE_DIRECTIONAL } from '../values';
 
 export function computeShadowBiasCSM(scope: PBInsideFunctionScope, NdotL: PBShaderExp, split: PBShaderExp) {
   const pb = scope.$builder;
@@ -23,7 +24,7 @@ export function computeShadowBias(
 ) {
   const pb = scope.$builder;
   const depthBiasParam = ShaderHelper.getDepthBiasValues(scope);
-  if (lightType) {
+  if (lightType === LIGHT_TYPE_DIRECTIONAL) {
     return pb.dot(pb.mul(depthBiasParam.xy, pb.vec2(1, pb.sub(1, NdotL))), pb.vec2(1, 1));
   } else {
     const nearFar = ShaderHelper.getShadowCameraParams(scope).xy;

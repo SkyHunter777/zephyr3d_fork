@@ -359,7 +359,9 @@ export class Material extends Disposable implements Clonable<Material>, IDisposa
    * @internal
    */
   private calcGlobalHash(ctx: DrawContext, pass: number) {
-    return `${this.getHash(pass)}:${ctx.materialFlags}:${ctx.renderPassHash}`;
+    return `${this.getHash(pass)}:${ctx.materialFlags}:${ctx.renderPassHash}:${
+      ctx.drawEnvLight ? 1 : 0
+    }:${ctx.currentShadowLight ? 1 : 0}:${ctx.lightBlending ? 1 : 0}`;
   }
   /**
    * Draw a primitive for all passes using this material.

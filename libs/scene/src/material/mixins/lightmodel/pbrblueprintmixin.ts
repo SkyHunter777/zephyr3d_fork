@@ -148,6 +148,7 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
       const pb = scope.$builder;
       const funcName = 'Z_PBRBluePrintLight';
       const that = this;
+      const baseLightPass = !that.drawContext.lightBlending;
       pb.func(
         funcName,
         [
@@ -158,11 +159,13 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
         ],
         function () {
           this.$l.lightingColor = pb.vec3(0);
-          this.$l.emissiveColor = this.pbrData.emissive;
-          if (outRoughness) {
-            that.indirectLighting(this, this.viewVec, this.pbrData, this.lightingColor, this.outRoughness);
-          } else {
-            that.indirectLighting(this, this.viewVec, this.pbrData, this.lightingColor);
+          this.$l.emissiveColor = baseLightPass ? this.pbrData.emissive : pb.vec3(0);
+          if (baseLightPass) {
+            if (outRoughness) {
+              that.indirectLighting(this, this.viewVec, this.pbrData, this.lightingColor, this.outRoughness);
+            } else {
+              that.indirectLighting(this, this.viewVec, this.pbrData, this.lightingColor);
+            }
           }
           that.forEachLight(this, function (type, posRange, dirCutoff, colorIntensity, extra, shadow) {
             this.$if(pb.equal(type, LIGHT_TYPE_RECT), function () {
@@ -200,13 +203,17 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
                   this.NoL = pb.clamp(pb.dot(this.pbrData.normal, this.L), 0, 1);
                   this.NoL_light = pb.clamp(pb.dot(this.lightNormal, pb.neg(this.L)), 0, 1);
                   this.$if(pb.greaterThan(this.NoL_light, 0), function () {
+                    this.$l.sampleShadow = pb.float(1);
                     this.falloff = pb.float(1);
                     this.$if(pb.greaterThan(this.range, 0), function () {
                       this.falloff = pb.max(0, pb.sub(1, pb.div(this.dist, this.range)));
                       this.falloff = pb.mul(this.falloff, this.falloff);
                     });
+                    if (shadow) {
+                      this.sampleShadow = that.calculateShadow(this, this.worldPos, pb.max(this.NoL, 1e-5));
+                    }
                     this.atten = pb.mul(this.invDist2, this.NoL_light, this.falloff);
-                    this.lightColor = pb.mul(this.baseColor, this.atten, this.NoL);
+                    this.lightColor = pb.mul(this.baseColor, this.atten, this.NoL, this.sampleShadow);
                     that.directLighting(
                       this,
                       this.L,

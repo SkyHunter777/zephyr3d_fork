@@ -6,7 +6,7 @@ import { RenderQueue } from './render_queue';
 import type { Camera } from '../camera/camera';
 import type { DrawContext } from './drawable';
 import { RenderBundleWrapper } from './renderbundle_wrapper';
-import { MaterialVaryingFlags } from '../values';
+import { MaterialVaryingFlags, RENDER_PASS_TYPE_LIGHT } from '../values';
 import type { BindGroup } from '@zephyr3d/device';
 import { getDevice } from '../app/api';
 
@@ -132,7 +132,7 @@ export abstract class RenderPass extends Disposable {
     hash: string
   ) {
     let recording = false;
-    if (renderBundle && ctx.camera.commandBufferReuse) {
+    if (renderBundle && ctx.camera.commandBufferReuse && !this.shouldDisableRenderBundles(ctx)) {
       const bundle = renderBundle.getRenderBundle(hash);
       if (bundle) {
         ctx.device.executeRenderBundle(bundle);
@@ -161,9 +161,16 @@ export abstract class RenderPass extends Disposable {
         ctx.device.reverseVertexWindingOrder(!ctx.device.isWindingOrderReversed());
       }
     }
-    if (renderBundle && ctx.camera.commandBufferReuse) {
+    if (renderBundle && ctx.camera.commandBufferReuse && !this.shouldDisableRenderBundles(ctx)) {
       renderBundle.endRenderBundle(hash);
     }
+  }
+  private shouldDisableRenderBundles(ctx: DrawContext) {
+    return (
+      (ctx.renderPass?.type === RENDER_PASS_TYPE_LIGHT &&
+        (!!ctx.currentShadowLight || !!ctx.lightBlending)) ||
+      false
+    );
   }
   /** @internal */
   protected drawItemList(itemList: RenderItemListInfo, ctx: DrawContext, reverseWinding: boolean) {

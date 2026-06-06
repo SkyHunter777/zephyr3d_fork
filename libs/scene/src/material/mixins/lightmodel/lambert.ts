@@ -43,11 +43,12 @@ export function mixinLambert<T extends typeof MeshMaterial>(BaseCls: T) {
       const pb = scope.$builder;
       const funcName = 'Z_lambertLight';
       const that = this;
+      const baseLightPass = !that.drawContext.lightBlending;
       pb.func(funcName, [pb.vec3('worldPos'), pb.vec3('normal'), pb.vec4('albedo')], function () {
         if (!that.needFragmentColor()) {
           this.$return(this.albedo.rgb);
         } else {
-          if (that.needCalculateEnvLight()) {
+          if (that.needCalculateEnvLight() && baseLightPass) {
             this.$l.diffuseColor = that.getEnvLightIrradiance(this, this.normal);
           } else {
             this.$l.diffuseColor = pb.vec3(0);

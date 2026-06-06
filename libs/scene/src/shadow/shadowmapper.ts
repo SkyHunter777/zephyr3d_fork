@@ -696,9 +696,8 @@ export class ShadowMapper {
   }
   /** @internal */
   protected createLightCameraSpot(lightCamera: Camera) {
-    lightCamera.parent = this._light;
-    lightCamera.position.setXYZ(0, 0, 0);
-    lightCamera.rotation.identity();
+    this._light.worldMatrix.decompose(null, lightCamera.rotation, lightCamera.position);
+    lightCamera.parent = this._light.scene?.rootNode ?? null;
     lightCamera.scale.setXYZ(1, 1, 1);
     lightCamera.setPerspective(
       2 * Math.acos((this._light as SpotLight).cutoff),
@@ -710,9 +709,8 @@ export class ShadowMapper {
   /** @internal */
   protected createLightCameraRect(lightCamera: Camera) {
     const rect = this._light as RectLight;
-    lightCamera.parent = this._light;
-    lightCamera.position.setXYZ(0, 0, 0);
-    lightCamera.rotation.identity();
+    this._light.worldMatrix.decompose(null, lightCamera.rotation, lightCamera.position);
+    lightCamera.parent = this._light.scene?.rootNode ?? null;
     lightCamera.scale.setXYZ(1, 1, 1);
     const halfW = rect.width * 0.5;
     const halfH = rect.height * 0.5;
@@ -980,7 +978,7 @@ export class ShadowMapper {
       const shadowMapRenderCamera = ShadowMapper.fetchCameraForScene(scene);
       this.createLightCameraPoint(shadowMapRenderCamera);
       this.calcDepthBiasParams(
-        camera,
+        shadowMapRenderCamera,
         this._config.shadowMapSize,
         this._config.depthBias,
         this._config.normalBias,
@@ -1034,7 +1032,7 @@ export class ShadowMapper {
           );
           this.createLightCameraDirectional(shadowRegion, cascadeCamera, shadowMapCullCamera, null, border);
           this.calcDepthBiasParams(
-            camera,
+            shadowMapRenderCamera,
             this._config.shadowMapSize,
             this._config.depthBias,
             this._config.normalBias,
@@ -1108,6 +1106,7 @@ export class ShadowMapper {
       } else {
         const shadowMapRenderCamera = ShadowMapper.fetchCameraForScene(scene)!;
         const snapMatrix = ShadowMapper._snapMatrix;
+        snapMatrix.identity();
         shadowMapRenderCamera.clipMask = AABB.ClipLeft | AABB.ClipRight | AABB.ClipBottom | AABB.ClipTop;
         if (this._light.isDirectionLight()) {
           this.createLightCameraDirectional(
@@ -1123,7 +1122,7 @@ export class ShadowMapper {
           this.createLightCameraSpot(shadowMapRenderCamera);
         }
         this.calcDepthBiasParams(
-          camera,
+          shadowMapRenderCamera,
           this._config.shadowMapSize,
           this._config.depthBias,
           this._config.normalBias,
