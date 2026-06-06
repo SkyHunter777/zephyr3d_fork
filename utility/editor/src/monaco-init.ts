@@ -1,3 +1,15 @@
+declare const __DEV__: boolean;
+declare const __ZEPHYR3D_MONACO_PACKAGES__: Array<{
+  name: string;
+  devEntry: string;
+  devRoot: string;
+  prodDts: string;
+  useSourceInDev: boolean;
+  virtualRoot?: string;
+  virtualEntryPath?: string;
+}>;
+declare const __ZEPHYR3D_MONACO_SOURCE_FILES__: string[];
+
 declare global {
   interface Window {
     require?: {
@@ -7,37 +19,40 @@ declare global {
   }
 }
 
+type MonacoPackage = (typeof __ZEPHYR3D_MONACO_PACKAGES__)[number];
+
 const monacoCssHref = './vendor/monaco/vs/editor/editor.main.css';
 const monacoLoaderHref = './vendor/monaco/vs/loader.js';
 const monacoBaseHref = './vendor/monaco/vs';
-
-const typeFiles = [
-  { path: 'vendor/zephyr3d/base/dist/index.d.ts', name: '@zephyr3d/base' },
-  { path: 'vendor/zephyr3d/device/dist/index.d.ts', name: '@zephyr3d/device' },
-  { path: 'vendor/zephyr3d/scene/dist/index.d.ts', name: '@zephyr3d/scene' },
-  { path: 'vendor/zephyr3d/imgui/dist/index.d.ts', name: '@zephyr3d/imgui' },
-  { path: 'vendor/zephyr3d/loaders/dist/index.d.ts', name: '@zephyr3d/loaders' },
-  { path: 'vendor/zephyr3d/backend-webgl/dist/index.d.ts', name: '@zephyr3d/backend-webgl' },
-  { path: 'vendor/zephyr3d/backend-webgpu/dist/index.d.ts', name: '@zephyr3d/backend-webgpu' },
-  {
-    path: 'vendor/zephyr3d/editor/dist/pluginapi/core/pluginapi.d.ts',
-    name: '@zephyr3d/editor/editor-plugin'
-  }
-] as const;
-
-const zephyrPackages = [
-  '@zephyr3d/base',
-  '@zephyr3d/device',
-  '@zephyr3d/scene',
-  '@zephyr3d/backend-webgl',
-  '@zephyr3d/backend-webgpu',
-  '@zephyr3d/editor/editor-plugin'
-] as const;
+const monacoPackages = __ZEPHYR3D_MONACO_PACKAGES__;
+const zephyrPackages = monacoPackages.map((pkg) => pkg.name);
+const monacoSourceFiles = new Set(__ZEPHYR3D_MONACO_SOURCE_FILES__.map((url) => resolveBrowserUrl(url)));
 
 let monacoInitPromise: Promise<void> | null = null;
 
-function resolveEditorAssetUrl(path: string) {
-  return new URL(path.replace(/^\.?\//, ''), document.baseURI).href;
+function resolveEditorAssetUrl(filePath: string) {
+  return new URL(filePath.replace(/^\.?\//, ''), document.baseURI).href;
+}
+
+function resolveBrowserUrl(url: string) {
+  return new URL(url, document.baseURI).href;
+}
+
+function normalizeVirtualRoot(pkg: MonacoPackage) {
+  return (pkg.virtualRoot ?? `file:///node_modules/${pkg.name}`).replace(/\/+$/, '');
+}
+
+function createVirtualFileName(pkg: MonacoPackage, sourceUrl: string) {
+  if (pkg.virtualEntryPath && sourceUrl === resolveBrowserUrl(pkg.devEntry)) {
+    return pkg.virtualEntryPath;
+  }
+
+  const normalizedSourceUrl = sourceUrl.replace(/\\/g, '/');
+  const normalizedDevRoot = resolveBrowserUrl(pkg.devRoot).replace(/\\/g, '/').replace(/\/+$/, '');
+  const relativePath = normalizedSourceUrl.startsWith(normalizedDevRoot)
+    ? normalizedSourceUrl.slice(normalizedDevRoot.length).replace(/^\/+/, '')
+    : normalizedSourceUrl.split('/').pop() ?? 'index.ts';
+  return relativePath ? `${normalizeVirtualRoot(pkg)}/${relativePath}` : `${normalizeVirtualRoot(pkg)}/index.ts`;
 }
 
 function ensureMonacoCss() {
@@ -101,25 +116,112 @@ function requireModules(modules: string[]) {
   });
 }
 
-async function loadTypeFiles(monaco: any) {
-  const loadPromises = typeFiles.map(async (file) => {
-    const url = resolveEditorAssetUrl(file.path);
+function parseRelativeImports(source: string) {
+  const imports = new Set<string>();
+  const importExportRe =
+    /\b(?:import|export)\b(?:[\s\w*{},]+from\s*)?\(\s*["']([^"']+)["']\s*\)|\b(?:import|export)\b[\s\w*{},]*from\s*["']([^"']+)["']|\brequire\(\s*["']([^"']+)["']\s*\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = importExportRe.exec(source))) {
+    const specifier = match[1] || match[2] || match[3];
+    if (specifier?.startsWith('./') || specifier?.startsWith('../')) {
+      imports.add(specifier);
+    }
+  }
+  return [...imports];
+}
+
+function resolveRelativeCandidates(specifier: string, baseUrl: string) {
+  const resolved = new URL(specifier, baseUrl);
+  const href = resolved.toString();
+  if (/\.[a-z0-9]+$/i.test(resolved.pathname)) {
+    return monacoSourceFiles.has(href) ? [href] : [];
+  }
+  const base = href.endsWith('/') ? href.slice(0, -1) : href;
+  return [
+    `${base}.d.ts`,
+    `${base}.ts`,
+    `${base}.tsx`,
+    `${base}.js`,
+    `${base}.mjs`,
+    `${base}/index.d.ts`,
+    `${base}/index.ts`,
+    `${base}/index.tsx`,
+    `${base}/index.js`,
+    `${base}/index.mjs`
+  ].filter((candidate) => monacoSourceFiles.has(candidate));
+}
+
+async function fetchText(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+  return await response.text();
+}
+
+async function tryFetchFirst(candidates: string[]) {
+  for (const url of candidates) {
     try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      const content = await response.text();
-      const fileName = `file:///node_modules/${file.name}/index.d.ts`;
-      monaco.languages.typescript.typescriptDefaults.addExtraLib(content, fileName);
-      return { success: true, file: url };
+      const content = await fetchText(url);
+      return { url, content };
+    } catch {
+      // Keep trying until one candidate resolves.
+    }
+  }
+  return null;
+}
+
+async function loadDevSourceTypes(pkg: MonacoPackage, monaco: any) {
+  const visited = new Set<string>();
+  const pending = [resolveBrowserUrl(pkg.devEntry)];
+  const defaults = monaco.languages.typescript.typescriptDefaults;
+
+  while (pending.length > 0) {
+    const currentUrl = pending.shift();
+    if (!currentUrl || visited.has(currentUrl)) {
+      continue;
+    }
+    visited.add(currentUrl);
+
+    let content: string;
+    try {
+      content = await fetchText(currentUrl);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`Failed to load ${url}:`, message);
-      return { success: false, file: url, error: message };
+      console.warn(`Failed to load ${currentUrl}:`, message);
+      continue;
     }
-  });
-  return Promise.allSettled(loadPromises);
+
+    defaults.addExtraLib(content, createVirtualFileName(pkg, currentUrl));
+
+    for (const specifier of parseRelativeImports(content)) {
+      const resolved = await tryFetchFirst(resolveRelativeCandidates(specifier, currentUrl));
+      if (resolved && !visited.has(resolved.url)) {
+        pending.push(resolved.url);
+      }
+    }
+  }
+}
+
+async function loadProdTypes(pkg: MonacoPackage, monaco: any) {
+  const url = resolveEditorAssetUrl(pkg.prodDts);
+  try {
+    const content = await fetchText(url);
+    monaco.languages.typescript.typescriptDefaults.addExtraLib(content, `${normalizeVirtualRoot(pkg)}/index.d.ts`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`Failed to load ${url}:`, message);
+  }
+}
+
+async function loadTypeFiles(monaco: any) {
+  for (const pkg of monacoPackages) {
+    if (__DEV__ && pkg.useSourceInDev) {
+      await loadDevSourceTypes(pkg, monaco);
+    } else {
+      await loadProdTypes(pkg, monaco);
+    }
+  }
 }
 
 function configureMonacoDefaults(monaco: any) {
@@ -138,7 +240,7 @@ function configureMonacoDefaults(monaco: any) {
     strict: true,
     skipLibCheck: true,
     declaration: true,
-    baseUrl: '.',
+    baseUrl: 'file:///',
     typeRoots: ['file:///node_modules/@types'],
     resolveJsonModule: true,
     experimentalDecorators: true,
