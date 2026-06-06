@@ -138,16 +138,16 @@ function resolveRelativeCandidates(specifier: string, baseUrl: string) {
   }
   const base = href.endsWith('/') ? href.slice(0, -1) : href;
   return [
-    `${base}.d.ts`,
     `${base}.ts`,
     `${base}.tsx`,
     `${base}.js`,
     `${base}.mjs`,
-    `${base}/index.d.ts`,
+    `${base}.d.ts`,
     `${base}/index.ts`,
     `${base}/index.tsx`,
     `${base}/index.js`,
-    `${base}/index.mjs`
+    `${base}/index.mjs`,
+    `${base}/index.d.ts`
   ].filter((candidate) => monacoSourceFiles.has(candidate));
 }
 

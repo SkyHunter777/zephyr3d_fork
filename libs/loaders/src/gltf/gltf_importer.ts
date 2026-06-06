@@ -1599,7 +1599,6 @@ export class GLTFImporter extends AbstractModelImporter {
     vfs: VFS
   ): Promise<AssetTextureInfo> {
     const mt: AssetTextureInfo = {
-      name: null,
       image: null,
       sampler: null,
       texCoord: info.texCoord ?? 0,
@@ -1626,7 +1625,7 @@ export class GLTFImporter extends AbstractModelImporter {
             : Vector3.zero();
         mt.transform = Matrix4x4.scaling(scale).multiplyLeft(rotation).translateLeft(translation);
       }
-      mt.name = textureInfo.name || null;
+      mt.name = textureInfo.name || undefined;
       let wrapS: TextureAddressMode = 'repeat';
       let wrapT: TextureAddressMode = 'repeat';
       let magFilter: TextureFilterMode = 'linear';
@@ -1700,7 +1699,7 @@ export class GLTFImporter extends AbstractModelImporter {
           if (image.uri) {
             const imageUrl = vfs.normalizePath(vfs.join(gltf._baseURI, image.uri));
             mt.image = {
-              name: image.name || textureInfo.name || null,
+              name: image.name || textureInfo.name || undefined,
               uri: imageUrl
             };
           } else if (typeof image.bufferView === 'number' && image.mimeType) {
@@ -1711,7 +1710,7 @@ export class GLTFImporter extends AbstractModelImporter {
                 const view = new Uint8Array(arrayBuffer, bufferView.byteOffset || 0, bufferView.byteLength);
                 const mimeType = image.mimeType;
                 mt.image = {
-                  name: image.name || textureInfo.name || null,
+                  name: image.name || textureInfo.name || undefined,
                   data: view,
                   mimeType
                 };

@@ -4,9 +4,20 @@ import dts from 'rollup-plugin-dts';
 
 function getTargetDts() {
   return {
+    external: (id) => /@zephyr3d\/base/.test(id),
     input: './src/index.ts',
     output: [{ file: './dist/index.d.ts', format: 'es' }],
-    plugins: [dts()]
+    plugins: [
+      dts({
+        respectExternal: true,
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@zephyr3d/base': ['../base/dist/index.d.ts']
+          }
+        }
+      })
+    ]
   };
 }
 

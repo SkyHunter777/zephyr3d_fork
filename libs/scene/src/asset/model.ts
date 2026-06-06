@@ -2,6 +2,7 @@ import type { TypedArray, Interpolator, Nullable, DeepPartial, VFS } from '@zeph
 import {
   ASSERT,
   DRef,
+  PathUtils,
   uint8ArrayToBase64,
   Vector4,
   Disposable,
