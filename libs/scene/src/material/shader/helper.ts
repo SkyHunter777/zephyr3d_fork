@@ -87,7 +87,8 @@ export class ShaderHelper {
     depthBiasScales: new Vector4(),
     shadowMatrices: new Float32Array(16 * 4),
     shadowStrength: 1,
-    envLightStrength: 1
+    envLightStrength: 1,
+    envLightSpecularStrength: 1
   };
   /** @internal */
   private static readonly _fogUniforms = {
@@ -248,11 +249,13 @@ export class ShaderHelper {
             pb.vec4('depthBiasScales'),
             pb.vec4[16]('shadowMatrices'),
             pb.float('shadowStrength'),
-            pb.float('envLightStrength')
+            pb.float('envLightStrength'),
+            pb.float('envLightSpecularStrength')
           ])
         : pb.defineStruct([
             pb.vec3('sunDir'),
             pb.float('envLightStrength'),
+            pb.float('envLightSpecularStrength'),
             pb.vec4('clusterParams'),
             pb.ivec4('countParams'),
             pb.ivec2('lightIndexTexSize')
@@ -880,6 +883,7 @@ export class ShaderHelper {
       clusterParams: clusterParams,
       countParams: countParams,
       envLightStrength: ctx.env!.light.strength ?? 0,
+      envLightSpecularStrength: ctx.env!.light.specularStrength ?? 1,
       lightIndexTexSize: new Int32Array([lightIndexTexture.width, lightIndexTexture.height])
     });
     bindGroup.setBuffer(UNIFORM_NAME_LIGHT_BUFFER, lightBuffer);
@@ -907,6 +911,7 @@ export class ShaderHelper {
     this._lightUniformShadow.shadowMatrices.set(shadowMapParams.shadowMatrices);
     this._lightUniformShadow.shadowStrength = light.shadow.shadowStrength;
     this._lightUniformShadow.envLightStrength = ctx.env?.light.strength ?? 0;
+    this._lightUniformShadow.envLightSpecularStrength = ctx.env?.light.specularStrength ?? 1;
     bindGroup.setValue('light', this._lightUniformShadow);
     bindGroup.setTexture(
       UNIFORM_NAME_SHADOW_MAP,
@@ -929,6 +934,18 @@ export class ShaderHelper {
    */
   static getEnvLightStrength(scope: PBInsideFunctionScope): PBShaderExp {
     return scope.light.envLightStrength;
+  }
+  /**
+   * Gets the uniform variable of type float which holds the specular strength of the environment light
+   *
+   * @remarks
+   * This function can only be used in the fragment shader
+   *
+   * @param scope - Current shader scope
+   * @returns The uniform variable which presents the specular strength of the environment light
+   */
+  static getEnvLightSpecularStrength(scope: PBInsideFunctionScope): PBShaderExp {
+    return scope.light.envLightSpecularStrength ?? scope.$builder.float(1);
   }
   /**
    * Gets current scene color texture

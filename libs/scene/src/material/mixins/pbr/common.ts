@@ -1415,6 +1415,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
             return;
           }
           const envLightStrength = ShaderHelper.getEnvLightStrength(this);
+          const envLightSpecularStrength = ShaderHelper.getEnvLightSpecularStrength(this);
           this.$l.specWeight = pb.mix(this.data.specularWeight, 1.0, this.data.metallic);
           if (that.occlusionTexture) {
             const occlusionSample = that.sampleOcclusionTexture(this).r;
@@ -1479,7 +1480,10 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
                 pb.reflect(pb.neg(this.viewVec), this.normal),
                 this.data.roughness
               );
-              this.outColor = pb.add(this.outColor, pb.mul(this.radiance, this.specularFactor));
+              this.outColor = pb.add(
+                this.outColor,
+                pb.mul(this.radiance, this.specularFactor, envLightSpecularStrength)
+              );
             }
           }
           if (ctx.env!.light.envLight.hasIrradiance()) {
@@ -1572,7 +1576,12 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
               this.data.ccFactor.y
             );
             this.$l.FssEss = pb.add(pb.mul(this.k_S, this.f_ab.x), pb.vec3(this.f_ab.y));
-            this.$l.ccSpecular = pb.mul(this.radiance, this.FssEss, this.occlusion);
+            this.$l.ccSpecular = pb.mul(
+              this.radiance,
+              this.FssEss,
+              this.occlusion,
+              envLightSpecularStrength
+            );
             this.outColor = pb.add(
               pb.mul(this.outColor, pb.sub(pb.vec3(1), pb.mul(this.FssEss, this.data.ccFactor.x))),
               pb.mul(this.ccSpecular, this.data.ccFactor.x)

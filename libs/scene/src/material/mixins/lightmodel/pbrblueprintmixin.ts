@@ -530,6 +530,7 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
             return;
           }
           const envLightStrength = ShaderHelper.getEnvLightStrength(this);
+          const envLightSpecularStrength = ShaderHelper.getEnvLightSpecularStrength(this);
           this.$l.occlusion = envLightStrength;
           this.$l.reflectionMode = this.zReflectionMode;
           this.$l.NoV = pb.clamp(pb.dot(this.data.normal, this.viewVec), 0.0001, 1);
@@ -563,7 +564,10 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
                 pb.reflect(pb.neg(this.viewVec), this.data.normal),
                 this.data.roughness
               );
-              this.outColor = pb.add(this.outColor, pb.mul(this.radiance, this.specularFactor));
+              this.outColor = pb.add(
+                this.outColor,
+                pb.mul(this.radiance, this.specularFactor, envLightSpecularStrength)
+              );
             }
           }
           if (ctx.env!.light.envLight.hasIrradiance()) {
