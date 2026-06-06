@@ -969,13 +969,21 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
           ];
         }
         this.$l.alphaWidth = pb.max(pb.fwidth(this.alpha), 1e-4);
+        this.$l.shadowCutoff = pb.max(pb.sub(this.cutoff, pb.min(0.18, pb.mul(this.alphaWidth, 2))), 0);
         this.$l.coverage = pb.clamp(
-          pb.add(pb.div(pb.sub(this.alpha, this.cutoff), this.alphaWidth), 0.5),
+          pb.add(pb.div(pb.sub(this.alpha, this.shadowCutoff), this.alphaWidth), 0.5),
           0,
           1
         );
         this.$l.pixel = pb.mod(pb.floor(this.$builtins.fragCoord.xy), pb.vec2(4));
-        this.$l.noise = this.Z_shadowDither4x4.at(pb.uint(pb.add(pb.mul(this.pixel.y, 4), this.pixel.x)));
+        // Scramble the ordered dither with shadow depth so overlapping masked layers
+        // at the same texel do not all discard the exact same coverage bits.
+        this.$l.layerJitter = pb.floor(pb.mul(pb.fract(pb.mul(this.$builtins.fragCoord.z, 131.37)), 16));
+        this.$l.ditherIndex = pb.mod(
+          pb.add(pb.add(pb.mul(this.pixel.y, 4), this.pixel.x), this.layerJitter),
+          16
+        );
+        this.$l.noise = this.Z_shadowDither4x4.at(pb.uint(this.ditherIndex));
         this.$return(pb.lessThan(this.coverage, this.noise));
       } else if (that.featureUsed<boolean>(FEATURE_ALPHADITHER) && !that.isTransparentPass(that.pass)) {
         this.$l.frame = pb.float(ShaderHelper.getFramestamp(this));

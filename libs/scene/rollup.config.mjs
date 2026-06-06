@@ -6,9 +6,27 @@ const externals = [/@zephyr3d\/base/, /@zephyr3d\/device/];
 
 function getTargetDts() {
   return {
+    external: (id) => {
+      for (const m of externals) {
+        if (m.test(id)) {
+          return true;
+        }
+      }
+    },
     input: './src/index.ts',
     output: [{ file: './dist/index.d.ts', format: 'es' }],
-    plugins: [dts()]
+    plugins: [
+      dts({
+        respectExternal: true,
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@zephyr3d/base': ['../base/dist/index.d.ts'],
+            '@zephyr3d/device': ['../device/dist/index.d.ts']
+          }
+        }
+      })
+    ]
   };
 }
 
