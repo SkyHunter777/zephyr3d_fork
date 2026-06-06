@@ -31,6 +31,7 @@ import { getParticleNodeClass } from './scene/particle';
 import {
   getBoxShapeClass,
   getBoxFrameShapeClass,
+  getCapsuleShapeClass,
   getSphereShapeClass,
   getTorusShapeClass,
   getCylinderShapeClass,
@@ -305,6 +306,7 @@ export class ResourceManager {
 
         getBoxShapeClass(),
         getBoxFrameShapeClass(),
+        getCapsuleShapeClass(),
         getSphereShapeClass(),
         getTorusShapeClass(),
         getCylinderShapeClass(),
@@ -523,6 +525,18 @@ export class ResourceManager {
    */
   getPropertiesByClass(cls: SerializableClass) {
     return this._clsPropMap.get(cls) ?? null;
+  }
+  /**
+   * Get all properties declared on a class, including inherited serializable properties.
+   */
+  getAllPropertiesByClass(cls: Nullable<SerializableClass>) {
+    const props: PropertyAccessor[] = [];
+    let current = cls;
+    while (current) {
+      props.unshift(...(this.getPropertiesByClass(current) ?? []));
+      current = current.parent ? this.getClassByConstructor(current.parent) : null;
+    }
+    return props;
   }
   /**
    * Get a property accessor by class and property name.
@@ -840,6 +854,12 @@ export class ResourceManager {
    */
   invalidateBluePrint(path: string) {
     this._assetManager.invalidateBluePrint(path);
+  }
+  /**
+   * Register a model loader by MIME type.
+   */
+  setModelLoader(mimeType: string, loader: import('../../asset').ModelLoader) {
+    this._assetManager.setModelLoader(mimeType, loader);
   }
   /**
    * Load a primitive by ID and track the allocation for reverse lookup.
