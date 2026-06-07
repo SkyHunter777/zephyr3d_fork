@@ -41,6 +41,7 @@ import {
 import { getSceneClass } from './scene/scene';
 import { getTerrainClass } from './scene/terrain';
 import { getWaterClass, getFFTWaveGeneratorClass, getFBMWaveGeneratorClass } from './scene/water';
+import { getMSDFTextClass, getMSDFTextSpriteClass, getTextSpriteClass } from './scene/text';
 import {
   getAnimationClass,
   getFixedGeometryCacheTrackClass,
@@ -284,6 +285,9 @@ export class ResourceManager {
         getGraphNodeClass(),
         getMeshClass(),
         getSpriteClass(),
+        getTextSpriteClass(),
+        getMSDFTextSpriteClass(),
+        getMSDFTextClass(),
         getWaterClass(this),
         getTerrainClass(this),
         getFFTWaveGeneratorClass(),
