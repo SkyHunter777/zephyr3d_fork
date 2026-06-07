@@ -45,6 +45,7 @@ import {
   getAnimationClass,
   getFixedGeometryCacheTrackClass,
   getInterpolatorClass,
+  getJointDynamicsModifierClass,
   getMorphTrackClass,
   getPCAGeometryCacheTrackClass,
   getNodeEulerRotationTrackClass,
@@ -52,7 +53,9 @@ import {
   getNodeScaleTrackClass,
   getNodeTranslationTrackClass,
   getPropTrackClass,
-  getSkeletonClass
+  getSkeletonClass,
+  getSkeletonRigClass,
+  getSkinBindingClass
 } from './scene/animation';
 import type { Scene } from '../../scene';
 import { SceneNode } from '../../scene';
@@ -68,6 +71,7 @@ import {
   getJSONStringClass,
   getJSONArrayClass
 } from './json';
+import { getScriptAttachmentClass } from './scene/script';
 import {
   ConstantBooleanNode,
   ConstantBVec2Node,
@@ -260,9 +264,13 @@ export class ResourceManager {
         getJSONBoolClass(),
         getJSONObjectClass(),
         getJSONArrayClass(),
+        getScriptAttachmentClass(),
         getAABBClass(),
         getInterpolatorClass(),
         getSkeletonClass(),
+        getSkeletonRigClass(),
+        getSkinBindingClass(),
+        getJointDynamicsModifierClass(),
         getAnimationClass(this),
         getPropTrackClass(this),
         getNodeRotationTrackClass(),
