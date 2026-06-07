@@ -17,6 +17,7 @@ type PropertySnapshot = {
 type ScriptConfigEditorHost = {
   scriptHost: Scene | SceneNode;
   scriptPath: string;
+  attachmentIndex: number;
 };
 
 export type ScriptPanelOptions = {
@@ -30,6 +31,9 @@ export type ScriptPanelOptions = {
   onSceneChanged?: () => void;
   onRefreshMainProperties?: () => void;
   getSelectedAssetPath?: () => Nullable<string>;
+  getScriptInspectorAccessors?: (
+    context: ScriptConfigEditorHost
+  ) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>;
 };
 
 export class ScriptPanel {
@@ -87,11 +91,13 @@ export class ScriptPanel {
   }
 
   render() {
+    ImGui.PushID('ScriptPanel');
     const host = this._host;
     ImGui.Text('Scripts');
     if (!host) {
       ImGui.Separator();
       ImGui.TextDisabled('Select a scene or node to edit scripts');
+      ImGui.PopID();
       return;
     }
     const attachments = this.getScriptAttachments(host);
@@ -125,6 +131,7 @@ export class ScriptPanel {
             this.moveScriptAttachment(host, i, -1);
             this.popInlineActionButtonStyle();
             ImGui.EndTable();
+            ImGui.PopID();
             return;
           }
         } else {
@@ -138,6 +145,7 @@ export class ScriptPanel {
             this.moveScriptAttachment(host, i, 1);
             this.popInlineActionButtonStyle();
             ImGui.EndTable();
+            ImGui.PopID();
             return;
           }
         } else {
@@ -152,6 +160,7 @@ export class ScriptPanel {
           this.popInlineActionButtonStyle();
           this.removeScriptAttachment(host, i);
           ImGui.EndTable();
+          ImGui.PopID();
           return;
         }
         this.popInlineActionButtonStyle();
@@ -160,6 +169,7 @@ export class ScriptPanel {
     }
     ImGui.Separator();
     if (this.renderScriptDropTarget(host)) {
+      ImGui.PopID();
       return;
     }
     if (attachments.length > 0) {
@@ -170,6 +180,7 @@ export class ScriptPanel {
         ImGui.TextDisabled('Select a valid script to edit config');
       }
     }
+    ImGui.PopID();
   }
 
   private getScriptAttachments(host: Scene | SceneNode) {
@@ -189,7 +200,11 @@ export class ScriptPanel {
     this._selectedScriptIndex = Math.max(0, Math.min(this._selectedScriptIndex, attachments.length - 1));
     const attachment = attachments[this._selectedScriptIndex];
     this._scriptConfigEditorHost = attachment?.script
-      ? { scriptHost: host!, scriptPath: attachment.script }
+      ? {
+          scriptHost: host!,
+          scriptPath: attachment.script,
+          attachmentIndex: this._selectedScriptIndex
+        }
       : null;
     this._scriptConfigGrid.object = this._scriptConfigEditorHost;
     this._scriptConfigGrid.setExtraPropertiesProvider(
@@ -197,14 +212,17 @@ export class ScriptPanel {
       this._scriptConfigEditorHost
         ? async (object) =>
             object === this._scriptConfigEditorHost
-              ? this.bindScriptPropertyAccessors(
-                  this._scriptConfigEditorHost.scriptHost,
-                  await getSingleScriptPropertyAccessors(
+              ? [
+                  ...this.bindScriptPropertyAccessors(
                     this._scriptConfigEditorHost.scriptHost,
-                    this._scriptConfigEditorHost.scriptPath,
-                    this._selectedScriptIndex
-                  )
-                )
+                    await getSingleScriptPropertyAccessors(
+                      this._scriptConfigEditorHost.scriptHost,
+                      this._scriptConfigEditorHost.scriptPath,
+                      this._scriptConfigEditorHost.attachmentIndex
+                    )
+                  ),
+                  ...((await this._options.getScriptInspectorAccessors?.(this._scriptConfigEditorHost)) ?? [])
+                ]
               : []
         : null
     );

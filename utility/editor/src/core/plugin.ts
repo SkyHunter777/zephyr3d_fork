@@ -25,6 +25,8 @@ import type {
   EditorToolbarContext,
   EditorEditToolFactoryContext,
   EditorPropertyAccessorProvider,
+  EditorScriptInspectorAccessorProvider,
+  EditorScriptInspectorContext,
   EditorEventMap,
   EditorPlugin,
   EditorPluginContext,
@@ -60,6 +62,8 @@ export type {
   EditorToolbarContext,
   EditorEditToolFactoryContext,
   EditorPropertyAccessorProvider,
+  EditorScriptInspectorAccessorProvider,
+  EditorScriptInspectorContext,
   EditorEventMap,
   EditorPluginDefinition,
   EditorPlugin,
@@ -187,6 +191,10 @@ export type RuntimeEditorPropertyAccessorProvider = (
   object: unknown
 ) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>;
 
+export type RuntimeEditorScriptInspectorAccessorProvider = (
+  context: EditorScriptInspectorContext
+) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>;
+
 type EditorPluginEntry = {
   plugin: EditorPlugin;
   context: Nullable<EditorPluginContext>;
@@ -202,6 +210,7 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
   private readonly _editToolFactories: RuntimeEditorEditToolFactory[] = [];
   private readonly _nodeProxyFactories: RuntimeEditorNodeProxyFactory[] = [];
   private readonly _propertyAccessorProviders = new Map<string, RuntimeEditorPropertyAccessorProvider>();
+  private readonly _scriptInspectorAccessorProviders = new Map<string, RuntimeEditorScriptInspectorAccessorProvider>();
 
   constructor(editor: Editor) {
     super();
@@ -341,9 +350,29 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
     };
   }
 
+  addScriptInspectorAccessorProvider(id: string, provider: RuntimeEditorScriptInspectorAccessorProvider) {
+    if (this._scriptInspectorAccessorProviders.has(id)) {
+      throw new Error(`Editor script inspector accessor provider '${id}' already registered`);
+    }
+    this._scriptInspectorAccessorProviders.set(id, provider);
+    this.dispatchContributionChanged();
+    return () => {
+      if (this._scriptInspectorAccessorProviders.delete(id)) {
+        this.dispatchContributionChanged();
+      }
+    };
+  }
+
   async getPropertyAccessors(object: unknown) {
     const results = await Promise.all(
       [...this._propertyAccessorProviders.values()].map((provider) => Promise.resolve(provider(object)))
+    );
+    return results.flatMap((props) => props ?? []);
+  }
+
+  async getScriptInspectorAccessors(context: EditorScriptInspectorContext) {
+    const results = await Promise.all(
+      [...this._scriptInspectorAccessorProviders.values()].map((provider) => Promise.resolve(provider(context)))
     );
     return results.flatMap((props) => props ?? []);
   }
@@ -507,7 +536,9 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
         selectProjectFiles: async (title, rootDir, multi, filter, width, height) =>
           await Dialog.openFile(title, ProjectService.VFS, rootDir, filter, multi, width, height),
         selectProjectFolders: async (title, rootDir, multi, width, height) =>
-          await Dialog.openFolder(title, ProjectService.VFS, rootDir, multi, width, height)
+          await Dialog.openFolder(title, ProjectService.VFS, rootDir, multi, width, height),
+        saveProjectFile: async (title, rootDir, filter, defaultName, width, height) =>
+          await Dialog.saveFile(title, ProjectService.VFS, rootDir, filter, width ?? 520, height ?? 620, defaultName)
       },
       getSceneContext: () => {
         const controller = this._editor.moduleManager.currentModule?.controller;
@@ -553,6 +584,11 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
       },
       registerPropertyAccessors: (providerId: string, provider: EditorPropertyAccessorProvider) => {
         const dispose = this.addPropertyAccessorProvider(`${plugin.id}:${providerId}`, provider);
+        context.subscriptions.push(new EditorPluginSubscription(dispose));
+        return dispose;
+      },
+      registerScriptInspectorExtension: (providerId: string, provider: EditorScriptInspectorAccessorProvider) => {
+        const dispose = this.addScriptInspectorAccessorProvider(`${plugin.id}:${providerId}`, provider);
         context.subscriptions.push(new EditorPluginSubscription(dispose));
         return dispose;
       },

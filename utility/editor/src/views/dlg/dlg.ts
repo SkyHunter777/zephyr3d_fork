@@ -87,9 +87,10 @@ export class Dialog {
     rootDir: string,
     filter: string,
     width: number,
-    height: number
+    height: number,
+    defaultName?: string
   ) {
-    return DlgSaveFile.saveFile(title, vfs, rootDir, filter, width, height);
+    return DlgSaveFile.saveFile(title, vfs, rootDir, filter, width, height, defaultName);
   }
   public static async openFile(
     title: string,

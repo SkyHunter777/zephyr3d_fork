@@ -244,7 +244,8 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       onPropertyEditFinished: (object, prop, oldValue, newValue) =>
         void this.handleObjectPropertyEditFinished(object, prop, oldValue, newValue),
       onSceneChanged: () => eventBus.dispatchEvent('scene_changed'),
-      onRefreshMainProperties: () => this._propGrid.refresh()
+      onRefreshMainProperties: () => this._propGrid.refresh(),
+      getScriptInspectorAccessors: (context) => this.editor.plugins.getScriptInspectorAccessors(context)
     });
     this._propGrid.setExtraPropertiesProvider('morph-target-groups', (object) =>
       getMorphTargetGroupPropertyAccessors(object)
@@ -1106,29 +1107,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     this._leftDockPanel!.end();
 
     if (this._rightDockPanel.begin('##PropertyGridPanel')) {
-      const contentHeight = ImGui.GetContentRegionAvail().y;
-      const splitterHeight = 6;
-      const minScriptPanelHeight = 140;
-      const minPropPanelHeight = 80;
-      const maxScriptPanelHeight = Math.max(
-        minScriptPanelHeight,
-        contentHeight - minPropPanelHeight - splitterHeight
-      );
-      const scriptPanelHeight = Math.max(
-        minScriptPanelHeight,
-        Math.min(this._scriptPanel.height, maxScriptPanelHeight)
-      );
-      this._scriptPanel.height = scriptPanelHeight;
-      const propPanelHeight = Math.max(
-        minPropPanelHeight,
-        contentHeight - scriptPanelHeight - splitterHeight
-      );
-      if (ImGui.BeginChild('##PropGridRegion', new ImGui.ImVec2(-1, propPanelHeight), false)) {
+      if (ImGui.BeginChild('##PropGridRegion', new ImGui.ImVec2(-1, 0), false)) {
         this._propGrid.render();
-      }
-      ImGui.EndChild();
-      this.renderScriptPanelSplitter(contentHeight, splitterHeight, minPropPanelHeight, minScriptPanelHeight);
-      if (ImGui.BeginChild('##ScriptPanelRegion', new ImGui.ImVec2(-1, 0), false)) {
+        ImGui.Separator();
         this._scriptPanel.render();
       }
       ImGui.EndChild();
@@ -2594,43 +2575,6 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     this.updateGizmoTransformSpace();
     this._propGrid.object = activeNode === activeNode.scene!.rootNode ? activeNode.scene : activeNode;
     this._scriptPanel.host = activeNode === activeNode.scene!.rootNode ? activeNode.scene : activeNode;
-  }
-  private renderScriptPanelSplitter(
-    totalHeight: number,
-    splitterHeight: number,
-    minPropPanelHeight: number,
-    minScriptPanelHeight: number
-  ) {
-    const width = ImGui.GetContentRegionAvail().x;
-    const style = ImGui.GetStyle();
-    const size = new ImGui.ImVec2(width, splitterHeight);
-    ImGui.InvisibleButton('##script_panel_splitter', size, 0);
-    const hovered = ImGui.IsItemHovered();
-    const active = ImGui.IsItemActive();
-    const rectMin = ImGui.GetItemRectMin();
-    const rectMax = ImGui.GetItemRectMax();
-    const drawList = ImGui.GetWindowDrawList();
-    const color = ImGui.GetColorU32(
-      active ? ImGui.Col.SeparatorActive : hovered ? ImGui.Col.SeparatorHovered : ImGui.Col.Separator
-    );
-    const lineY = (rectMin.y + rectMax.y) * 0.5;
-    drawList.AddLine(new ImGui.ImVec2(rectMin.x, lineY), new ImGui.ImVec2(rectMax.x, lineY), color, 1);
-    if (hovered || active) {
-      ImGui.SetMouseCursor(ImGui.MouseCursor.ResizeNS);
-    }
-    if (active) {
-      const maxScriptPanelHeight = Math.max(
-        minScriptPanelHeight,
-        totalHeight - minPropPanelHeight - splitterHeight
-      );
-      this._scriptPanel.height = Math.max(
-        minScriptPanelHeight,
-        Math.min(this._scriptPanel.height - ImGui.GetIO().MouseDelta.y, maxScriptPanelHeight)
-      );
-    }
-    if (style.ItemSpacing.y > 0) {
-      ImGui.Dummy(new ImGui.ImVec2(0, Math.max(0, style.ItemSpacing.y - splitterHeight)));
-    }
   }
   private isTransformModeActive() {
     const mode = this._postGizmoRenderer?.mode;
