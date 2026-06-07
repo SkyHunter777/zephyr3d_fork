@@ -9,6 +9,13 @@ export type SaveOptions = {
   importAnimations: boolean;
   importJointDynamics: boolean;
   rebuildPrefab?: boolean;
+  rebuildMaterial?: boolean;
+};
+
+type SharedModelWithPreprocessOptions = SharedModel & {
+  _preprocessOptions?: {
+    rebuildMaterial?: boolean;
+  };
 };
 
 export class ResourceService {
@@ -65,7 +72,15 @@ export class ResourceService {
     srcVFS: VFS,
     saveOptions?: SaveOptions
   ) {
-    await model.preprocess(manager, name, path, srcVFS, getEngine().resourceManager.VFS);
+    const modelWithOptions = model as SharedModelWithPreprocessOptions;
+    modelWithOptions._preprocessOptions = {
+      rebuildMaterial: saveOptions?.rebuildMaterial ?? true
+    };
+    try {
+      await model.preprocess(manager, name, path, srcVFS, getEngine().resourceManager.VFS);
+    } finally {
+      delete modelWithOptions._preprocessOptions;
+    }
     const prefabName = name.endsWith('.zprefab') ? name : `${name}.zprefab`;
     const prefabPath = manager.VFS.join(path, prefabName);
     if (!saveOptions?.rebuildPrefab && (await manager.VFS.exists(prefabPath))) {

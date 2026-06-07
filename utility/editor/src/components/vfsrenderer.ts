@@ -1865,7 +1865,8 @@ export class VFSRenderer extends makeObservable(Disposable)<{
                       dtVFS,
                       {
                         ...saveOptions[i],
-                        rebuildPrefab: !!result.rebuildPrefab
+                        rebuildPrefab: !!result.rebuildPrefab,
+                        rebuildMaterial: !!result.rebuildMaterial
                       }
                     );
                   } catch (err) {

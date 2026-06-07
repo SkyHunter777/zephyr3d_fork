@@ -782,6 +782,15 @@ export type SaveOptions = {
   importMeshes: boolean;
   importSkeletons: boolean;
   importAnimations: boolean;
+  rebuildMaterial?: boolean;
+};
+
+type PreprocessOptions = {
+  rebuildMaterial?: boolean;
+};
+
+type SharedModelWithPreprocessOptions = SharedModel & {
+  _preprocessOptions?: PreprocessOptions;
 };
 
 /**
@@ -1251,6 +1260,7 @@ export class SharedModel extends Disposable {
   ): Promise<void> {
     const destName = name;
     const usedPaths = new Set<string>();
+    const rebuildMaterial = (this as SharedModelWithPreprocessOptions)._preprocessOptions?.rebuildMaterial ?? true;
     const prefabName = name.endsWith('.zprefab') ? name : `${name}.zprefab`;
     const prefabPath = dstVFS.join(destPath, prefabName);
     const reusableResourcePools = await this.createReimportResourcePools(dstVFS, destPath, prefabPath);
@@ -1310,8 +1320,9 @@ export class SharedModel extends Disposable {
     if (materialKeys.length > 0) {
       console.info(`Importing ${materialKeys.length} materials`);
       for (const k of materialKeys) {
+        const material = this._materialList[k];
         const baseName = this.sanitizeResourceName(
-          this.getMaterialBaseName(this._materialList[k], k, destName),
+          this.getMaterialBaseName(material, k, destName),
           `${destName}_material_${k}`
         );
         const path =
@@ -1332,11 +1343,16 @@ export class SharedModel extends Disposable {
             usedPaths,
             `${destName}_material_${k}`
           ));
-        const m = await this.createMaterial(manager, this._materialList[k], dstVFS);
+        if (!rebuildMaterial && (await dstVFS.exists(path))) {
+          material.path = path;
+          continue;
+        }
+        material.path = '';
+        const m = await this.createMaterial(manager, material, dstVFS);
+        material.path = path;
         const data = await manager.serializeObject(m);
         const content = JSON.stringify({ type: 'Default', data }, null, 2);
         await dstVFS.writeFile(path, content, { encoding: 'utf8', create: true });
-        this._materialList[k].path = path;
         m!.dispose();
       }
     }
