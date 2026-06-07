@@ -75,6 +75,7 @@ describe('JointDynamics serialization', () => {
         controllerConfig: {
           subSteps: 5,
           blendRatio: 0.25,
+          rootSlideLimit: 10,
           windForce: grabberNode.position.clone(),
           preserveTwist: true
         }
@@ -149,6 +150,7 @@ describe('JointDynamics serialization', () => {
     expect(restoredSystemSnapshot.chainConfig.chains[0].end.name).toBe('tip');
     expect(restoredSystem.controller.getConfig().subSteps).toBe(7);
     expect(restoredSystem.controller.getConfig().blendRatio).toBeCloseTo(0.25);
+    expect(restoredSystem.controller.getConfig().rootSlideLimit).toBeCloseTo(10);
     expect(restoredSystem.controller.getConfig().preserveTwist).toBe(false);
     expect(restoredSystem.controller.getConfig().gravity.y).toBeCloseTo(-4);
     expect(restoredSystem.controller.getConfig().curves.massScale.evaluate(0.5)).toBeCloseTo(2);

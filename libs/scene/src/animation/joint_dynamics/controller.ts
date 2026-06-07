@@ -87,7 +87,7 @@ export interface ControllerConfig {
   relaxation: number;
   /** Number of simulation substeps per frame. Higher = more stable at cost of performance */
   subSteps: number;
-  /** Max root bone slide distance per substep. Excess is distributed as offset. -1 = unlimited */
+  /** Max system-local root slide distance retained after root motion. Excess is applied to physics state. -1 = unlimited */
   rootSlideLimit: number;
   /** Max root bone rotation angle (degrees) per substep. Excess is distributed. -1 = unlimited */
   rootRotateLimit: number;
@@ -387,6 +387,8 @@ export class JointDynamicsSystemController {
 
     const blendRatio = this._computeBlendRatio();
     this._updateScaleDependentParameters();
+    const rootSlideLimit =
+      this._config.rootSlideLimit < 0 ? -1 : this._config.rootSlideLimit * this._currentSystemScale;
 
     // Capture current transforms
     const rootPos = this._rootTransform.getWorldPosition();
@@ -423,7 +425,7 @@ export class JointDynamicsSystemController {
       subSteps: this._config.subSteps,
       rootPosition: rootPos,
       previousRootPosition: this._previousRootPosition,
-      rootSlideLimit: this._config.rootSlideLimit,
+      rootSlideLimit,
       rootRotation: rootRot,
       previousRootRotation: this._previousRootRotation,
       rootRotateLimit: this._config.rootRotateLimit,
@@ -701,29 +703,65 @@ export class JointDynamicsSystemController {
   }
 
   /**
-   * Compensates for teleportation by resetting the previous root transform to the current one.
-   * Call this after a character warp or teleport to avoid a large root-motion impulse on the
-   * next simulation step.
+   * Resets all physics state after teleportation.
+   * @deprecated Use {@link reset}. This method is kept as a compatibility alias.
    */
   warp(): void {
-    if (!this._rootTransform) {
-      return;
-    }
-    this._previousRootPosition = this._rootTransform.getWorldPosition();
-    this._previousRootRotation = this._rootTransform.getWorldRotation();
+    this.reset();
   }
 
   /**
    * Resets all physics state.
-   * Each simulated point is snapped back to the current transform position and grab state
-   * is cleared.
+   * Simulated points, transform history, root-motion history, grab state and wave phase are
+   * snapped back to the current scene transforms. Runtime configuration and fixed/released
+   * point weights are preserved.
    */
   reset(): void {
     for (let i = 0; i < this._pointsRW.length; i++) {
       const pos = this._pointTransforms[i].getWorldPosition();
-      this._pointsRW[i].positionCurrent = pos.clone();
-      this._pointsRW[i].positionPrevious = pos.clone();
-      this._pointsRW[i].grabberIndex = -1;
+      const ptRW = this._pointsRW[i];
+      ptRW.positionCurrent = pos.clone();
+      ptRW.positionPrevious = pos.clone();
+      ptRW.positionCurrentTransform = pos.clone();
+      ptRW.positionPreviousTransform = pos.clone();
+      ptRW.positionToTransform = pos.clone();
+      this._positionsToTransform[i] = pos.clone();
+      ptRW.fakeWindDirection = Vector3.axisPZ();
+      ptRW.grabberIndex = -1;
+      ptRW.grabberDistance = 0;
+      ptRW.friction = 0;
+    }
+    for (let i = 0; i < this._pointsRW.length; i++) {
+      const parent = this._pointsR[i]?.parent ?? -1;
+      if (parent !== -1) {
+        const direction = Vector3.sub(
+          this._pointsRW[i].positionCurrent,
+          this._pointsRW[parent].positionCurrent
+        );
+        this._pointsRW[i].directionPrevious = direction.magnitudeSq > EPSILON ? direction : Vector3.axisPZ();
+      } else {
+        this._pointsRW[i].directionPrevious = Vector3.axisPZ();
+      }
+    }
+    for (let i = 0; i < this._collidersRW.length; i++) {
+      const transform = this._colliderTransforms[i];
+      const pos = transform.getWorldPosition();
+      const rot = transform.getWorldRotation();
+      const scale = transform.getWorldScale();
+      const colRW = this._collidersRW[i];
+      colRW.positionCurrentTransform = pos.clone();
+      colRW.positionPreviousTransform = pos.clone();
+      colRW.directionCurrentTransform = rot.clone();
+      colRW.directionPreviousTransform = rot.clone();
+      colRW.worldScale = scale.clone();
+      colRW.worldToLocal = Matrix4x4.compose(scale, rot, pos).inplaceInvertAffine();
+    }
+    for (let i = 0; i < this._grabbersRW.length; i++) {
+      this._grabbersRW[i].position = this._grabberTransforms[i].getWorldPosition();
+    }
+    if (this._rootTransform) {
+      this._previousRootPosition = this._rootTransform.getWorldPosition();
+      this._previousRootRotation = this._rootTransform.getWorldRotation();
     }
     this._fakeWaveCounter = 0;
   }
@@ -1207,14 +1245,7 @@ export class JointDynamicsSystemController {
     }
     this._refreshPointParameters();
     if (scaleChanged) {
-      for (let i = 0; i < this._pointsRW.length; i++) {
-        const pos = this._pointTransforms[i].getWorldPosition();
-        this._pointsRW[i].positionCurrent = pos.clone();
-        this._pointsRW[i].positionPrevious = pos.clone();
-        this._pointsRW[i].positionCurrentTransform = pos.clone();
-        this._pointsRW[i].positionPreviousTransform = pos.clone();
-      }
-      this.warp();
+      this.reset();
     }
   }
 

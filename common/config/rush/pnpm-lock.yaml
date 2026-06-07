@@ -161,7 +161,7 @@ importers:
         specifier: workspace:^0.1.1
         version: link:../../libs/loaders
       '@zephyr3d/scene':
-        specifier: workspace:^0.9.5
+        specifier: workspace:^0.9.6
         version: link:../../libs/scene
       '@zip.js/zip.js':
         specifier: ^2.7.54
@@ -318,7 +318,7 @@ importers:
         specifier: workspace:^0.2.9
         version: link:../../libs/device
       '@zephyr3d/scene':
-        specifier: workspace:^0.9.5
+        specifier: workspace:^0.9.6
         version: link:../../libs/scene
     devDependencies:
       '@babel/core':
@@ -439,7 +439,7 @@ importers:
         specifier: workspace:^0.2.9
         version: link:../../libs/device
       '@zephyr3d/scene':
-        specifier: workspace:^0.9.5
+        specifier: workspace:^0.9.6
         version: link:../../libs/scene
     devDependencies:
       '@babel/core':
@@ -1187,7 +1187,7 @@ importers:
         specifier: workspace:^0.2.9
         version: link:../device
       '@zephyr3d/scene':
-        specifier: workspace:^0.9.5
+        specifier: workspace:^0.9.6
         version: link:../scene
     devDependencies:
       '@babel/core':
@@ -1402,7 +1402,7 @@ importers:
         specifier: workspace:^0.2.4
         version: link:../libs/imgui
       '@zephyr3d/scene':
-        specifier: workspace:^0.9.5
+        specifier: workspace:^0.9.6
         version: link:../libs/scene
       '@zip.js/zip.js':
         specifier: ^2.7.54
@@ -1559,7 +1559,7 @@ importers:
         specifier: workspace:^0.1.1
         version: link:../../libs/loaders
       '@zephyr3d/scene':
-        specifier: workspace:^0.9.5
+        specifier: workspace:^0.9.6
         version: link:../../libs/scene
       '@zip.js/zip.js':
         specifier: ^2.7.54

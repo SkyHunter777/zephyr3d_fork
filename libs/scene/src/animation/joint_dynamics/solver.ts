@@ -60,7 +60,7 @@ export interface SimulationParams {
   rootPosition: Vector3;
   /** Previous frame's root bone world position (for root motion limiting) */
   previousRootPosition: Vector3;
-  /** Max root slide distance per substep. -1 = no limit */
+  /** Max world-space root slide distance retained after root motion. -1 = no limit */
   rootSlideLimit: number;
   /** Current root bone world rotation */
   rootRotation: Quaternion;

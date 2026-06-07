@@ -6,6 +6,7 @@ import {
   type ColliderRW,
   JointDynamicsSystem,
   type PointR,
+  type PointRW,
   pushoutFromCapsule,
   simulate
 } from '../../../libs/scene/src/animation/joint_dynamics';
@@ -40,6 +41,85 @@ function makeCapsule(height: number, scaledHeight: number): { colR: ColliderR; c
 }
 
 describe('JointDynamics capsule collision', () => {
+  it('fully resets simulation state after teleporting the system root', () => {
+    const scene = new Scene();
+    const root = new SceneNode(scene);
+    const child = new SceneNode(scene);
+    root.parent = scene.rootNode;
+    child.parent = root;
+    child.position.setXYZ(0, 1, 0);
+
+    const system = new JointDynamicsSystem({
+      chainConfig: {
+        systemRoot: root,
+        chains: [{ start: root, end: child }]
+      },
+      controllerConfig: {
+        constraintOptions: {
+          structuralVertical: true
+        }
+      }
+    });
+
+    system.update(1 / 60);
+    root.position.setXYZ(20, 0, 0);
+    system.controller.reset();
+
+    const controller = system.controller as unknown as {
+      _pointsRW: PointRW[];
+      _previousRootPosition: Vector3;
+      _positionsToTransform: Vector3[];
+    };
+    const childWorld = child.getWorldPosition();
+
+    expect(controller._previousRootPosition.x).toBeCloseTo(root.getWorldPosition().x);
+    expect(controller._pointsRW[1].positionCurrent.x).toBeCloseTo(childWorld.x);
+    expect(controller._pointsRW[1].positionPrevious.x).toBeCloseTo(childWorld.x);
+    expect(controller._pointsRW[1].positionCurrentTransform.x).toBeCloseTo(childWorld.x);
+    expect(controller._pointsRW[1].positionPreviousTransform.x).toBeCloseTo(childWorld.x);
+    expect(controller._positionsToTransform[1].x).toBeCloseTo(childWorld.x);
+
+    system.update(1 / 60);
+    expect(child.getWorldPosition().x).toBeGreaterThan(19);
+  });
+
+  it('interprets root slide limit in system-local units', () => {
+    const scene = new Scene();
+    const root = new SceneNode(scene);
+    const child = new SceneNode(scene);
+    root.parent = scene.rootNode;
+    child.parent = root;
+    child.position.setXYZ(1, 0, 0);
+    root.scale.setXYZ(2, 2, 2);
+
+    const system = new JointDynamicsSystem({
+      chainConfig: {
+        systemRoot: root,
+        chains: [{ start: root, end: child }]
+      },
+      controllerConfig: {
+        gravity: Vector3.zero(),
+        subSteps: 1,
+        relaxation: 0,
+        rootSlideLimit: 10,
+        curves: {
+          resistance: InterpolatorScalar.constant(1),
+          hardness: InterpolatorScalar.constant(0)
+        }
+      }
+    });
+
+    const controller = system.controller as unknown as { _pointsRW: PointRW[] };
+    root.position.setXYZ(500, 0, 0);
+    system.update(1 / 60);
+
+    expect(controller._pointsRW[1].positionCurrentTransform.x).toBeCloseTo(502);
+    expect(controller._pointsRW[1].positionCurrent.x).toBeCloseTo(482);
+    expect(
+      controller._pointsRW[1].positionCurrentTransform.x - controller._pointsRW[1].positionCurrent.x
+    ).toBeCloseTo(20);
+  });
+
   it('rescales point parameters and constraints when the system root scale changes', () => {
     const scene = new Scene();
     const root = new SceneNode(scene);

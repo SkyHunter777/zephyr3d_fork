@@ -629,7 +629,7 @@ export function getJointDynamicsModifierClass(): SerializableClass {
           'RootSlideLimit',
           'rootSlideLimit',
           'Root Slide Limit',
-          'Maximum root slide distance per substep. -1 means unlimited',
+          'Maximum system-local root movement left as relative physics lag after large root motion. -1 means unlimited',
           'float'
         ),
         createJointDynamicsNumberProp(

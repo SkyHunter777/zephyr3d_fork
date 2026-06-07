@@ -82,6 +82,7 @@ if (rig) {
 | `windForce` | World-space wind force |
 | `subSteps` | Simulation substeps per frame; higher is more stable but slower |
 | `relaxation` | Constraint iterations per substep |
+| `rootSlideLimit` | Maximum system-local root movement left as relative physics lag after large root motion; `-1` disables compensation |
 | `blendRatio` | Blend from physics to animation; `0` is full physics, `1` is full animation |
 | `enableBroadPhase` | Enables broad-phase pruning for collision tests |
 | `enableSurfaceCollision` | Enables surface/triangle collision |
@@ -183,10 +184,11 @@ After teleporting a character, switching scenes, or resetting a pose, call:
 ```javascript
 jointDynamics.resetChains();
 controller.reset();
-controller.warp();
 ```
 
-`warp()` resets root-motion compensation so teleportation does not create a large inertial impulse on the next frame.
+`reset()` clears simulation history and root-motion compensation so teleportation does not create a large inertial impulse on the next frame. `warp()` is kept as a deprecated alias for `reset()`.
+
+For large root motion where you still want some follow-through, set `rootSlideLimit` instead. For example, `rootSlideLimit: 10` means a 500-unit teleport leaves at most 10 local units of relative physics lag; the remaining root motion is applied directly to the simulation state.
 
 You can also fade dynamics in or out:
 

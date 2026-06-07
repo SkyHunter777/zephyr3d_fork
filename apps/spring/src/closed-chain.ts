@@ -129,7 +129,6 @@ export function createClosedChainDemo(scene: Scene): ClosedChainDemo {
   const tailTransform = createTransformAccess(bones[bones.length - 1]);
   springSystem.controller.fixPoint(fixedIndices[1]);
   springSystem.controller.reset();
-  springSystem.controller.warp();
 
   const update = (time: number, dt: number) => {
     sysroot.position.x = Math.sin(time * 1.1) * 0.18;

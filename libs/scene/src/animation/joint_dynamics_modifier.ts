@@ -48,11 +48,13 @@ export class JointDynamicsModifier extends SkeletonModifier {
   reset(): void {
     this._jointDynamicsSystem.resetChains();
     this._jointDynamicsSystem.controller.reset();
-    this._jointDynamicsSystem.controller.warp();
   }
 
+  /**
+   * @deprecated Use {@link reset}. Kept as a compatibility alias for teleport handling.
+   */
   warp(): void {
-    this._jointDynamicsSystem.controller.warp();
+    this._jointDynamicsSystem.controller.reset();
   }
 
   protected _getWeight(): number {

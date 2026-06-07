@@ -82,6 +82,7 @@ if (rig) {
 | `windForce` | 世界空间风力 |
 | `subSteps` | 每帧子步数，越大越稳定但越耗时 |
 | `relaxation` | 每个子步的约束迭代次数 |
+| `rootSlideLimit` | 大幅根节点运动后最多保留的相对物理滞后距离，单位为系统本地空间；`-1` 表示关闭补偿 |
 | `blendRatio` | 物理到动画的混合比，`0` 为完整物理，`1` 为完整动画 |
 | `enableBroadPhase` | 是否启用碰撞 broad-phase 剪枝 |
 | `enableSurfaceCollision` | 是否启用表面/三角面碰撞 |
@@ -183,10 +184,11 @@ controller.isPointFixed(0);
 ```javascript
 jointDynamics.resetChains();
 controller.reset();
-controller.warp();
 ```
 
-`warp()` 会重置根运动补偿状态，避免瞬移在下一帧产生很大的惯性冲击。
+`reset()` 会清除模拟历史和根运动补偿状态，避免瞬移在下一帧产生很大的惯性冲击。`warp()` 作为 `reset()` 的兼容别名保留，后续会逐渐淘汰。
+
+如果希望大幅根节点位移后仍保留少量惯性，可以设置 `rootSlideLimit`。例如 `rootSlideLimit: 10` 表示 500 单位的瞬移最多留下 10 个本地单位的相对物理滞后，其余根运动会直接应用到模拟状态。
 
 也可以平滑淡入或淡出动态效果：
 

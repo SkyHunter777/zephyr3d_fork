@@ -98,7 +98,7 @@ function clearDemos() {
 function activateChain() {
   clearDemos();
   chainDemo = createBoneChainDemo(scene);
-  chainDemo.springSystem.controller.warp();
+  chainDemo.springSystem.controller.reset();
   activeDemo = 'chain';
 
   const fixedSet = new Set<number>();
