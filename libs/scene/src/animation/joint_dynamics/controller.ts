@@ -15,7 +15,7 @@ import {
   type BoneNode
 } from './types';
 import { buildConstraints, buildSurfaceFaces, type ConstraintBuildOptions } from './constraints';
-import { simulate, applyResult, applyAngleLimits, type SimulationParams } from './solver';
+import { simulate, applyResult, applyAngleLimits, extractLocalTwist, type SimulationParams } from './solver';
 import type { DeepPartial, Nullable } from '@zephyr3d/base';
 import { InterpolatorScalar, Vector3, Quaternion, Matrix4x4, clamp01 } from '@zephyr3d/base';
 import type { SceneNode } from '../../scene';
@@ -224,6 +224,7 @@ export class JointDynamicsSystemController {
   private _colliderHandleToIndex = new Map<number, number>();
   private _flatPlaneHandleToIndex = new Map<number, number>();
   private _grabberHandleToIndex = new Map<number, number>();
+  private _lastOutputLocalRotations: Quaternion[] = [];
   private _baseSystemScale = 1;
   private _currentSystemScale = 1;
   private _basePointParentLengths: number[] = [];
@@ -276,8 +277,13 @@ export class JointDynamicsSystemController {
 
     // Flatten bone hierarchy to point list, build parent map
     const allPoints: BoneNode[] = [];
+    const visitedPoints = new Set<number>();
     this._parentMap = new Map<number, number>(); // child index -> parent index
     const walk = (node: BoneNode) => {
+      if (visitedPoints.has(node.index)) {
+        return;
+      }
+      visitedPoints.add(node.index);
       allPoints.push(node);
       for (const c of node.children) {
         this._parentMap.set(c.index, node.index);
@@ -287,6 +293,7 @@ export class JointDynamicsSystemController {
     for (const r of rootPoints) {
       walk(r);
     }
+    allPoints.sort((a, b) => a.index - b.index);
 
     this._allPoints = allPoints;
     this._maxPointDepth = allPoints.length > 0 ? Math.max(...allPoints.map((p) => p.depth)) : 0;
@@ -318,6 +325,7 @@ export class JointDynamicsSystemController {
     this._basePointParentLengths = this._pointsR.map((point) => point.parentLength);
     this._pointsRW = allPoints.map(() => this._createPointRW());
     this._positionsToTransform = new Array(allPoints.length).fill(Vector3.zero());
+    this._clearOutputTransformCache();
 
     // Initialize colliders
     this._collidersR = colliders.map((c) => c.r);
@@ -394,6 +402,7 @@ export class JointDynamicsSystemController {
     const rootPos = this._rootTransform.getWorldPosition();
     const rootRot = this._rootTransform.getWorldRotation();
 
+    const inputLocalRotations = this._getInputLocalRotations();
     for (let i = 0; i < this._pointsRW.length; i++) {
       this._pointsRW[i].positionPreviousTransform = this._pointsRW[i].positionCurrentTransform.clone();
       this._pointsRW[i].positionCurrentTransform = this._pointTransforms[i].getWorldPosition();
@@ -466,7 +475,8 @@ export class JointDynamicsSystemController {
 
     // Apply results
     const transformRots = this._pointTransforms.map((t) => t.getWorldRotation());
-    const transformLocalRots = this._pointTransforms.map((t) => t.getLocalRotation());
+    const transformLocalRots = inputLocalRotations;
+    const sceneParentRots = this._pointTransforms.map((t) => this._getSceneParentWorldRotation(t));
     const outputs = applyResult(
       this._pointsR,
       this._pointsRW,
@@ -474,13 +484,15 @@ export class JointDynamicsSystemController {
       blendRatio,
       transformRots,
       transformLocalRots,
-      this._config.preserveTwist
+      this._config.preserveTwist,
+      sceneParentRots
     );
 
     for (let i = 0; i < outputs.length; i++) {
       this._pointTransforms[i].setWorldPosition(outputs[i].position);
       this._pointTransforms[i].setWorldRotation(outputs[i].rotation);
     }
+    this._lastOutputLocalRotations = this._pointTransforms.map((t) => t.getLocalRotation());
 
     this._previousRootPosition = rootPos;
     this._previousRootRotation = rootRot;
@@ -493,7 +505,8 @@ export class JointDynamicsSystemController {
    */
   getResults(): Array<{ position: Vector3; rotation: Quaternion }> {
     const transformRots = this._pointTransforms.map((t) => t.getWorldRotation());
-    const transformLocalRots = this._pointTransforms.map((t) => t.getLocalRotation());
+    const transformLocalRots = this._getInputLocalRotations();
+    const sceneParentRots = this._pointTransforms.map((t) => this._getSceneParentWorldRotation(t));
     const outputs = applyResult(
       this._pointsR,
       this._pointsRW,
@@ -501,7 +514,8 @@ export class JointDynamicsSystemController {
       this._config.blendRatio,
       transformRots,
       transformLocalRots,
-      this._config.preserveTwist
+      this._config.preserveTwist,
+      sceneParentRots
     );
     return outputs.map((o) => ({ position: o.position, rotation: o.rotation }));
   }
@@ -556,6 +570,7 @@ export class JointDynamicsSystemController {
    */
   setConfig(config: ControllerConfig): void {
     this._config = this._sanitizeControllerConfig(this._cloneControllerConfig(config));
+    this._clearOutputTransformCache();
     this._refreshCachedSimulationConfig();
   }
 
@@ -622,6 +637,7 @@ export class JointDynamicsSystemController {
     }
     if (typeof config.preserveTwist === 'boolean') {
       this._config.preserveTwist = config.preserveTwist;
+      this._clearOutputTransformCache();
     }
 
     if (config.angleLimitConfig) {
@@ -764,6 +780,7 @@ export class JointDynamicsSystemController {
       this._previousRootRotation = this._rootTransform.getWorldRotation();
     }
     this._fakeWaveCounter = 0;
+    this._clearOutputTransformCache();
   }
 
   /**
@@ -1228,6 +1245,35 @@ export class JointDynamicsSystemController {
     return Math.max((Math.abs(scale.x) + Math.abs(scale.y) + Math.abs(scale.z)) / 3, EPSILON);
   }
 
+  private _getSceneParentWorldRotation(transform: TransformAccess): Quaternion | undefined {
+    const parent = transform.node?.parent;
+    if (!parent) {
+      return undefined;
+    }
+    const rotation = new Quaternion();
+    parent.worldMatrix.decompose(null, rotation, null);
+    return rotation;
+  }
+
+  private _clearOutputTransformCache(): void {
+    this._lastOutputLocalRotations = [];
+  }
+
+  private _getInputLocalRotations(): Quaternion[] {
+    return this._pointTransforms.map((transform, index) => {
+      const localRotation = transform.getLocalRotation();
+      const lastOutput = this._lastOutputLocalRotations[index];
+      if (
+        lastOutput &&
+        Quaternion.angleBetween(localRotation, lastOutput) <= EPSILON &&
+        this._pointsR[index]
+      ) {
+        return this._pointsR[index].initialLocalRotation.clone();
+      }
+      return localRotation;
+    });
+  }
+
   private _updateScaleDependentParameters(force = false): void {
     const systemScale = this._getSystemUniformScale();
     const scaleChanged = Math.abs(systemScale - this._currentSystemScale) > EPSILON;
@@ -1311,11 +1357,7 @@ export class JointDynamicsSystemController {
       boneAxis,
       initialLocalScale: initLocalScale,
       initialLocalRotation: initLocalRot,
-      initialLocalTwist: (() => {
-        const tw = new Quaternion();
-        initLocalRot.decomposeSwingTwist(boneAxis, undefined, tw);
-        return tw;
-      })(),
+      initialLocalTwist: extractLocalTwist(initLocalRot, boneAxis),
       initialLocalPosition: initLocalPos
     };
     this._applyConfigToPoint(point, node);

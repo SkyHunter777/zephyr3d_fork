@@ -1061,6 +1061,83 @@ export interface ApplyResultOutput {
 }
 
 /**
+ * Extracts the right-side local twist from a rotation around the supplied local axis.
+ *
+ * The result is the T in Q = S * T, where S aims the local axis and T only rolls
+ * around that same local axis. Replacing this twist preserves the aimed bone
+ * direction because right-side twist does not move the local axis before S.
+ *
+ * @internal
+ */
+export function extractLocalTwist(rotation: Quaternion, axis: Vector3, result?: Quaternion): Quaternion {
+  result = result ?? new Quaternion();
+  if (axis.magnitudeSq <= EPSILON * EPSILON) {
+    return result.identity();
+  }
+  const twistAxis = Vector3.normalize(axis);
+  const aimedAxis = rotation.transform(twistAxis);
+  if (aimedAxis.magnitudeSq <= EPSILON * EPSILON) {
+    return result.identity();
+  }
+  const swing = Quaternion.unitVectorToUnitVector(twistAxis, Vector3.normalize(aimedAxis));
+  const twist = Quaternion.multiply(Quaternion.inverse(swing), rotation, result);
+  twist.decomposeSwingTwist(twistAxis, undefined, result);
+  return result;
+}
+
+function replaceLocalTwistFromReference(
+  rotation: Quaternion,
+  ptR: PointR,
+  targetAxis: Vector3,
+  result?: Quaternion
+): Quaternion {
+  result = result ?? new Quaternion();
+  if (ptR.boneAxis.magnitudeSq <= EPSILON * EPSILON || targetAxis.magnitudeSq <= EPSILON * EPSILON) {
+    result.set(rotation);
+    return result;
+  }
+  const twistAxis = Vector3.normalize(ptR.boneAxis);
+  const targetDir = Vector3.normalize(targetAxis);
+  const initialNoTwist = Quaternion.multiply(
+    ptR.initialLocalRotation,
+    Quaternion.inverse(ptR.initialLocalTwist)
+  );
+  const initialAxis = initialNoTwist.transform(twistAxis);
+  if (initialAxis.magnitudeSq <= EPSILON * EPSILON) {
+    result.set(rotation);
+    return result;
+  }
+  const swingDelta = Quaternion.unitVectorToUnitVector(Vector3.normalize(initialAxis), targetDir);
+  const noTwist = Quaternion.multiply(swingDelta, initialNoTwist);
+  return Quaternion.multiply(noTwist, ptR.initialLocalTwist, result);
+}
+
+function getSceneParentWorldRotation(
+  index: number,
+  transformRotations: readonly Quaternion[],
+  transformLocalRotations: readonly Quaternion[],
+  sceneParentRotations?: readonly (Quaternion | undefined)[]
+): Quaternion {
+  if (sceneParentRotations?.[index]) {
+    return sceneParentRotations[index];
+  }
+  return Quaternion.multiply(transformRotations[index], Quaternion.inverse(transformLocalRotations[index]));
+}
+
+function getPointParentWorldRotation(
+  index: number,
+  ptR: PointR,
+  results: readonly ApplyResultOutput[],
+  transformRotations: readonly Quaternion[],
+  transformLocalRotations: readonly Quaternion[],
+  sceneParentRotations?: readonly (Quaternion | undefined)[]
+): Quaternion {
+  return ptR.parent !== -1
+    ? (results[ptR.parent]?.rotation ?? transformRotations[ptR.parent])
+    : getSceneParentWorldRotation(index, transformRotations, transformLocalRotations, sceneParentRotations);
+}
+
+/**
  * Computes transform outputs from the simulated point positions.
  *
  * @public
@@ -1073,7 +1150,8 @@ export function applyResult(
   // Current transform rotations (world and local) read from engine
   transformRotations: readonly Quaternion[],
   transformLocalRotations: readonly Quaternion[],
-  preserveTwist: boolean
+  preserveTwist: boolean,
+  sceneParentRotations?: readonly (Quaternion | undefined)[]
 ): ApplyResultOutput[] {
   const results: ApplyResultOutput[] = new Array(pointsR.length);
 
@@ -1103,20 +1181,23 @@ export function applyResult(
       // In C#, setting localRotation immediately updates the world rotation.
       // worldRot = parentWorldRot * localRot
       // We approximate: the parent's current world rotation is in transformRotations[ptR.parent]
-      if (ptR.parent !== -1) {
-        // Use the parent's OUTPUT rotation (already computed if parent index < current index)
-        const parentRot = results[ptR.parent] ? results[ptR.parent].rotation : transformRotations[ptR.parent];
-        worldRot = Quaternion.multiply(parentRot, localRot);
-      } else {
-        worldRot = localRot.clone();
-      }
+      const parentRot = getPointParentWorldRotation(
+        index,
+        ptR,
+        results,
+        transformRotations,
+        transformLocalRotations,
+        sceneParentRotations
+      );
+      worldRot = Quaternion.multiply(parentRot, localRot);
 
       // Step 3: Aim toward child (simple shortest-arc, no twist correction here)
       if (ptR.child !== -1) {
         const childDir = Vector3.sub(positionsToTransform[ptR.child], ptRW.positionToTransform);
         if (childDir.magnitudeSq > EPSILON) {
-          const aimVec = worldRot.transform(ptR.boneAxis);
-          const aimRot = Quaternion.unitVectorToUnitVector(aimVec, childDir);
+          const aimVec = Vector3.normalize(worldRot.transform(ptR.boneAxis));
+          const targetDir = Vector3.normalize(childDir);
+          const aimRot = Quaternion.unitVectorToUnitVector(aimVec, targetDir);
           Quaternion.multiply(aimRot, worldRot, worldRot);
         }
       }
@@ -1129,21 +1210,27 @@ export function applyResult(
       const childBlend =
         ptR.child !== -1 ? Math.max(pointsR[ptR.child].forceFadeRatio, blendRatio) : blendRatio;
 
-      // Fixed joints are fully driven by the scene graph (animation + parent transforms).
-      // Use the engine's current world rotation directly as the baseline �?do NOT
-      // reconstruct it from localRot, because localRot was read from the transform that
-      // was written back last frame (after aim correction), so it carries stale physics
-      // noise that would accumulate each frame and cause periodic spin artifacts.
-      // transformRotations[index] is read before applyResult runs, so it still holds
-      // the correct animated world rotation for this frame.
-      worldRot = transformRotations[index];
+      // Use the caller-provided local rotation as the fixed-joint baseline.
+      // The controller sanitizes this value when the transform still contains
+      // the previous physics output instead of a fresh animation pose.
+      const parentRot = getPointParentWorldRotation(
+        index,
+        ptR,
+        results,
+        transformRotations,
+        transformLocalRotations,
+        sceneParentRotations
+      );
+      localRot = transformLocalRotations[index].clone();
+      worldRot = Quaternion.multiply(parentRot, localRot);
 
       // Aim toward simulated child position, blended back toward the animated direction.
       if (ptR.child !== -1) {
         const childDir = Vector3.sub(positionsToTransform[ptR.child], ptRW.positionToTransform);
         if (childDir.magnitudeSq > EPSILON) {
-          const aimVec = worldRot.transform(ptR.boneAxis);
-          const aimRot = Quaternion.unitVectorToUnitVector(aimVec, childDir);
+          const aimVec = Vector3.normalize(worldRot.transform(ptR.boneAxis));
+          const targetDir = Vector3.normalize(childDir);
+          const aimRot = Quaternion.unitVectorToUnitVector(aimVec, targetDir);
           worldRot = Quaternion.slerp(Quaternion.multiply(aimRot, worldRot), worldRot, childBlend);
         }
       }
@@ -1159,16 +1246,22 @@ export function applyResult(
   if (preserveTwist) {
     for (let index = 0; index < pointsR.length; index++) {
       const ptR = pointsR[index];
-      if (ptR.weight < EPSILON || ptR.child === -1) {
+      if (ptR.child === -1) {
         continue;
       }
       const result = results[index];
-      const parentWorldRot = ptR.parent !== -1 ? results[ptR.parent].rotation : Quaternion.identity();
+      const parentWorldRot = getPointParentWorldRotation(
+        index,
+        ptR,
+        results,
+        transformRotations,
+        transformLocalRotations,
+        sceneParentRotations
+      );
       const effectiveLocal = Quaternion.multiply(Quaternion.inverse(parentWorldRot), result.rotation);
-      const curTwist = new Quaternion();
-      effectiveLocal.decomposeSwingTwist(ptR.boneAxis, undefined, curTwist);
-      const swingTF = Quaternion.multiply(effectiveLocal, Quaternion.inverse(curTwist));
-      const correctedLocal = Quaternion.multiply(swingTF, ptR.initialLocalTwist);
+      const targetLocalAxis = effectiveLocal.transform(ptR.boneAxis);
+      const correctedLocal = replaceLocalTwistFromReference(effectiveLocal, ptR, targetLocalAxis);
+      result.localRotation = correctedLocal;
       Quaternion.multiply(parentWorldRot, correctedLocal, result.rotation);
     }
   }

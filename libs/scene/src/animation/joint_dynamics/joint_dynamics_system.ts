@@ -145,34 +145,72 @@ export class JointDynamicsSystem {
     this._bindPose = new WeakMap();
     const rootPoints: BoneNode[] = [];
     const boneNodes: BoneNode[] = [];
+    const boneToNode = new Map<BoneNode, SceneNode>();
     const pointTransforms: TransformAccess[] = [];
-    let index = 0;
+    const nodeToBone = new Map<SceneNode, BoneNode>();
+    const nodeToDepth = new Map<SceneNode, number>();
     for (const chain of config.chainConfig.chains) {
       const chainNodes = this.collectChainNodes(chain.start, chain.end);
+      let previous: BoneNode | null = null;
       for (let i = 0; i < chainNodes.length; i++) {
         const node = chainNodes[i];
-        this._bindPose.set(node, {
-          position: node.position.clone(),
-          rotation: node.rotation.clone(),
-          scale: node.scale.clone()
-        });
-        const boneNode = {
-          index: index++,
-          position: node.getWorldPosition(),
-          children: [],
-          isFixed: i === 0, // Fix the first bone in the chain
-          depth: i
-        };
-        boneNodes.push(boneNode);
-        pointTransforms.push(createTransformAccess(node));
-        if (i > 0) {
-          boneNodes[boneNodes.length - 2].children.push(boneNode);
+        let boneNode = nodeToBone.get(node);
+        if (!boneNode) {
+          this._bindPose.set(node, {
+            position: node.position.clone(),
+            rotation: node.rotation.clone(),
+            scale: node.scale.clone()
+          });
+          boneNode = {
+            index: boneNodes.length,
+            position: node.getWorldPosition(),
+            children: [],
+            isFixed: i === 0,
+            depth: i
+          };
+          nodeToBone.set(node, boneNode);
+          nodeToDepth.set(node, i);
+          boneNodes.push(boneNode);
+          boneToNode.set(boneNode, node);
+        } else {
+          const depth = nodeToDepth.get(node) ?? boneNode.depth;
+          if (i < depth) {
+            boneNode.depth = i;
+            nodeToDepth.set(node, i);
+          }
+          boneNode.isFixed = boneNode.isFixed || i === 0;
         }
-        if (i === 0) {
+        if (previous && !previous.children.includes(boneNode)) {
+          previous.children.push(boneNode);
+          const rootIndex = rootPoints.indexOf(boneNode);
+          if (rootIndex !== -1) {
+            rootPoints.splice(rootIndex, 1);
+          }
+        } else if (!previous && !rootPoints.includes(boneNode)) {
           rootPoints.push(boneNode);
         }
+        previous = boneNode;
       }
     }
+    const orderedBoneNodes: BoneNode[] = [];
+    const visitedBoneNodes = new Set<BoneNode>();
+    const orderBoneNode = (boneNode: BoneNode) => {
+      if (visitedBoneNodes.has(boneNode)) {
+        return;
+      }
+      visitedBoneNodes.add(boneNode);
+      boneNode.index = orderedBoneNodes.length;
+      orderedBoneNodes.push(boneNode);
+      for (const child of boneNode.children) {
+        orderBoneNode(child);
+      }
+    };
+    for (const root of rootPoints) {
+      orderBoneNode(root);
+    }
+    boneNodes.length = 0;
+    boneNodes.push(...orderedBoneNodes);
+    pointTransforms.push(...boneNodes.map((boneNode) => createTransformAccess(boneToNode.get(boneNode)!)));
     const systemRoot = createTransformAccess(config.chainConfig.systemRoot);
     const defaultConfig = this.getDefaultControllerConfig();
     const controllerConfig: ControllerConfig = {
@@ -504,7 +542,7 @@ export class JointDynamicsSystem {
       fakeWavePower: 0,
       angleLimitConfig: { angleLimit: -1, limitFromRoot: false },
       enableBroadPhase: false,
-      preserveTwist: false,
+      preserveTwist: true,
       curves: {
         gravityScale: InterpolatorScalar.constant(1),
         windForceScale: InterpolatorScalar.constant(1),

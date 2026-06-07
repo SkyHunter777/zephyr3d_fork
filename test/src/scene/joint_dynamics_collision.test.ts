@@ -41,6 +41,123 @@ function makeCapsule(height: number, scaledHeight: number): { colR: ColliderR; c
 }
 
 describe('JointDynamics capsule collision', () => {
+  it('does not feed previous physics output back into a static short chain', () => {
+    const scene = new Scene();
+    const root = new SceneNode(scene);
+    const child = new SceneNode(scene);
+    root.parent = scene.rootNode;
+    child.parent = root;
+    child.position.setXYZ(0, 0.05, 0);
+
+    const system = new JointDynamicsSystem({
+      chainConfig: {
+        systemRoot: root,
+        chains: [{ start: root, end: child }]
+      },
+      controllerConfig: {
+        gravity: Vector3.zero(),
+        preserveTwist: true,
+        subSteps: 1,
+        relaxation: 0,
+        curves: {
+          resistance: InterpolatorScalar.constant(0),
+          hardness: InterpolatorScalar.constant(1)
+        },
+        constraintOptions: {
+          structuralVertical: true
+        }
+      }
+    });
+
+    const disturbedRotation = Quaternion.fromAxisAngle(Vector3.axisPZ(), Math.PI / 5);
+    root.rotation.set(disturbedRotation);
+    system.controller.reset();
+    root.rotation.identity();
+
+    for (let i = 0; i < 12; i++) {
+      system.update(1 / 60);
+    }
+
+    expect(Quaternion.angleBetween(root.rotation, Quaternion.identity())).toBeLessThan(0.001);
+    expect(Vector3.distance(child.position, new Vector3(0, 0.05, 0))).toBeLessThan(0.001);
+  });
+
+  it('deduplicates shared nodes across multiple short chains', () => {
+    const scene = new Scene();
+    const root = new SceneNode(scene);
+    const childA = new SceneNode(scene);
+    const childB = new SceneNode(scene);
+    root.parent = scene.rootNode;
+    childA.parent = root;
+    childB.parent = root;
+    childA.position.setXYZ(0, 0.05, 0);
+    childB.position.setXYZ(0.05, 0, 0);
+
+    const system = new JointDynamicsSystem({
+      chainConfig: {
+        systemRoot: root,
+        chains: [
+          { start: root, end: childA },
+          { start: root, end: childB }
+        ]
+      },
+      controllerConfig: {
+        gravity: Vector3.zero(),
+        preserveTwist: true,
+        subSteps: 1,
+        relaxation: 0,
+        curves: {
+          resistance: InterpolatorScalar.constant(0),
+          hardness: InterpolatorScalar.constant(1)
+        },
+        constraintOptions: {
+          structuralVertical: true
+        }
+      }
+    });
+    const controller = system.controller as unknown as { _pointsR: PointR[]; _pointTransforms: unknown[] };
+
+    expect(controller._pointsR).toHaveLength(3);
+    expect(controller._pointTransforms).toHaveLength(3);
+
+    for (let i = 0; i < 12; i++) {
+      system.update(1 / 60);
+    }
+
+    expect(Quaternion.angleBetween(root.rotation, Quaternion.identity())).toBeLessThan(0.001);
+    expect(Vector3.distance(childA.position, new Vector3(0, 0.05, 0))).toBeLessThan(0.001);
+    expect(Vector3.distance(childB.position, new Vector3(0.05, 0, 0))).toBeLessThan(0.001);
+  });
+
+  it('uses current transform positions as simulation targets with preserveTwist enabled', () => {
+    const scene = new Scene();
+    const root = new SceneNode(scene);
+    const child = new SceneNode(scene);
+    root.parent = scene.rootNode;
+    child.parent = root;
+    child.position.setXYZ(0.1, 0, 0);
+
+    const system = new JointDynamicsSystem({
+      chainConfig: {
+        systemRoot: root,
+        chains: [{ start: root, end: child }]
+      },
+      controllerConfig: {
+        gravity: Vector3.zero(),
+        preserveTwist: true,
+        subSteps: 1,
+        relaxation: 0
+      }
+    });
+    const controller = system.controller as unknown as { _pointsRW: PointRW[] };
+
+    system.update(1 / 60);
+    child.position.setXYZ(0.1, -0.03, 0);
+    system.update(1 / 60);
+
+    expect(controller._pointsRW[1].positionCurrentTransform.y).toBeCloseTo(-0.03);
+  });
+
   it('fully resets simulation state after teleporting the system root', () => {
     const scene = new Scene();
     const root = new SceneNode(scene);
