@@ -803,7 +803,16 @@ export async function getScriptPropertyAccessors(host: unknown): Promise<Propert
 
 export function clearScriptPropertyAccessorCache(path?: Nullable<string>) {
   if (path) {
-    propertyCache.delete(path);
+    const normalized = String(path).trim();
+    for (const key of [...propertyCache.keys()]) {
+      if (
+        key === normalized ||
+        key.startsWith(`${normalized}::`) ||
+        key.split('|').some((part) => part === normalized)
+      ) {
+        propertyCache.delete(key);
+      }
+    }
   } else {
     propertyCache.clear();
   }

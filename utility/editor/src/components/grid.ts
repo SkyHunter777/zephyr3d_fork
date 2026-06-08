@@ -545,6 +545,9 @@ export class PropertyEditor extends Observable<{
     }
     for (const extraProps of results) {
       for (const prop of extraProps ?? []) {
+        if (prop.isHidden?.call(object, -1, object)) {
+          continue;
+        }
         targetGroup.addProperty(object, prop);
       }
     }
