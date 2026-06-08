@@ -1163,7 +1163,8 @@ export class PropertyEditor extends Observable<{
         : ImGui.GetContentRegionAvail().x;
     let changed = false;
     if (isSceneNodeRef || isAssetRef) {
-      this.renderClippedStringField('##value_display', val[0], fieldWidth, false);
+      const displayText = isSceneNodeRef ? this.resolveSceneNodeRefLabel(object, val[0]) : val[0];
+      this.renderClippedStringField('##value_display', displayText, fieldWidth, false);
     } else {
       const clicked = this.renderClippedStringField('##value_display', val[0], fieldWidth, canInlineEdit);
       if (clicked && canInlineEdit) {
@@ -1470,6 +1471,39 @@ export class PropertyEditor extends Observable<{
     }
     eventBus.dispatchEvent('reveal_asset', ProjectService.VFS.normalizePath(path));
   }
+  private resolveSceneNodeRefHost(object: any): Nullable<SceneNode> {
+    if (object instanceof SceneNode) {
+      return object;
+    }
+    if (object?.host instanceof SceneNode) {
+      return object.host;
+    }
+    if (object?.scriptHost instanceof SceneNode) {
+      return object.scriptHost;
+    }
+    if (this.object instanceof SceneNode) {
+      return this.object;
+    }
+    return null;
+  }
+  private resolveSceneNodeRefLabel(object: any, value: string) {
+    const id = String(value ?? '').trim();
+    if (!id) {
+      return '';
+    }
+    const host = this.resolveSceneNodeRefHost(object);
+    const scope = host
+      ? ((typeof (host as any)?.getPrefabNode === 'function' && (host as any).getPrefabNode()) ||
+        host.scene?.rootNode ||
+        host)
+      : null;
+    const node = scope?.findNodeById?.(id);
+    if (node instanceof SceneNode) {
+      const name = String(node.name ?? '').trim();
+      return name || node.persistentId || id;
+    }
+    return `[Missing] ${id}`;
+  }
   private revealAssetFromProperty(object: any, prop: PropertyAccessor<any>) {
     if (!prop.options?.mimeTypes?.length) {
       return;
@@ -1642,9 +1676,10 @@ export class PropertyEditor extends Observable<{
                   )
                 : customTextInput('##value', val, '', readonly ? CustomInputTextFlags.ReadOnly : 0);
             } else {
+              const displayText = isSceneNodeRef ? this.resolveSceneNodeRefLabel(object, val[0]) : val[0];
               const clicked = this.renderClippedStringField(
                 '##value_display',
-                val[0],
+                displayText,
                 fieldWidth,
                 canInlineEdit
               );
