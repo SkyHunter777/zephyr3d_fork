@@ -248,11 +248,15 @@ export function getSubsurfaceProfileClass(): SerializableClass {
 
 function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMaterial>[] {
   const supportsSSSThicknessAuthoring = function (this: PBRMaterial) {
-    return !this.$isInstance && !!(this.transmission || (this as PBRMaterial & { subsurfaceProfile?: unknown }).subsurfaceProfile);
+    return (
+      !this.$isInstance &&
+      !!(this.transmission || (this as PBRMaterial & { subsurfaceProfile?: unknown }).subsurfaceProfile)
+    );
   };
   return defineProps([
     {
       name: 'IOR',
+      description: 'Index of refraction for the material surface',
       type: 'float',
       default: 1.5,
       options: {
@@ -270,6 +274,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     },
     {
       name: 'OcclusionStrength',
+      description: 'Strength multiplier for the occlusion texture effect',
       type: 'float',
       phase: 2,
       default: 1,
@@ -291,6 +296,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     ...getTextureProps<PBRMaterial>(manager, 'occlusionTexture', '2D', false, 0),
     {
       name: 'EmissiveColor',
+      description: 'Base self-illumination color emitted by the material',
       type: 'rgb',
       options: {
         animatable: true
@@ -309,6 +315,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     },
     {
       name: 'EmissiveStrength',
+      description: 'Intensity multiplier for the emissive color and emissive texture',
       type: 'float',
       options: {
         animatable: true,
@@ -348,6 +355,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     ...getTextureProps<PBRMaterial>(manager, 'specularTexture', '2D', false, 0),
     {
       name: 'Transmission',
+      description: 'If true, enables light transmission through the material',
       type: 'bool',
       phase: 0,
       default: false,
@@ -363,6 +371,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     },
     {
       name: 'TransmissionFactor',
+      description: 'Amount of transmitted light, from fully opaque to fully transparent',
       type: 'float',
       phase: 1,
       default: 0,
@@ -386,6 +395,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     }),
     {
       name: 'ThicknessFactor',
+      description: 'Physical thickness used by transmission and volume attenuation',
       type: 'float',
       phase: 1,
       default: 0,
@@ -409,6 +419,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     }),
     {
       name: 'AttenuationColor',
+      description: 'Color tint applied to transmitted light as it travels through the material',
       type: 'rgb',
       phase: 1,
       default: [1, 1, 1],
@@ -429,6 +440,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     },
     {
       name: 'AttenuationDistance',
+      description: 'Distance over which transmitted light is attenuated inside the material',
       type: 'float',
       phase: 1,
       default: 99999,
@@ -449,6 +461,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     },
     {
       name: 'Iridescence',
+      description: 'If true, enables thin-film iridescence on the material surface',
       type: 'bool',
       phase: 0,
       default: false,
@@ -464,6 +477,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     },
     {
       name: 'IridescenceFactor',
+      description: 'Strength of the iridescence effect',
       type: 'float',
       phase: 1,
       default: 0,
@@ -487,6 +501,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     }),
     {
       name: 'IridescenceIOR',
+      description: 'Index of refraction used for the iridescence layer',
       type: 'float',
       phase: 1,
       default: 1.3,
@@ -505,6 +520,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     },
     {
       name: 'IridescenceThicknessMin',
+      description: 'Minimum thin-film thickness used for iridescence, typically in nanometers',
       type: 'float',
       phase: 1,
       default: 100,
@@ -525,6 +541,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     },
     {
       name: 'IridescenceThicknessMax',
+      description: 'Maximum thin-film thickness used for iridescence, typically in nanometers',
       type: 'float',
       phase: 1,
       default: 400,
@@ -548,6 +565,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     }),
     {
       name: 'ClearCoat',
+      description: 'If true, enables a clear coat layer on top of the material',
       type: 'bool',
       phase: 0,
       default: false,
@@ -563,6 +581,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     },
     {
       name: 'ClearCoatIntensity',
+      description: 'Strength of the clear coat layer',
       type: 'float',
       phase: 1,
       default: 0,
@@ -586,6 +605,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     }),
     {
       name: 'ClearCoatRoughnessFactor',
+      description: 'Roughness of the clear coat layer',
       type: 'float',
       phase: 1,
       default: 0,
@@ -612,6 +632,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     }),
     {
       name: 'Sheen',
+      description: 'If true, enables a soft fabric-like sheen layer',
       type: 'bool',
       phase: 0,
       default: false,
@@ -627,6 +648,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     },
     {
       name: 'SheenColorFactor',
+      description: 'Color of the sheen layer',
       type: 'rgb',
       phase: 1,
       default: [0, 0, 0],
@@ -650,6 +672,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
     }),
     {
       name: 'SheenRoughnessFactor',
+      description: 'Roughness of the sheen layer',
       type: 'float',
       phase: 1,
       default: 0,
@@ -680,6 +703,7 @@ function getLitMaterialProps(manager: ResourceManager): PropertyAccessor<LitProp
     ...getUnlitMaterialProps(manager),
     {
       name: 'doubleSidedLighting',
+      description: 'If true, lighting is evaluated on both sides of the surface',
       type: 'bool',
       default: false,
       isValid(this: LitPropTypes) {
@@ -694,6 +718,7 @@ function getLitMaterialProps(manager: ResourceManager): PropertyAccessor<LitProp
     },
     {
       name: 'vertexNormal',
+      description: 'If true, uses vertex normals for lighting and normal mapping',
       type: 'bool',
       default: true,
       get(this: LitPropTypes, value) {
@@ -708,6 +733,7 @@ function getLitMaterialProps(manager: ResourceManager): PropertyAccessor<LitProp
     },
     {
       name: 'vertexTangent',
+      description: 'If true, uses vertex tangents for tangent-space normal mapping',
       type: 'bool',
       default: false,
       get(this: LitPropTypes, value) {
@@ -728,6 +754,7 @@ function getUnlitMaterialProps(manager: ResourceManager): PropertyAccessor<Unlit
   return defineProps([
     {
       name: 'vertexColor',
+      description: 'If true, multiplies the material color by per-vertex color data',
       type: 'bool',
       default: false,
       get(this: UnlitPropTypes, value) {
@@ -742,6 +769,7 @@ function getUnlitMaterialProps(manager: ResourceManager): PropertyAccessor<Unlit
     },
     {
       name: 'AlbedoColor',
+      description: 'Base RGBA color of the material before lighting',
       type: 'rgba',
       options: {
         animatable: true
@@ -774,6 +802,8 @@ export function getMeshMaterialClass(): SerializableClass[] {
         return defineProps([
           {
             name: 'AlphaCutoff',
+            description:
+              'If greater then 0, pixels which have alpha smaller than alpha cutoff will be discarded',
             type: 'float',
             default: 0,
             options: {
@@ -793,6 +823,7 @@ export function getMeshMaterialClass(): SerializableClass[] {
           },
           {
             name: 'AlphaToCoverage',
+            description: 'If true, alpha-to-coverage will be enabled',
             type: 'bool',
             default: false,
             get(this: MeshMaterial, value) {
@@ -807,6 +838,7 @@ export function getMeshMaterialClass(): SerializableClass[] {
           },
           {
             name: 'AlphaDither',
+            description: 'If true, alpha-dithering will be enabled',
             type: 'bool',
             default: false,
             get(this: MeshMaterial, value) {
@@ -821,6 +853,7 @@ export function getMeshMaterialClass(): SerializableClass[] {
           },
           {
             name: 'BlendMode',
+            description: 'Blending mode for this material',
             type: 'string',
             options: {
               enum: { labels: ['None', 'Blend', 'Additive'], values: ['none', 'blend', 'additive'] }
@@ -871,6 +904,7 @@ export function getMeshMaterialClass(): SerializableClass[] {
           },
           {
             name: 'CullMode',
+            description: 'Cull mode for this material',
             type: 'string',
             options: {
               enum: { labels: ['None', 'Front', 'Back'], values: ['none', 'front', 'back'] }
@@ -888,6 +922,7 @@ export function getMeshMaterialClass(): SerializableClass[] {
           },
           {
             name: 'Opacity',
+            description: 'Opacity value for this material, no effect if blendingMode is `none`',
             type: 'float',
             options: {
               animatable: true,
@@ -907,6 +942,7 @@ export function getMeshMaterialClass(): SerializableClass[] {
           },
           {
             name: 'TAAStrength',
+            description: 'TAA strength for this material',
             type: 'float',
             options: {
               minValue: 0,
@@ -956,6 +992,7 @@ export function getStandardSpriteMaterialClass(manager: ResourceManager): Serial
         return defineProps([
           {
             name: 'SpriteTexture',
+            description: 'Texture file path for the sprite',
             type: 'object',
             default: '',
             options: {
@@ -974,7 +1011,7 @@ export function getStandardSpriteMaterialClass(manager: ResourceManager): Serial
             get(value) {
               value.str[0] = manager.getAssetId(this.spriteTexture) ?? '';
             },
-            async set(value) {
+            async set(this: StandardSpriteMaterial, value) {
               if (!value || !value.str[0]) {
                 this.spriteTexture = null;
               } else {
@@ -1017,6 +1054,7 @@ export function getParticleMaterialClass(manager: ResourceManager): Serializable
         return defineProps([
           {
             name: 'AlphaMap',
+            description: 'Alpha texture file path',
             type: 'object',
             default: '',
             options: {
@@ -1056,6 +1094,7 @@ export function getParticleMaterialClass(manager: ResourceManager): Serializable
           },
           {
             name: 'RampMap',
+            description: 'Ramp texture file path',
             type: 'object',
             default: '',
             options: {
@@ -1111,6 +1150,7 @@ export function getPBRBluePrintMaterialClass(manager: ResourceManager): Serializ
         return defineProps([
           {
             name: 'doubleSidedLighting',
+            description: 'If true, double-sided lighting will be enabled',
             type: 'bool',
             default: false,
             isValid(this: LitPropTypes) {
@@ -1125,6 +1165,7 @@ export function getPBRBluePrintMaterialClass(manager: ResourceManager): Serializ
           },
           {
             name: 'Reflection',
+            description: 'Reflection mode for the material',
             type: 'string',
             default: 'ggx',
             options: {
@@ -1145,6 +1186,7 @@ export function getPBRBluePrintMaterialClass(manager: ResourceManager): Serializ
           },
           {
             name: 'SubsurfaceProfile',
+            description: 'If true, subsurface-scattering will be enabled',
             type: 'object',
             phase: 1,
             default: null,
@@ -1169,6 +1211,7 @@ export function getPBRBluePrintMaterialClass(manager: ResourceManager): Serializ
           }),
           {
             name: 'Anisotropy',
+            description: 'Anistropy value',
             type: 'float',
             default: 0.75,
             options: {
@@ -1191,6 +1234,7 @@ export function getPBRBluePrintMaterialClass(manager: ResourceManager): Serializ
           },
           {
             name: 'AnisotropyDirection',
+            description: 'Anisotropy direction',
             type: 'float',
             default: 0,
             options: {
@@ -1213,6 +1257,7 @@ export function getPBRBluePrintMaterialClass(manager: ResourceManager): Serializ
           },
           {
             name: 'AnisotropyDirectionScaleBias',
+            description: 'Anisotropy direction scale bias',
             type: 'vec2',
             default: [1, 0],
             options: {
@@ -1295,6 +1340,7 @@ export function getBlinnMaterialClass(manager: ResourceManager): SerializableCla
         return defineProps([
           {
             name: 'Shininess',
+            description: 'Shininess value',
             type: 'float',
             options: {
               animatable: true,
@@ -1330,6 +1376,7 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
         return defineProps([
           {
             name: 'Metallic',
+            description: 'Metallic value',
             type: 'float',
             options: {
               animatable: true,
@@ -1348,6 +1395,7 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
           },
           {
             name: 'Roughness',
+            description: 'Roughness value',
             type: 'float',
             options: {
               animatable: true,
@@ -1366,6 +1414,7 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
           },
           {
             name: 'SpecularFactor',
+            description: 'RGBA specular factor used to tint and scale specular reflections',
             type: 'rgba',
             options: {
               animatable: true
@@ -1385,6 +1434,7 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
           },
           {
             name: 'Reflection',
+            description: 'Reflection mode',
             type: 'string',
             default: 'ggx',
             options: {
@@ -1405,6 +1455,7 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
           },
           {
             name: 'Anisotropy',
+            description: 'Strength of anisotropic reflections; values near 0 behave isotropically',
             type: 'float',
             default: 0.75,
             options: {
@@ -1427,6 +1478,7 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
           },
           {
             name: 'AnisotropyDirection',
+            description: 'Rotation angle in degrees for the anisotropic highlight direction',
             type: 'float',
             default: 0,
             options: {
@@ -1459,6 +1511,7 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
           ),
           {
             name: 'AnisotropyDirectionScaleBias',
+            description: 'Scale and bias applied when decoding anisotropy direction from its texture',
             type: 'vec2',
             default: [1, 0],
             options: {
@@ -1475,11 +1528,16 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
               return this.$isInstance ? this.coreMaterial.anisotropyDirectionScaleBias : [1, 0];
             },
             isValid() {
-              return !this.$isInstance && this.reflectionMode === 'anisotropic' && !!this.anisotropyDirectionTexture;
+              return (
+                !this.$isInstance &&
+                this.reflectionMode === 'anisotropic' &&
+                !!this.anisotropyDirectionTexture
+              );
             }
           },
           {
             name: 'SubsurfaceProfile',
+            description: 'If true, enables subsurface scattering for translucent materials',
             type: 'object',
             phase: 1,
             default: null,
@@ -1499,9 +1557,16 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
               return !this.$isInstance;
             }
           },
-          ...getTextureProps<PBRMetallicRoughnessMaterial>(manager, 'subsurfaceTexture', '2D', false, 1, function () {
-            return !!this.subsurfaceProfile;
-          }),
+          ...getTextureProps<PBRMetallicRoughnessMaterial>(
+            manager,
+            'subsurfaceTexture',
+            '2D',
+            false,
+            1,
+            function () {
+              return !!this.subsurfaceProfile;
+            }
+          ),
           ...getTextureProps<PBRMetallicRoughnessMaterial>(
             manager,
             'metallicRoughnessTexture',
@@ -1529,6 +1594,7 @@ export function getPBRSpecularGlossinessMaterialClass(manager: ResourceManager):
         return defineProps([
           {
             name: 'SpecularFactor',
+            description: 'RGB specular color multiplier for reflected highlights',
             type: 'rgb',
             options: {
               animatable: true
@@ -1547,6 +1613,7 @@ export function getPBRSpecularGlossinessMaterialClass(manager: ResourceManager):
           },
           {
             name: 'GlossnessFactor',
+            description: 'Glossiness of the surface; higher values produce sharper reflections',
             type: 'float',
             options: {
               animatable: true,

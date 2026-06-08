@@ -11,7 +11,12 @@ import { Vector2, Vector4 } from '@zephyr3d/base';
 import type { IMixinLight } from '../lit';
 import { mixinLight } from '../lit';
 import { ShaderHelper } from '../../shader/helper';
-import { LIGHT_TYPE_POINT, LIGHT_TYPE_RECT, MaterialVaryingFlags, RENDER_PASS_TYPE_LIGHT } from '../../../values';
+import {
+  LIGHT_TYPE_POINT,
+  LIGHT_TYPE_RECT,
+  MaterialVaryingFlags,
+  RENDER_PASS_TYPE_LIGHT
+} from '../../../values';
 
 export type PBRReflectionMode = 'none' | 'ggx' | 'anisotropic' | 'glint';
 
@@ -62,7 +67,9 @@ export type IMixinPBRMetallicRoughness = {
   ): void;
 } & IMixinPBRCommon &
   IMixinLight &
-  TextureMixinInstanceTypes<['metallicRoughness', 'occlusion', 'specular', 'specularColor', 'anisotropyDirection']>;
+  TextureMixinInstanceTypes<
+    ['metallicRoughness', 'occlusion', 'specular', 'specularColor', 'anisotropyDirection']
+  >;
 
 /**
  * PBRMetallicRoughness lighting model mixin
@@ -231,6 +238,15 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
             } else {
               this.$l.F = this.schlickFresnel;
             }
+            if (that.sheen) {
+              this.$l.sheenAlbedoScaling = that.getSheenAlbedoScalingForDirect(
+                this,
+                this.NoV,
+                this.NoL,
+                this.data.sheenColor,
+                this.data.sheenRoughness
+              );
+            }
             this.$l.alphaRoughness = pb.mul(this.data.roughness, this.data.roughness);
             this.$l.specularRoughness = pb.sqrt(this.alphaRoughness);
             this.$l.Dggx = that.distributionGGX(this, this.NoH, this.alphaRoughness);
@@ -296,7 +312,7 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
               this.specularScale
             );
             if (that.sheen) {
-              this.specular = pb.mul(this.specular, this.data.sheenAlbedoScaling);
+              this.specular = pb.mul(this.specular, this.sheenAlbedoScaling);
             }
             this.$if(pb.equal(this.reflectionMode, PBR_REFLECTION_MODE.none), function () {
               this.specular = pb.vec3(0);
@@ -315,7 +331,11 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
               pb.sub(pb.vec3(1), pb.mul(this.F, this.data.specularWeight)),
               pb.div(this.data.diffuse.rgb, Math.PI)
             );
-            this.$l.diffuse = pb.mul(this.lightColor, pb.max(this.diffuseBRDF, pb.vec3(0)), this.diffuseScale);
+            this.$l.diffuse = pb.mul(
+              this.lightColor,
+              pb.max(this.diffuseBRDF, pb.vec3(0)),
+              this.diffuseScale
+            );
             if (
               (that.transmission || outTransmissionColor) &&
               that.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT
@@ -349,22 +369,16 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
                 this.data.attenuationColor,
                 this.data.attenuationDistance
               );
-              this.$l.transmissionContribution = pb.mul(
-                this.transmittedLight,
-                this.data.transmissionFactor
-              );
+              this.$l.transmissionContribution = pb.mul(this.transmittedLight, this.data.transmissionFactor);
               if (outTransmissionColor) {
-                this.outTransmissionColor = pb.add(
-                  this.outTransmissionColor,
-                  this.transmissionContribution
-                );
+                this.outTransmissionColor = pb.add(this.outTransmissionColor, this.transmissionContribution);
               }
               if (that.transmission) {
                 this.diffuse = pb.mix(this.diffuse, this.transmittedLight, this.data.transmissionFactor);
               }
             }
             if (that.sheen) {
-              this.diffuse = pb.mul(this.diffuse, this.data.sheenAlbedoScaling);
+              this.diffuse = pb.mul(this.diffuse, this.sheenAlbedoScaling);
             }
             this.outColor = pb.add(this.outColor, this.diffuse);
             if (outDiffuseColor) {
@@ -372,7 +386,7 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
             }
             if (that.sheen) {
               this.$l.sheenD = that.D_Charlie(this, this.NoH, this.data.sheenRoughness);
-              this.$l.sheenV = that.V_Ashikhmin(this, this.NoL, this.NoV);
+              this.$l.sheenV = that.V_Sheen(this, this.NoL, this.NoV, this.data.sheenRoughness);
               this.outColor = pb.add(
                 this.outColor,
                 pb.mul(this.lightColor, this.data.sheenColor, this.sheenD, this.sheenV)
@@ -485,9 +499,9 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
     }
     calculateAnisotropyDirectionScaleBias(scope: PBInsideFunctionScope) {
       const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-      return (instancing
-        ? scope.$inputs.zAnisotropyDirectionScaleBias
-        : scope.zAnisotropyDirectionScaleBias) as PBShaderExp;
+      return (
+        instancing ? scope.$inputs.zAnisotropyDirectionScaleBias : scope.zAnisotropyDirectionScaleBias
+      ) as PBShaderExp;
     }
     PBRLight(
       scope: PBInsideFunctionScope,
@@ -614,7 +628,10 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
               this.$l.NoL = pb.clamp(pb.dot(this.normal, this.lightDir), 0, 1);
               this.$l.lightColor = pb.mul(colorIntensity.rgb, colorIntensity.a, this.lightAtten, this.NoL);
               if (shadow) {
-                this.lightColor = pb.mul(this.lightColor, that.calculateShadow(this, this.worldPos, this.NoL));
+                this.lightColor = pb.mul(
+                  this.lightColor,
+                  that.calculateShadow(this, this.worldPos, this.NoL)
+                );
               }
               if (outSSSDiffuse) {
                 if (outSSSTransmission) {
@@ -689,28 +706,31 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
       );
       return (
         outRoughness && outSSSDiffuse && outSSSTransmission
-          ? pb.getGlobalScope()[funcName](
-              worldPos,
-              normal,
-              TBN,
-              viewVec,
-              albedo,
-              outRoughness,
-              outSSSDiffuse,
-              outSSSTransmission
-            )
+          ? pb
+              .getGlobalScope()
+              [
+                funcName
+              ](worldPos, normal, TBN, viewVec, albedo, outRoughness, outSSSDiffuse, outSSSTransmission)
           : outRoughness && outSSSDiffuse
-            ? pb.getGlobalScope()[funcName](worldPos, normal, TBN, viewVec, albedo, outRoughness, outSSSDiffuse)
+            ? pb
+                .getGlobalScope()
+                [funcName](worldPos, normal, TBN, viewVec, albedo, outRoughness, outSSSDiffuse)
             : outRoughness && outSSSTransmission
-              ? pb.getGlobalScope()[funcName](worldPos, normal, TBN, viewVec, albedo, outRoughness, outSSSTransmission)
+              ? pb
+                  .getGlobalScope()
+                  [funcName](worldPos, normal, TBN, viewVec, albedo, outRoughness, outSSSTransmission)
               : outRoughness
                 ? pb.getGlobalScope()[funcName](worldPos, normal, TBN, viewVec, albedo, outRoughness)
                 : outSSSDiffuse && outSSSTransmission
-                  ? pb.getGlobalScope()[funcName](worldPos, normal, TBN, viewVec, albedo, outSSSDiffuse, outSSSTransmission)
+                  ? pb
+                      .getGlobalScope()
+                      [funcName](worldPos, normal, TBN, viewVec, albedo, outSSSDiffuse, outSSSTransmission)
                   : outSSSDiffuse
                     ? pb.getGlobalScope()[funcName](worldPos, normal, TBN, viewVec, albedo, outSSSDiffuse)
                     : outSSSTransmission
-                      ? pb.getGlobalScope()[funcName](worldPos, normal, TBN, viewVec, albedo, outSSSTransmission)
+                      ? pb
+                          .getGlobalScope()
+                          [funcName](worldPos, normal, TBN, viewVec, albedo, outSSSTransmission)
                       : pb.getGlobalScope()[funcName](worldPos, normal, TBN, viewVec, albedo)
       ) as PBShaderExp;
     }
@@ -802,7 +822,10 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
       } else {
         data.specularWeight = specularFactor.a;
       }
-      data.specularWeight = pb.mul(data.specularWeight, pb.float(pb.notEqual(reflectionMode, PBR_REFLECTION_MODE.none)));
+      data.specularWeight = pb.mul(
+        data.specularWeight,
+        pb.float(pb.notEqual(reflectionMode, PBR_REFLECTION_MODE.none))
+      );
       data.f0 = pb.vec4(
         pb.mix(
           pb.min(pb.mul(this.getF0(scope).rgb, scope.specularColor), pb.vec3(1)),

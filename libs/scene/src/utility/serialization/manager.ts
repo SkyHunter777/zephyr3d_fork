@@ -24,7 +24,7 @@ import {
   getPBRBluePrintMaterialClass,
   getSpriteMaterialClass,
   getSpriteBlueprintMaterialClass,
-  getStandardSpriteMaterialClass,  
+  getStandardSpriteMaterialClass
 } from './scene/material';
 import { getMeshClass } from './scene/mesh';
 import { getParticleNodeClass } from './scene/particle';
@@ -732,7 +732,9 @@ export class ResourceManager {
     const className = json['ClassName'];
     const index = cls.findIndex((val) => val.name === className);
     if (index < 0) {
-      throw new Error(`Deserialize object failed: Cannot found serialization meta data for class "${String(className)}"`);
+      throw new Error(
+        `Deserialize object failed: Cannot found serialization meta data for class "${String(className)}"`
+      );
     }
     let info = cls[index];
     const initParams = json['Init'] as { asset?: string };
@@ -1220,7 +1222,12 @@ export class ResourceManager {
     return v;
   }
   private isSerializedObjectEnvelope(v: unknown): v is Record<string, unknown> {
-    return !!v && typeof v === 'object' && !Array.isArray(v) && typeof (v as Record<string, unknown>).ClassName === 'string';
+    return (
+      !!v &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      typeof (v as Record<string, unknown>).ClassName === 'string'
+    );
   }
   private async deserializeObjectPropsForCls<T extends object>(
     obj: T,
@@ -1281,7 +1288,11 @@ export class ResourceManager {
                 tmpVal.str[0] = p;
               } else {
                 tmpVal.object.push(
-                  p ? (this.isSerializedObjectEnvelope(p) ? ((await this.deserializeObject<any>(obj, p)) ?? null) : p) : null
+                  p
+                    ? this.isSerializedObjectEnvelope(p)
+                      ? ((await this.deserializeObject<any>(obj, p)) ?? null)
+                      : p
+                    : null
                 );
               }
             }

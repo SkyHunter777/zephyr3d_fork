@@ -12,6 +12,7 @@ import { Vector3 } from '@zephyr3d/base';
 import { Vector4 } from '@zephyr3d/base';
 import type { DrawContext } from '../../../render';
 import { getGGXLUT } from '../../../utility/textures/ggxlut';
+import { getSheenLUT } from '../../../utility/textures/sheenlut';
 import { getLTCAmpLUT, getLTCMatLUT } from '../../../utility/textures/ltclut';
 import type { TextureMixinInstanceTypes } from '../texture';
 import { mixinTextureProps } from '../texture';
@@ -65,6 +66,19 @@ export type IMixinPBRCommon = {
   getCommonDatasStruct(scope: PBInsideFunctionScope): ShaderTypeFunc;
   calculateEmissiveColor(scope: PBInsideFunctionScope): PBShaderExp;
   getF0(scope: PBInsideFunctionScope): PBShaderExp;
+  getSheenAlbedoScaling(
+    scope: PBInsideFunctionScope,
+    Ndot: PBShaderExp,
+    sheenColor: PBShaderExp,
+    sheenRoughness: PBShaderExp
+  ): PBShaderExp;
+  getSheenAlbedoScalingForDirect(
+    scope: PBInsideFunctionScope,
+    NoV: PBShaderExp,
+    NoL: PBShaderExp,
+    sheenColor: PBShaderExp,
+    sheenRoughness: PBShaderExp
+  ): PBShaderExp;
   directLighting(
     scope: PBInsideFunctionScope,
     lightDir: PBShaderExp,
@@ -415,6 +429,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
         }
         if (this.sheen) {
           scope.zSheenFactor = pb.vec4().uniform(2);
+          scope.zSheenLut = pb.tex2D().uniform(2);
         }
         if (this.clearcoat) {
           scope.zClearcoatFactor = pb.vec4().uniform(2);
@@ -452,6 +467,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
         }
         if (this.sheen) {
           bindGroup.setValue('zSheenFactor', this._sheenFactor);
+          bindGroup.setTexture('zSheenLut', getSheenLUT(64));
         }
         if (this.clearcoat) {
           bindGroup.setValue('zClearcoatFactor', this._clearcoatFactor);
@@ -484,9 +500,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
         pb.float('metallic'),
         pb.float('roughness'),
         pb.float('specularWeight'),
-        ...(this.sheen
-          ? [pb.float('sheenAlbedoScaling'), pb.vec3('sheenColor'), pb.float('sheenRoughness')]
-          : []),
+        ...(this.sheen ? [pb.vec3('sheenColor'), pb.float('sheenRoughness')] : []),
         ...(this.clearcoat
           ? [pb.vec4('ccFactor'), pb.vec3('ccNormal'), pb.float('ccNoV'), pb.float('ccFresnel')]
           : []),
@@ -544,11 +558,6 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
         } else {
           data.sheenRoughness = scope.zSheenFactor.a;
         }
-        scope.$l.sheenDFG = 0.157;
-        data.sheenAlbedoScaling = pb.sub(
-          1,
-          pb.mul(pb.max(pb.max(data.sheenColor.r, data.sheenColor.g), data.sheenColor.b), scope.sheenDFG)
-        );
       }
       if (this.clearcoat) {
         if (this.clearcoatNormalTexture) {
@@ -656,11 +665,38 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
         return pb.mul(this.getEmissiveColor(scope), this.getEmissiveStrength(scope)) as PBShaderExp;
       }
     }
+    getSheenAlbedoScaling(
+      scope: PBInsideFunctionScope,
+      Ndot: PBShaderExp,
+      sheenColor: PBShaderExp,
+      sheenRoughness: PBShaderExp
+    ): PBShaderExp {
+      const pb = scope.$builder;
+      const sheenE = pb.textureSampleLevel(
+        scope.zSheenLut,
+        pb.clamp(pb.vec2(Ndot, sheenRoughness), pb.vec2(0), pb.vec2(1)),
+        0
+      ).r;
+      const maxSheenColor = pb.max(pb.max(sheenColor.r, sheenColor.g), sheenColor.b);
+      return pb.sub(1, pb.mul(maxSheenColor, sheenE)) as PBShaderExp;
+    }
+    getSheenAlbedoScalingForDirect(
+      scope: PBInsideFunctionScope,
+      NoV: PBShaderExp,
+      NoL: PBShaderExp,
+      sheenColor: PBShaderExp,
+      sheenRoughness: PBShaderExp
+    ): PBShaderExp {
+      const pb = scope.$builder;
+      const eV = this.getSheenAlbedoScaling(scope, NoV, sheenColor, sheenRoughness);
+      const eL = this.getSheenAlbedoScaling(scope, NoL, sheenColor, sheenRoughness);
+      return pb.min(eV, eL) as PBShaderExp;
+    }
     D_Charlie(scope: PBInsideFunctionScope, NdotH: PBShaderExp, sheenRoughness: PBShaderExp): PBShaderExp {
       const funcNameDCharlie = 'Z_DCharlie';
       const pb = scope.$builder;
       pb.func(funcNameDCharlie, [pb.float('NdotH'), pb.float('sheenRoughness')], function () {
-        this.$l.alphaG = pb.mul(this.sheenRoughness, this.sheenRoughness);
+        this.$l.alphaG = pb.mul(pb.max(this.sheenRoughness, 0.000001), pb.max(this.sheenRoughness, 0.000001));
         this.$l.invR = pb.div(1, this.alphaG);
         this.$l.cos2h = pb.mul(this.NdotH, this.NdotH);
         this.$l.sin2h = pb.max(pb.sub(1, this.cos2h), 0.0078125);
@@ -669,6 +705,73 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
         );
       });
       return scope.$g[funcNameDCharlie](NdotH, sheenRoughness) as PBShaderExp;
+    }
+    V_Sheen(
+      scope: PBInsideFunctionScope,
+      NdotL: PBShaderExp,
+      NdotV: PBShaderExp,
+      sheenRoughness: PBShaderExp
+    ) {
+      const funcNameVSheen = 'Z_VSheen';
+      const pb = scope.$builder;
+      pb.func('Z_lambdaSheenNumericHelper', [pb.float('x'), pb.float('alphaG')], function () {
+        this.$l.oneMinusAlphaSq = pb.mul(pb.sub(1, this.alphaG), pb.sub(1, this.alphaG));
+        this.$l.a = pb.mix(21.5473, 25.3245, this.oneMinusAlphaSq);
+        this.$l.b = pb.mix(3.82987, 3.32435, this.oneMinusAlphaSq);
+        this.$l.c = pb.mix(0.19823, 0.16801, this.oneMinusAlphaSq);
+        this.$l.d = pb.mix(-1.9776, -1.27393, this.oneMinusAlphaSq);
+        this.$l.e = pb.mix(-4.32054, -4.85967, this.oneMinusAlphaSq);
+        this.$return(
+          pb.add(
+            pb.div(this.a, pb.add(1, pb.mul(this.b, pb.pow(this.x, this.c)))),
+            pb.mul(this.d, this.x),
+            this.e
+          )
+        );
+      });
+      pb.func('Z_lambdaSheen', [pb.float('cosTheta'), pb.float('alphaG')], function () {
+        this.$if(pb.lessThan(pb.abs(this.cosTheta), 0.5), function () {
+          this.$return(pb.exp(this.Z_lambdaSheenNumericHelper(pb.abs(this.cosTheta), this.alphaG)));
+        });
+        this.$return(
+          pb.exp(
+            pb.sub(
+              pb.mul(2, this.Z_lambdaSheenNumericHelper(0.5, this.alphaG)),
+              this.Z_lambdaSheenNumericHelper(pb.sub(1, pb.abs(this.cosTheta)), this.alphaG)
+            )
+          )
+        );
+      });
+      pb.func(
+        funcNameVSheen,
+        [pb.float('NdotL'), pb.float('NdotV'), pb.float('sheenRoughness')],
+        function () {
+          this.$l.alphaG = pb.mul(
+            pb.max(this.sheenRoughness, 0.000001),
+            pb.max(this.sheenRoughness, 0.000001)
+          );
+          this.$return(
+            pb.clamp(
+              pb.div(
+                1,
+                pb.mul(
+                  pb.add(
+                    1,
+                    this.Z_lambdaSheen(this.NdotV, this.alphaG),
+                    this.Z_lambdaSheen(this.NdotL, this.alphaG)
+                  ),
+                  4,
+                  this.NdotV,
+                  this.NdotL
+                )
+              ),
+              0,
+              1
+            )
+          );
+        }
+      );
+      return scope.$g[funcNameVSheen](NdotL, NdotV, sheenRoughness) as PBShaderExp;
     }
     V_Ashikhmin(scope: PBInsideFunctionScope, NdotL: PBShaderExp, NdotV: PBShaderExp) {
       const funcNameVAshikhmin = 'Z_VAshikhmin';
@@ -957,6 +1060,15 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
             } else {
               this.$l.F = this.schlickFresnel;
             }
+            if (that.sheen) {
+              this.$l.sheenAlbedoScaling = that.getSheenAlbedoScalingForDirect(
+                this,
+                this.NoV,
+                this.NoL,
+                this.data.sheenColor,
+                this.data.sheenRoughness
+              );
+            }
             this.$l.baseLayerAttenuation = pb.float(1);
             if (that.clearcoat) {
               this.$if(pb.greaterThan(this.data.ccFactor.x, 0), function () {
@@ -985,7 +1097,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
             );
             this.specular = pb.mul(this.specular, this.baseLayerAttenuation);
             if (that.sheen) {
-              this.specular = pb.mul(this.specular, this.data.sheenAlbedoScaling);
+              this.specular = pb.mul(this.specular, this.sheenAlbedoScaling);
             }
             this.outColor = pb.add(this.outColor, this.specular);
             if (that.iridescence) {
@@ -1001,7 +1113,11 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
               pb.sub(pb.vec3(1), pb.mul(this.F, this.data.specularWeight)),
               pb.div(this.data.diffuse.rgb, Math.PI)
             );
-            this.$l.diffuse = pb.mul(this.lightColor, pb.max(this.diffuseBRDF, pb.vec3(0)), this.diffuseScale);
+            this.$l.diffuse = pb.mul(
+              this.lightColor,
+              pb.max(this.diffuseBRDF, pb.vec3(0)),
+              this.diffuseScale
+            );
             if (that.transmission && that.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
               this.$l.transmissionRay = that.getVolumeTransmissionRay(
                 this,
@@ -1035,13 +1151,13 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
               this.diffuse = pb.mix(this.diffuse, this.transmittedLight, this.data.transmissionFactor);
             }
             if (that.sheen) {
-              this.diffuse = pb.mul(this.diffuse, this.data.sheenAlbedoScaling);
+              this.diffuse = pb.mul(this.diffuse, this.sheenAlbedoScaling);
             }
             this.diffuse = pb.mul(this.diffuse, this.baseLayerAttenuation);
             this.outColor = pb.add(this.outColor, this.diffuse);
             if (that.sheen) {
               this.$l.sheenD = that.D_Charlie(this, this.NoH, this.data.sheenRoughness);
-              this.$l.sheenV = that.V_Ashikhmin(this, this.NoL, this.NoV);
+              this.$l.sheenV = that.V_Sheen(this, this.NoL, this.NoV, this.data.sheenRoughness);
               this.outColor = pb.add(
                 this.outColor,
                 pb.mul(this.lightColor, this.data.sheenColor, this.sheenD, this.sheenV)
@@ -1122,8 +1238,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
           this.config = pb.add(this.config, 8);
         });
         this.n = 0;
-        this.$if(pb.equal(this.config, 0), function () {
-        })
+        this.$if(pb.equal(this.config, 0), function () {})
           .$elseif(pb.equal(this.config, 1), function () {
             this.n = 3;
             this.L[1] = pb.add(pb.mul(pb.neg(this.L[1].z), this.L[0]), pb.mul(this.L[0].z, this.L[1]));
@@ -1315,21 +1430,13 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
                 this.normal,
                 this.viewVec,
                 this.worldPos,
-                pb.mat3(
-                  pb.vec3(1, 0, 0),
-                  pb.vec3(0, 1, 0),
-                  pb.vec3(0, 0, 1)
-                ),
+                pb.mat3(pb.vec3(1, 0, 0), pb.vec3(0, 1, 0), pb.vec3(0, 0, 1)),
                 this.p0,
                 this.p1,
                 this.p2,
                 this.p3
               );
-              this.$l.lightColor = pb.mul(
-                this.colorIntensity.rgb,
-                this.colorIntensity.a,
-                this.falloff
-              );
+              this.$l.lightColor = pb.mul(this.colorIntensity.rgb, this.colorIntensity.a, this.falloff);
               this.$l.baseF0 = this.data.f0.rgb;
               this.$l.rectSpecularScale = that.getRectSpecularScale(this);
               this.$l.specularLtc = pb.mul(
@@ -1347,7 +1454,17 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
           });
         }
       );
-      scope.$g[funcName](worldPos, normal, viewVec, commonData, posRange, axisX, axisY, colorIntensity, outColor);
+      scope.$g[funcName](
+        worldPos,
+        normal,
+        viewVec,
+        commonData,
+        posRange,
+        axisX,
+        axisY,
+        colorIntensity,
+        outColor
+      );
     }
     fresnel0ToIor(scope: PBInsideFunctionScope, fresnel0: PBShaderExp) {
       const pb = scope.$builder;
@@ -1566,6 +1683,24 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
             this.$l.occlusion = envLightStrength;
           }
           this.$l.NoV = pb.clamp(pb.dot(this.normal, this.viewVec), 0.0001, 1);
+          if (that.sheen) {
+            this.$l.sheenLutSample = pb.clamp(
+              pb.textureSampleLevel(
+                this.zSheenLut,
+                pb.clamp(pb.vec2(this.NoV, this.data.sheenRoughness), pb.vec2(0), pb.vec2(1)),
+                0
+              ),
+              pb.vec4(0),
+              pb.vec4(1)
+            );
+            this.$l.sheenAlbedoScaling = pb.sub(
+              1,
+              pb.mul(
+                pb.max(pb.max(this.data.sheenColor.r, this.data.sheenColor.g), this.data.sheenColor.b),
+                this.sheenLutSample.r
+              )
+            );
+          }
           this.$l.ggxLutSample = pb.clamp(
             pb.textureSampleLevel(
               this.zGGXLut,
@@ -1601,7 +1736,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
               });
             }
             if (that.sheen) {
-              this.specularFactor = pb.mul(this.specularFactor, this.data.sheenAlbedoScaling);
+              this.specularFactor = pb.mul(this.specularFactor, this.sheenAlbedoScaling);
             }
             if (outRoughness) {
               this.outRoughness = pb.vec4(this.specularFactor /*this.data.f0.rgb*/, this.data.roughness);
@@ -1650,11 +1785,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
               pb.sub(pb.vec3(1), pb.mul(this.F_avg, this.Ems))
             );
             this.$l.k_D = pb.mul(this.data.diffuse.rgb, pb.add(pb.sub(pb.vec3(1), this.FssEss), this.FmsEms));
-            this.$l.iblDiffuse = pb.mul(
-              pb.add(this.FmsEms, this.k_D),
-              pb.div(this.irradiance, Math.PI),
-              this.occlusion
-            );
+            this.$l.iblDiffuse = pb.mul(pb.add(this.FmsEms, this.k_D), this.irradiance, this.occlusion);
             if (that.clearcoat) {
               this.$if(pb.greaterThan(this.data.ccFactor.x, 0), function () {
                 this.iblDiffuse = pb.mul(
@@ -1664,7 +1795,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
               });
             }
             if (that.sheen) {
-              this.iblDiffuse = pb.mul(this.iblDiffuse, this.data.sheenAlbedoScaling);
+              this.iblDiffuse = pb.mul(this.iblDiffuse, this.sheenAlbedoScaling);
             }
             if (that.transmission && that.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
               this.$l.iblTransmission = that.getIBLVolumnRefraction(
@@ -1689,21 +1820,27 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
               this.outDiffuseColor = pb.add(this.outDiffuseColor, this.iblDiffuse);
             }
           }
-          if (that.sheen && ctx.env!.light.envLight.hasIrradiance()) {
-            this.$l.refl = pb.reflect(pb.neg(this.viewVec), this.normal);
-            this.$l.sheenBRDF = pb.clamp(
-              pb.textureSampleLevel(
-                this.zGGXLut,
-                pb.clamp(pb.vec2(this.NoV, this.data.sheenRoughness), pb.vec2(0), pb.vec2(1)),
-                0
-              ),
-              pb.vec4(0),
-              pb.vec4(1)
-            ).b;
-            this.outColor = pb.add(
-              this.outColor,
-              pb.mul(this.data.sheenColor, this.irradiance.rgb, this.sheenBRDF)
-            );
+          if (
+            that.sheen &&
+            (ctx.env!.light.envLight.hasSheenRadiance() || ctx.env!.light.envLight.hasIrradiance())
+          ) {
+            this.$l.sheenBRDF = this.sheenLutSample.b;
+            if (ctx.env!.light.envLight.hasSheenRadiance()) {
+              this.$l.sheenRadiance = ctx.env!.light.envLight.getSheenRadiance(
+                this,
+                pb.reflect(pb.neg(this.viewVec), this.normal),
+                this.data.sheenRoughness
+              );
+              this.outColor = pb.add(
+                this.outColor,
+                pb.mul(this.data.sheenColor, this.sheenRadiance, this.sheenBRDF, this.occlusion)
+              );
+            } else {
+              this.outColor = pb.add(
+                this.outColor,
+                pb.mul(this.data.sheenColor, this.irradiance.rgb, this.sheenBRDF, this.occlusion)
+              );
+            }
           }
           if (that.clearcoat && ctx.env!.light.envLight.hasRadiance()) {
             this.$l.NoV = pb.clamp(pb.dot(this.data.ccNormal, this.viewVec), 0.0001, 1);
@@ -1732,12 +1869,7 @@ export function mixinPBRCommon<T extends typeof MeshMaterial>(BaseCls: T) {
               this.data.ccFactor.y
             );
             this.$l.FssEss = pb.add(pb.mul(this.k_S, this.f_ab.x), pb.vec3(this.f_ab.y));
-            this.$l.ccSpecular = pb.mul(
-              this.radiance,
-              this.FssEss,
-              this.occlusion,
-              envLightSpecularStrength
-            );
+            this.$l.ccSpecular = pb.mul(this.radiance, this.FssEss, this.occlusion, envLightSpecularStrength);
             this.outColor = pb.add(this.outColor, pb.mul(this.ccSpecular, this.data.ccFactor.x));
           }
         }

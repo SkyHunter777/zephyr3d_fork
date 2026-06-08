@@ -1274,10 +1274,7 @@ export class ShaderHelper {
     return scope[UNIFORM_NAME_LIGHT_BUFFER].at(scope.$builder.add(scope.$builder.mul(lightIndex, 4), 2));
   }
   /** @internal */
-  static getLightExtra(
-    scope: PBInsideFunctionScope,
-    lightIndex: PBShaderExp | number
-  ): PBShaderExp {
+  static getLightExtra(scope: PBInsideFunctionScope, lightIndex: PBShaderExp | number): PBShaderExp {
     return scope[UNIFORM_NAME_LIGHT_BUFFER].at(scope.$builder.add(scope.$builder.mul(lightIndex, 4), 3));
   }
   /**

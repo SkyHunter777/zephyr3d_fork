@@ -132,7 +132,17 @@ export class SSS extends AbstractPostEffect {
         false
       );
       device.setFramebuffer(blurFramebufferH);
-      this.blur(ctx, inputScatterTexture, sceneDepthTexture, profileLUT, blurWidth, blurHeight, kernelRadius, true, sssSettings);
+      this.blur(
+        ctx,
+        inputScatterTexture,
+        sceneDepthTexture,
+        profileLUT,
+        blurWidth,
+        blurHeight,
+        kernelRadius,
+        true,
+        sssSettings
+      );
       device.setFramebuffer(blurFramebufferV);
       this.blur(
         ctx,
@@ -193,19 +203,8 @@ export class SSS extends AbstractPostEffect {
     bindGroup.setTexture('normalTex', sssNormalTexture, fetchSampler('clamp_nearest_nomip'));
     bindGroup.setTexture('depthTex', sceneDepthTexture, fetchSampler('clamp_nearest_nomip'));
     bindGroup.setValue('cameraNearFar', new Vector2(ctx.camera.getNearPlane(), ctx.camera.getFarPlane()));
-    bindGroup.setValue(
-      'targetSize',
-      new Vector4(
-        targetWidth,
-        targetHeight,
-        targetWidth,
-        targetHeight
-      )
-    );
-    bindGroup.setValue(
-      'sampleOffsets',
-      this.createSampleOffsets(kernelRadius)
-    );
+    bindGroup.setValue('targetSize', new Vector4(targetWidth, targetHeight, targetWidth, targetHeight));
+    bindGroup.setValue('sampleOffsets', this.createSampleOffsets(kernelRadius));
     bindGroup.setValue('blurScale', ctx.camera.sssBlurScale);
     bindGroup.setValue('blurStdDev', sssSettings.blurStdDev);
     bindGroup.setValue('depthCutoff', sssSettings.blurDepthCutoff);
@@ -249,8 +248,12 @@ export class SSS extends AbstractPostEffect {
       : mainTransmissionLight
         ? mainTransmissionLight.directionAndCutoff.xyz()
         : { x: 0, y: 0, z: 1 };
-    const sunColorIntensity = mainTransmissionLight ? mainTransmissionLight.diffuseAndIntensity : { x: 1, y: 1, z: 1, w: 0 };
-    const mainLightPosRange = mainTransmissionLight ? mainTransmissionLight.positionAndRange : { x: 0, y: 0, z: 0, w: 1 };
+    const sunColorIntensity = mainTransmissionLight
+      ? mainTransmissionLight.diffuseAndIntensity
+      : { x: 1, y: 1, z: 1, w: 0 };
+    const mainLightPosRange = mainTransmissionLight
+      ? mainTransmissionLight.positionAndRange
+      : { x: 0, y: 0, z: 0, w: 1 };
     const mainLightDirCutoff = mainTransmissionLight
       ? mainTransmissionLight.directionAndCutoff
       : { x: 0, y: 0, z: -1, w: 0 };
@@ -264,7 +267,11 @@ export class SSS extends AbstractPostEffect {
             : LIGHT_TYPE_RECT
       : LIGHT_TYPE_DIRECTIONAL;
     bindGroup.setTexture('colorTex', inputColorTexture, fetchSampler('clamp_linear'));
-    bindGroup.setTexture('diffuseTex', ctx.SSSDiffuseTexture ?? inputColorTexture, fetchSampler('clamp_linear'));
+    bindGroup.setTexture(
+      'diffuseTex',
+      ctx.SSSDiffuseTexture ?? inputColorTexture,
+      fetchSampler('clamp_linear')
+    );
     bindGroup.setTexture('blurTex', blurredTexture, fetchSampler('clamp_linear'));
     bindGroup.setTexture(
       'transmissionTex',
@@ -306,12 +313,7 @@ export class SSS extends AbstractPostEffect {
     bindGroup.setValue('mainLightType', mainLightType);
     bindGroup.setValue(
       'sunColorIntensity',
-      new Float32Array([
-        sunColorIntensity.x,
-        sunColorIntensity.y,
-        sunColorIntensity.z,
-        sunColorIntensity.w
-      ])
+      new Float32Array([sunColorIntensity.x, sunColorIntensity.y, sunColorIntensity.z, sunColorIntensity.w])
     );
     bindGroup.setValue('sssStrength', ctx.camera.sssStrength);
     bindGroup.setValue('transmissionStrength', ctx.camera.sssTransmissionStrength);
@@ -348,7 +350,11 @@ export class SSS extends AbstractPostEffect {
         depthBiasScales: shadowMapParams.depthBiasScales,
         shadowMatrices: new Float32Array(shadowMapParams.shadowMatrices)
       });
-      bindGroup.setTexture('Z_UniformShadowMap', shadowMapParams.shadowMap!, shadowMapParams.shadowMapSampler);
+      bindGroup.setTexture(
+        'Z_UniformShadowMap',
+        shadowMapParams.shadowMap!,
+        shadowMapParams.shadowMapSampler
+      );
     }
     device.setProgram(program);
     device.setBindGroup(0, bindGroup);
@@ -390,29 +396,17 @@ export class SSS extends AbstractPostEffect {
           this.$return(pb.max(this.value.x, pb.max(this.value.y, this.value.z)));
         });
         pb.func('readProfileRadius', [pb.float('slot')], function () {
-          this.$l.uv = pb.vec2(
-            pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth),
-            SSS.profileRowV(0)
-          );
+          this.$l.uv = pb.vec2(pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth), SSS.profileRowV(0));
           this.$return(
-            pb.mul(
-              pb.textureSampleLevel(this.profileLUTTex, this.uv, 0).rgb,
-              SSS._profileRadiusEncodeMax
-            )
+            pb.mul(pb.textureSampleLevel(this.profileLUTTex, this.uv, 0).rgb, SSS._profileRadiusEncodeMax)
           );
         });
         pb.func('readProfileFalloff', [pb.float('slot')], function () {
-          this.$l.uv = pb.vec2(
-            pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth),
-            SSS.profileRowV(1)
-          );
+          this.$l.uv = pb.vec2(pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth), SSS.profileRowV(1));
           this.$return(pb.textureSampleLevel(this.profileLUTTex, this.uv, 0).rgb);
         });
         pb.func('readProfileSettingsA', [pb.float('slot')], function () {
-          this.$l.uv = pb.vec2(
-            pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth),
-            SSS.profileRowV(4)
-          );
+          this.$l.uv = pb.vec2(pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth), SSS.profileRowV(4));
           this.$l.raw = pb.textureSampleLevel(this.profileLUTTex, this.uv, 0);
           this.$return(
             pb.vec4(
@@ -424,10 +418,7 @@ export class SSS extends AbstractPostEffect {
           );
         });
         pb.func('readProfileSettingsB', [pb.float('slot')], function () {
-          this.$l.uv = pb.vec2(
-            pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth),
-            SSS.profileRowV(6)
-          );
+          this.$l.uv = pb.vec2(pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth), SSS.profileRowV(6));
           this.$l.raw = pb.textureSampleLevel(this.profileLUTTex, this.uv, 0);
           this.$return(
             pb.vec4(
@@ -579,19 +570,31 @@ export class SSS extends AbstractPostEffect {
               pb.greaterThanEqual(this.centerDepth01, 1)
             ),
             function () {
-            this.$outputs.outColor = this.centerColor;
-          }
+              this.$outputs.outColor = this.centerColor;
+            }
           ).$else(function () {
             this.$l.widthStrength = pb.clamp(this.centerParam.g, 0, 0.999);
             this.$l.centerDepth = pb.mul(this.centerDepth01, this.cameraNearFar.y);
             this.$l.centerLogDepth = pb.log(pb.add(this.centerDepth, 1));
             this.$l.profileSettingsA = this.readProfileSettingsA(this.centerSlot);
             this.$l.profileSettingsB = this.readProfileSettingsB(this.centerSlot);
-            this.$l.profileWorldScale = pb.clamp(this.profileSettingsA.x, 0.05, SSS._profileWorldScaleEncodeMax);
+            this.$l.profileWorldScale = pb.clamp(
+              this.profileSettingsA.x,
+              0.05,
+              SSS._profileWorldScaleEncodeMax
+            );
             this.$l.profileBoundaryBleed = pb.clamp(this.profileSettingsA.y, 0, 1);
-            this.$l.profileNormalScale = pb.clamp(this.profileSettingsA.z, 0, SSS._profileNormalScaleEncodeMax);
+            this.$l.profileNormalScale = pb.clamp(
+              this.profileSettingsA.z,
+              0,
+              SSS._profileNormalScaleEncodeMax
+            );
             this.$l.profileDistribution = pb.clamp(this.profileSettingsA.w, 0, 1);
-            this.$l.profileScatterScale = pb.clamp(this.profileSettingsB.y, 0.05, SSS._profileWorldScaleEncodeMax);
+            this.$l.profileScatterScale = pb.clamp(
+              this.profileSettingsB.y,
+              0.05,
+              SSS._profileWorldScaleEncodeMax
+            );
             this.$l.profileStrengthScale = pb.clamp(this.profileSettingsB.z, 0.05, 2);
             this.$l.profileWorldScaleNorm = pb.clamp(
               pb.div(this.profileWorldScale, SSS._profileWorldScaleEncodeMax),
@@ -628,11 +631,7 @@ export class SSS extends AbstractPostEffect {
             this.$l.profileRadius = pb.mul(
               this.readProfileRadius(this.centerSlot),
               this.profileWorldScale,
-              pb.mix(
-                0.76,
-                1.44,
-                this.profileScatterScaleNorm
-              ),
+              pb.mix(0.76, 1.44, this.profileScatterScaleNorm),
               pb.mix(0.92, 1.08, this.profileStrengthNorm)
             );
             this.$l.profileFalloff = this.readProfileFalloff(this.centerSlot);
@@ -717,15 +716,21 @@ export class SSS extends AbstractPostEffect {
                     this.$l.sampleDepth = pb.mul(this.depth01Sample, this.cameraNearFar.y);
                     this.$l.sampleLogDepth = pb.log(pb.add(this.sampleDepth, 1));
                     this.$if(
-                      pb.lessThan(pb.abs(pb.sub(this.sampleLogDepth, this.centerLogDepth)), this.depthThreshold),
+                      pb.lessThan(
+                        pb.abs(pb.sub(this.sampleLogDepth, this.centerLogDepth)),
+                        this.depthThreshold
+                      ),
                       function () {
                         this.$l.sampleNormal = this.decodeNormal(this.sampleUV);
-                        this.$if(pb.greaterThan(pb.dot(this.sampleNormal, this.centerNormal), this.normalThreshold), function () {
-                          this.$l.sampleColor = this.sampleColor(this.sampleUV).rgb;
-                          this.$l.w = pb.mul(this.kernelWeight, this.sampleWeight);
-                          this.colorSum = pb.add(this.colorSum, pb.mul(this.sampleColor, this.w));
-                          this.weightSum = pb.add(this.weightSum, this.w);
-                        });
+                        this.$if(
+                          pb.greaterThan(pb.dot(this.sampleNormal, this.centerNormal), this.normalThreshold),
+                          function () {
+                            this.$l.sampleColor = this.sampleColor(this.sampleUV).rgb;
+                            this.$l.w = pb.mul(this.kernelWeight, this.sampleWeight);
+                            this.colorSum = pb.add(this.colorSum, pb.mul(this.sampleColor, this.w));
+                            this.weightSum = pb.add(this.weightSum, this.w);
+                          }
+                        );
                       }
                     );
                   });
@@ -839,36 +844,21 @@ export class SSS extends AbstractPostEffect {
           this.$return(pb.max(this.value.x, pb.max(this.value.y, this.value.z)));
         });
         pb.func('readProfileRadius', [pb.float('slot')], function () {
-          this.$l.uv = pb.vec2(
-            pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth),
-            SSS.profileRowV(0)
-          );
+          this.$l.uv = pb.vec2(pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth), SSS.profileRowV(0));
           this.$return(
-            pb.mul(
-              pb.textureSampleLevel(this.profileLUTTex, this.uv, 0).rgb,
-              SSS._profileRadiusEncodeMax
-            )
+            pb.mul(pb.textureSampleLevel(this.profileLUTTex, this.uv, 0).rgb, SSS._profileRadiusEncodeMax)
           );
         });
         pb.func('readProfileFalloff', [pb.float('slot')], function () {
-          this.$l.uv = pb.vec2(
-            pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth),
-            SSS.profileRowV(1)
-          );
+          this.$l.uv = pb.vec2(pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth), SSS.profileRowV(1));
           this.$return(pb.textureSampleLevel(this.profileLUTTex, this.uv, 0).rgb);
         });
         pb.func('readProfileTintBias', [pb.float('slot')], function () {
-          this.$l.uv = pb.vec2(
-            pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth),
-            SSS.profileRowV(2)
-          );
+          this.$l.uv = pb.vec2(pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth), SSS.profileRowV(2));
           this.$return(pb.textureSampleLevel(this.profileLUTTex, this.uv, 0).rgb);
         });
         pb.func('readProfilePresetResponse', [pb.float('slot')], function () {
-          this.$l.uv = pb.vec2(
-            pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth),
-            SSS.profileRowV(3)
-          );
+          this.$l.uv = pb.vec2(pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth), SSS.profileRowV(3));
           this.$l.raw = pb.textureSampleLevel(this.profileLUTTex, this.uv, 0);
           this.$return(
             pb.vec4(
@@ -880,10 +870,7 @@ export class SSS extends AbstractPostEffect {
           );
         });
         pb.func('readProfileSettingsA', [pb.float('slot')], function () {
-          this.$l.uv = pb.vec2(
-            pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth),
-            SSS.profileRowV(4)
-          );
+          this.$l.uv = pb.vec2(pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth), SSS.profileRowV(4));
           this.$l.raw = pb.textureSampleLevel(this.profileLUTTex, this.uv, 0);
           this.$return(
             pb.vec4(
@@ -895,17 +882,11 @@ export class SSS extends AbstractPostEffect {
           );
         });
         pb.func('readProfileTransmissionTint', [pb.float('slot')], function () {
-          this.$l.uv = pb.vec2(
-            pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth),
-            SSS.profileRowV(5)
-          );
+          this.$l.uv = pb.vec2(pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth), SSS.profileRowV(5));
           this.$return(pb.textureSampleLevel(this.profileLUTTex, this.uv, 0).rgb);
         });
         pb.func('readProfileSettingsB', [pb.float('slot')], function () {
-          this.$l.uv = pb.vec2(
-            pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth),
-            SSS.profileRowV(6)
-          );
+          this.$l.uv = pb.vec2(pb.div(pb.add(this.slot, 0.5), SSS._profileLUTWidth), SSS.profileRowV(6));
           this.$l.raw = pb.textureSampleLevel(this.profileLUTTex, this.uv, 0);
           this.$return(
             pb.vec4(
@@ -968,26 +949,17 @@ export class SSS extends AbstractPostEffect {
             this.$l.depthMean = pb.div(this.depthAccum, pb.max(this.sampleCount, 1));
             this.$l.normalMean = pb.div(this.normalAccum, pb.max(this.sampleCount, 1));
             this.$l.depthThin = pb.clamp(
-              pb.mul(
-                this.depthMean,
-                pb.add(52, pb.mul(this.radiusScale, 18))
-              ),
+              pb.mul(this.depthMean, pb.add(52, pb.mul(this.radiusScale, 18))),
               0,
               1
             );
             this.$l.normalThin = pb.clamp(
-              pb.mul(
-                this.normalMean,
-                pb.add(1.4, pb.mul(this.radiusScale, 0.5))
-              ),
+              pb.mul(this.normalMean, pb.add(1.4, pb.mul(this.radiusScale, 0.5))),
               0,
               1
             );
             this.$l.combinedThin = pb.clamp(
-              pb.add(
-                pb.mul(this.depthThin, 0.72),
-                pb.mul(this.normalThin, 0.52)
-              ),
+              pb.add(pb.mul(this.depthThin, 0.72), pb.mul(this.normalThin, 0.52)),
               0,
               1
             );
@@ -1013,7 +985,13 @@ export class SSS extends AbstractPostEffect {
         });
         pb.func(
           'calculateMainLightDirection',
-          [pb.vec3('worldPos'), pb.int('lightType'), pb.vec4('posRange'), pb.vec4('dirCutoff'), pb.vec3('fallbackDir')],
+          [
+            pb.vec3('worldPos'),
+            pb.int('lightType'),
+            pb.vec4('posRange'),
+            pb.vec4('dirCutoff'),
+            pb.vec3('fallbackDir')
+          ],
           function () {
             this.$return(
               this.$choice(
@@ -1033,9 +1011,12 @@ export class SSS extends AbstractPostEffect {
             });
             this.$l.dist = pb.distance(this.posRange.xyz, this.worldPos);
             this.$l.falloff = pb.max(0, pb.sub(1, pb.div(this.dist, pb.max(this.posRange.w, 1e-4))));
-            this.$if(pb.or(pb.equal(this.lightType, LIGHT_TYPE_POINT), pb.equal(this.lightType, LIGHT_TYPE_RECT)), function () {
-              this.$return(pb.mul(this.falloff, this.falloff));
-            });
+            this.$if(
+              pb.or(pb.equal(this.lightType, LIGHT_TYPE_POINT), pb.equal(this.lightType, LIGHT_TYPE_RECT)),
+              function () {
+                this.$return(pb.mul(this.falloff, this.falloff));
+              }
+            );
             this.$l.spotFactor = pb.dot(
               pb.normalize(pb.sub(this.worldPos, this.posRange.xyz)),
               this.dirCutoff.xyz
@@ -1148,10 +1129,10 @@ export class SSS extends AbstractPostEffect {
           this.$l.profileActive = pb.greaterThan(this.param.a, 0.5);
           this.$l.scatterSoftnessAuthor = pb.clamp(pb.mul(pb.sub(this.param.a, 0.75), 4), 0, 1);
           this.$l.roughnessInfo = pb.textureSampleLevel(this.roughnessTex, this.uv, 0);
-              this.$l.profileStrength = this.max3(this.profile.rgb);
-              this.$l.materialTransmissionMask = pb.clamp(this.profile.a, 0, 1);
-              this.debugTransmissionMask = this.materialTransmissionMask;
-              this.$l.profileSlot = this.readProfileSlot(this.param);
+          this.$l.profileStrength = this.max3(this.profile.rgb);
+          this.$l.materialTransmissionMask = pb.clamp(this.profile.a, 0, 1);
+          this.debugTransmissionMask = this.materialTransmissionMask;
+          this.$l.profileSlot = this.readProfileSlot(this.param);
           this.$l.profilePreset = this.readProfilePreset(this.param);
           this.$l.depth01 = this.readDepth01(this.uv);
           this.$l.result = this.baseColor.rgb;
@@ -1168,12 +1149,28 @@ export class SSS extends AbstractPostEffect {
               this.$l.profileSettingsA = this.readProfileSettingsA(this.profileSlot);
               this.$l.profileTransmissionTint = this.readProfileTransmissionTint(this.profileSlot);
               this.$l.profileSettingsB = this.readProfileSettingsB(this.profileSlot);
-              this.$l.profileWorldScale = pb.clamp(this.profileSettingsA.x, 0.05, SSS._profileWorldScaleEncodeMax);
+              this.$l.profileWorldScale = pb.clamp(
+                this.profileSettingsA.x,
+                0.05,
+                SSS._profileWorldScaleEncodeMax
+              );
               this.$l.profileBoundaryBleed = pb.clamp(this.profileSettingsA.y, 0, 1);
-              this.$l.profileNormalScale = pb.clamp(this.profileSettingsA.z, 0, SSS._profileNormalScaleEncodeMax);
+              this.$l.profileNormalScale = pb.clamp(
+                this.profileSettingsA.z,
+                0,
+                SSS._profileNormalScaleEncodeMax
+              );
               this.$l.profileDistribution = pb.clamp(this.profileSettingsA.w, 0, 1);
-              this.$l.profileExtinctionScale = pb.clamp(this.profileSettingsB.x, 0, SSS._profileExtinctionEncodeMax);
-              this.$l.profileScatterScale = pb.clamp(this.profileSettingsB.y, 0.05, SSS._profileWorldScaleEncodeMax);
+              this.$l.profileExtinctionScale = pb.clamp(
+                this.profileSettingsB.x,
+                0,
+                SSS._profileExtinctionEncodeMax
+              );
+              this.$l.profileScatterScale = pb.clamp(
+                this.profileSettingsB.y,
+                0.05,
+                SSS._profileWorldScaleEncodeMax
+              );
               this.$l.profileStrengthScale = pb.clamp(this.profileSettingsB.z, 0.05, 2);
               this.$l.profileWorldScaleNorm = pb.clamp(
                 pb.div(this.profileWorldScale, SSS._profileWorldScaleEncodeMax),
@@ -1194,11 +1191,7 @@ export class SSS extends AbstractPostEffect {
               this.$l.profileRadius = pb.mul(
                 this.readProfileRadius(this.profileSlot),
                 this.profileWorldScale,
-                pb.mix(
-                  0.78,
-                  1.42,
-                  this.profileScatterScaleNorm
-                ),
+                pb.mix(0.78, 1.42, this.profileScatterScaleNorm),
                 pb.mix(0.92, 1.08, this.profileStrengthNorm)
               );
               this.$l.profileFalloff = this.readProfileFalloff(this.profileSlot);
@@ -1284,10 +1277,7 @@ export class SSS extends AbstractPostEffect {
                   pb.mul(this.profileSpread, 0.62),
                   pb.add(
                     pb.mul(this.profileDiffusionSoftness, 0.18),
-                    pb.add(
-                      pb.mul(this.avgFalloff, 0.16),
-                      pb.mul(this.profileEnergyScale, 0.08)
-                    )
+                    pb.add(pb.mul(this.avgFalloff, 0.16), pb.mul(this.profileEnergyScale, 0.08))
                   )
                 ),
                 0,
@@ -1320,7 +1310,10 @@ export class SSS extends AbstractPostEffect {
                 );
               }
               this.transmissionShadow = this.transmissionShadowRaw;
-              this.$l.transmissionLightAttenuation = pb.mul(this.mainLightAttenuation, this.transmissionShadow);
+              this.$l.transmissionLightAttenuation = pb.mul(
+                this.mainLightAttenuation,
+                this.transmissionShadow
+              );
               this.$l.thinnessComponents = this.estimateScreenThinnessComponents(
                 this.uv,
                 this.depth01,
@@ -1449,10 +1442,7 @@ export class SSS extends AbstractPostEffect {
                 pb.vec3(1)
               );
               this.$l.edgeThinBoost = pb.clamp(
-                pb.mul(
-                  this.screenThinness,
-                  pb.add(0.14, pb.mul(this.materialThicknessField, 0.22))
-                ),
+                pb.mul(this.screenThinness, pb.add(0.14, pb.mul(this.materialThicknessField, 0.22))),
                 0,
                 0.32
               );
@@ -1485,7 +1475,10 @@ export class SSS extends AbstractPostEffect {
                     )
                   )
                 ),
-                pb.add(pb.add(0.05, pb.mul(this.materialScatterBoost, 0.12)), pb.mul(this.presetFrontScatter, 0.3)),
+                pb.add(
+                  pb.add(0.05, pb.mul(this.materialScatterBoost, 0.12)),
+                  pb.mul(this.presetFrontScatter, 0.3)
+                ),
                 1
               );
               this.$l.scatterMix = pb.add(
@@ -1498,10 +1491,7 @@ export class SSS extends AbstractPostEffect {
               this.$l.scatterStrength = pb.clamp(
                 pb.mul(
                   pb.max(
-                    pb.mul(
-                      this.profileStrength,
-                      pb.mix(0.88, 1.24, this.profileStrengthNorm)
-                    ),
+                    pb.mul(this.profileStrength, pb.mix(0.88, 1.24, this.profileStrengthNorm)),
                     pb.mul(this.widthStrength, 0.45)
                   ),
                   this.sssStrength,
@@ -1597,7 +1587,17 @@ export class SSS extends AbstractPostEffect {
                         pb.clamp(
                           pb.add(
                             pb.mul(this.profileBoundaryBleed, 0.35),
-                            pb.mul(pb.sub(1, pb.clamp(pb.div(this.profileExtinctionScale, SSS._profileExtinctionEncodeMax), 0, 1)), 0.28)
+                            pb.mul(
+                              pb.sub(
+                                1,
+                                pb.clamp(
+                                  pb.div(this.profileExtinctionScale, SSS._profileExtinctionEncodeMax),
+                                  0,
+                                  1
+                                )
+                              ),
+                              0.28
+                            )
                           ),
                           0,
                           0.8
@@ -1611,15 +1611,15 @@ export class SSS extends AbstractPostEffect {
               );
               this.$l.baseSpecular = pb.max(pb.sub(this.baseColor.rgb, this.baseDiffuseColor), pb.vec3(0));
               this.$l.scatterBlend = pb.clamp(
-                pb.mul(
-                  this.scatterStrength,
-                  pb.add(0.12, pb.mul(this.scatterMix, 0.24)),
-                  this.scatterMask
-                ),
+                pb.mul(this.scatterStrength, pb.add(0.12, pb.mul(this.scatterMix, 0.24)), this.scatterMask),
                 0,
                 pb.add(
                   pb.add(0.7, pb.mul(this.materialScatterBoost, 0.22)),
-                  this.$choice(pb.equal(this.profilePreset, 1), 0.12, this.$choice(pb.equal(this.profilePreset, 2), 0.08, 0))
+                  this.$choice(
+                    pb.equal(this.profilePreset, 1),
+                    0.12,
+                    this.$choice(pb.equal(this.profilePreset, 2), 0.08, 0)
+                  )
                 )
               );
               this.$l.blurredLuma = pb.dot(this.blurred, pb.vec3(0.2126, 0.7152, 0.0722));
@@ -1753,7 +1753,10 @@ export class SSS extends AbstractPostEffect {
                 this.scatterStrength,
                 this.scatterMask,
                 pb.add(
-                  pb.add(pb.add(0.002, pb.mul(this.materialScatterBoost, 0.004)), pb.mul(this.presetSoftness, 0.004)),
+                  pb.add(
+                    pb.add(0.002, pb.mul(this.materialScatterBoost, 0.004)),
+                    pb.mul(this.presetSoftness, 0.004)
+                  ),
                   pb.mul(
                     this.radiusResponse,
                     pb.add(
@@ -1769,7 +1772,10 @@ export class SSS extends AbstractPostEffect {
               );
               this.$l.scatteredDiffuse = pb.add(
                 this.scattered,
-                pb.add(this.terminatorLift, pb.add(this.multiScatterLift, pb.add(this.subdermalFill, this.softVeil)))
+                pb.add(
+                  this.terminatorLift,
+                  pb.add(this.multiScatterLift, pb.add(this.subdermalFill, this.softVeil))
+                )
               );
               this.$l.energyLimit = pb.add(
                 this.baseDiffuseColor,
@@ -1807,7 +1813,10 @@ export class SSS extends AbstractPostEffect {
                     pb.mul(this.avgFalloff, 0.12),
                     pb.add(
                       pb.mul(this.profileSpread, 0.12),
-                      pb.add(pb.mul(this.materialScatterBoost, 0.12), pb.mul(this.presetTransmissionBoost, 0.22))
+                      pb.add(
+                        pb.mul(this.materialScatterBoost, 0.12),
+                        pb.mul(this.presetTransmissionBoost, 0.22)
+                      )
                     )
                   )
                 ),
@@ -1847,7 +1856,10 @@ export class SSS extends AbstractPostEffect {
                     pb.add(pb.mul(this.materialThicknessField, 0.06), pb.mul(this.edgeThinBoost, 0.48)),
                     pb.add(
                       pb.mul(this.curvatureThinBoost, 0.32),
-                      pb.add(pb.mul(this.profileBoundaryBleed, 0.06), pb.mul(this.profileTransmissionScale, 0.08))
+                      pb.add(
+                        pb.mul(this.profileBoundaryBleed, 0.06),
+                        pb.mul(this.profileTransmissionScale, 0.08)
+                      )
                     )
                   ),
                   0,
@@ -1865,7 +1877,10 @@ export class SSS extends AbstractPostEffect {
                   0.04,
                   1
                 );
-                this.transmissionLightAttenuation = pb.mul(this.mainLightAttenuation, this.transmissionShadow);
+                this.transmissionLightAttenuation = pb.mul(
+                  this.mainLightAttenuation,
+                  this.transmissionShadow
+                );
                 this.debugTransmissionShadow = this.transmissionShadow;
                 this.debugProfileBoundary = pb.clamp(
                   pb.vec3(
@@ -1899,10 +1914,7 @@ export class SSS extends AbstractPostEffect {
                 );
                 this.$l.thinPotential = pb.clamp(
                   pb.add(
-                    pb.add(
-                      pb.mul(this.materialThicknessField, 0.78),
-                      this.edgeThinBoost
-                    ),
+                    pb.add(pb.mul(this.materialThicknessField, 0.78), this.edgeThinBoost),
                     pb.add(
                       this.curvatureThinBoost,
                       pb.mul(
@@ -1919,24 +1931,15 @@ export class SSS extends AbstractPostEffect {
                 );
                 this.$l.transmissionFocus = pb.clamp(
                   pb.mul(
-                    pb.add(
-                      pb.mul(this.materialThicknessField, 0.72),
-                      pb.mul(this.thinPotential, 0.38)
-                    ),
-                    pb.add(
-                      pb.add(0.22, pb.mul(this.thicknessBackScatter, 0.72)),
-                      pb.mul(this.backLit, 0.08)
-                    )
+                    pb.add(pb.mul(this.materialThicknessField, 0.72), pb.mul(this.thinPotential, 0.38)),
+                    pb.add(pb.add(0.22, pb.mul(this.thicknessBackScatter, 0.72)), pb.mul(this.backLit, 0.08))
                   ),
                   0,
                   1
                 );
                 this.$l.thinRegion = pb.clamp(
                   pb.add(
-                    pb.add(
-                      pb.mul(this.materialThicknessField, 0.86),
-                      pb.mul(this.transmissionFocus, 0.74)
-                    ),
+                    pb.add(pb.mul(this.materialThicknessField, 0.86), pb.mul(this.transmissionFocus, 0.74)),
                     pb.add(
                       pb.add(pb.mul(this.edgeThinBoost, 0.9), pb.mul(this.curvatureThinBoost, 0.5)),
                       pb.add(pb.mul(this.backLit, 0.1), pb.mul(this.profileSpread, 0.05))
@@ -1954,10 +1957,7 @@ export class SSS extends AbstractPostEffect {
                     ),
                     pb.clamp(
                       pb.add(
-                        pb.add(
-                          pb.add(0.16, pb.mul(this.backLit, 0.26)),
-                          pb.mul(this.edgeThinBoost, 0.85)
-                        ),
+                        pb.add(pb.add(0.16, pb.mul(this.backLit, 0.26)), pb.mul(this.edgeThinBoost, 0.85)),
                         pb.add(
                           pb.mul(this.curvatureThinBoost, 0.4),
                           pb.mul(pb.sub(1, this.depthThinness), 0.18)
@@ -1972,14 +1972,7 @@ export class SSS extends AbstractPostEffect {
                   1
                 );
                 this.$l.debugBlueDisplay = pb.pow(
-                  pb.clamp(
-                    pb.mul(
-                      pb.clamp(pb.sub(this.debugBlueSeed, 0.015), 0, 1),
-                      2.15
-                    ),
-                    0,
-                    1
-                  ),
+                  pb.clamp(pb.mul(pb.clamp(pb.sub(this.debugBlueSeed, 0.015), 0, 1), 2.15), 0, 1),
                   0.72
                 );
                 this.$l.debugGreenDisplay = pb.clamp(
@@ -2004,7 +1997,11 @@ export class SSS extends AbstractPostEffect {
                   this.debugBlueDisplay
                 );
                 this.$l.sunColor = pb.min(
-                  pb.mul(this.sunColorIntensity.rgb, this.sunColorIntensity.a, this.transmissionLightAttenuation),
+                  pb.mul(
+                    this.sunColorIntensity.rgb,
+                    this.sunColorIntensity.a,
+                    this.transmissionLightAttenuation
+                  ),
                   pb.vec3(4)
                 );
                 this.$l.capturedTransmission = pb.mul(
@@ -2014,7 +2011,10 @@ export class SSS extends AbstractPostEffect {
                     pb.clamp(
                       pb.add(
                         pb.add(0.16, pb.mul(this.avgFalloff, 0.12)),
-                        pb.add(pb.mul(this.materialScatterBoost, 0.1), pb.mul(this.presetTransmissionBoost, 0.18))
+                        pb.add(
+                          pb.mul(this.materialScatterBoost, 0.1),
+                          pb.mul(this.presetTransmissionBoost, 0.18)
+                        )
                       ),
                       0,
                       0.45
@@ -2034,7 +2034,10 @@ export class SSS extends AbstractPostEffect {
                     pb.add(0.88, pb.mul(this.radiusResponse, 0.18)),
                     pb.add(
                       pb.add(pb.mul(this.profileSpread, 0.08), pb.mul(this.thinRegion, 0.12)),
-                      pb.add(pb.mul(this.materialScatterBoost, 0.12), pb.mul(this.presetTransmissionBoost, 0.18))
+                      pb.add(
+                        pb.mul(this.materialScatterBoost, 0.12),
+                        pb.mul(this.presetTransmissionBoost, 0.18)
+                      )
                     )
                   ),
                   pb.add(
@@ -2079,7 +2082,10 @@ export class SSS extends AbstractPostEffect {
                     ),
                     pb.add(
                       pb.mul(this.profileSpread, 0.03),
-                      pb.add(pb.mul(this.materialScatterBoost, 0.04), pb.mul(this.presetTransmissionBoost, 0.06))
+                      pb.add(
+                        pb.mul(this.materialScatterBoost, 0.04),
+                        pb.mul(this.presetTransmissionBoost, 0.06)
+                      )
                     )
                   )
                 );
@@ -2091,7 +2097,10 @@ export class SSS extends AbstractPostEffect {
                       pb.clamp(
                         pb.add(
                           pb.add(0.18, pb.mul(this.presetTransmissionBoost, 0.26)),
-                          pb.add(pb.mul(this.materialThicknessField, 0.24), pb.mul(this.thicknessBackScatter, 0.22))
+                          pb.add(
+                            pb.mul(this.materialThicknessField, 0.24),
+                            pb.mul(this.thicknessBackScatter, 0.22)
+                          )
                         ),
                         0,
                         0.72
@@ -2104,7 +2113,10 @@ export class SSS extends AbstractPostEffect {
                   pb.mul(
                     pb.add(
                       pb.add(0.08, pb.mul(this.materialThicknessField, 0.2)),
-                      pb.add(pb.mul(this.thicknessBackScatter, 0.26), pb.mul(this.presetTransmissionBoost, 0.12))
+                      pb.add(
+                        pb.mul(this.thicknessBackScatter, 0.26),
+                        pb.mul(this.presetTransmissionBoost, 0.12)
+                      )
                     ),
                     pb.mix(1.06, 0.72, this.extinctionNorm)
                   ),
@@ -2150,10 +2162,7 @@ export class SSS extends AbstractPostEffect {
                   pb.add(
                     this.thicknessBackScatter,
                     pb.add(
-                      pb.mul(
-                        this.thinRegion,
-                        pb.add(0.18, pb.mul(this.presetTransmissionBoost, 0.16))
-                      ),
+                      pb.mul(this.thinRegion, pb.add(0.18, pb.mul(this.presetTransmissionBoost, 0.16))),
                       pb.mul(
                         this.widthStrength,
                         pb.add(
@@ -2229,15 +2238,15 @@ export class SSS extends AbstractPostEffect {
                 );
                 this.$l.visibleTransmissionMask = pb.clamp(
                   pb.add(
-                    pb.add(
-                      pb.mul(this.materialThicknessField, 0.72),
-                      pb.mul(this.thinRegion, 0.34)
-                    ),
+                    pb.add(pb.mul(this.materialThicknessField, 0.72), pb.mul(this.thinRegion, 0.34)),
                     pb.add(
                       pb.mul(this.thicknessBackScatter, 0.28),
                       pb.add(
                         pb.mul(this.materialTransmissionSoftness, 0.08),
-                        pb.add(pb.mul(this.profileTransmissionScale, 0.12), pb.mul(this.profileDiffusionSoftness, 0.06))
+                        pb.add(
+                          pb.mul(this.profileTransmissionScale, 0.12),
+                          pb.mul(this.profileDiffusionSoftness, 0.06)
+                        )
                       )
                     )
                   ),
@@ -2247,7 +2256,10 @@ export class SSS extends AbstractPostEffect {
                 this.$l.visibleTransmissionChroma = pb.clamp(
                   pb.add(
                     pb.add(0.66, pb.mul(this.visibleTransmissionMask, 0.32)),
-                    pb.add(pb.mul(this.thicknessBackScatter, 0.24), pb.mul(this.presetTransmissionBoost, 0.14))
+                    pb.add(
+                      pb.mul(this.thicknessBackScatter, 0.24),
+                      pb.mul(this.presetTransmissionBoost, 0.14)
+                    )
                   ),
                   0.52,
                   1
@@ -2279,7 +2291,10 @@ export class SSS extends AbstractPostEffect {
                     pb.add(2.35, pb.mul(this.visibleTransmissionMask, 1.85)),
                     pb.add(
                       pb.mul(this.thicknessBackScatter, 1.3),
-                      pb.add(pb.mul(this.materialTransmissionSoftness, 0.42), pb.mul(this.profileTransmissionScale, 0.72))
+                      pb.add(
+                        pb.mul(this.materialTransmissionSoftness, 0.42),
+                        pb.mul(this.profileTransmissionScale, 0.72)
+                      )
                     )
                   ),
                   2,
@@ -2333,85 +2348,81 @@ export class SSS extends AbstractPostEffect {
             this.$if(pb.lessThan(this.depth01, 1), function () {
               this.$if(pb.equal(this.debugView, 1), function () {
                 this.result = this.$choice(this.profileActive, pb.vec3(this.profileStrength), pb.vec3(0));
-              }).$elseif(pb.equal(this.debugView, 2), function () {
-                this.result = this.$choice(
-                  this.profileActive,
-                  pb.vec3(this.scatterSoftnessAuthor),
-                  pb.vec3(0)
-                );
-              }).$elseif(pb.equal(this.debugView, 3), function () {
-                this.$l.debugSlot = this.readProfileSlot(this.param);
-                this.result = this.$choice(
-                  this.profileActive,
-                  pb.clamp(pb.div(this.readProfileRadius(this.debugSlot), pb.vec3(8)), pb.vec3(0), pb.vec3(1)),
-                  pb.vec3(0)
-                );
-              }).$elseif(pb.equal(this.debugView, 4), function () {
-                this.$l.debugSlot = this.readProfileSlot(this.param);
-                this.result = this.$choice(
-                  this.profileActive,
-                  pb.clamp(this.readProfileFalloff(this.debugSlot), pb.vec3(0), pb.vec3(1)),
-                  pb.vec3(0)
-                );
-              }).$elseif(pb.equal(this.debugView, 5), function () {
-                this.result = this.$choice(
-                  this.profileActive,
-                  this.debugProfileEnergy,
-                  pb.vec3(0)
-                );
-              }).$elseif(pb.equal(this.debugView, 6), function () {
-                this.result = this.$choice(
-                  this.profileActive,
-                  this.debugProfileTransmission,
-                  pb.vec3(0)
-                );
-              }).$elseif(pb.equal(this.debugView, 7), function () {
-                this.result = this.$choice(
-                  this.profileActive,
-                  this.debugProfileBoundary,
-                  pb.vec3(0)
-                );
-              }).$elseif(pb.equal(this.debugView, 8), function () {
-                this.result = this.baseDiffuseColor;
-              }).$elseif(pb.equal(this.debugView, 9), function () {
-                this.result = this.$choice(
-                  this.profileActive,
-                  pb.textureSampleLevel(this.blurTex, this.uv, 0).rgb,
-                  pb.vec3(0)
-                );
-              }).$elseif(pb.equal(this.debugView, 10), function () {
-                this.result = this.$choice(
-                  this.profileActive,
-                  this.debugThinnessLayers,
-                  pb.vec3(0)
-                );
-              }).$elseif(pb.equal(this.debugView, 11), function () {
-                this.result = this.$choice(
-                  this.profileActive,
-                  pb.vec3(
-                    this.debugTransmissionMask,
-                    this.debugTransmissionMask,
-                    this.debugTransmissionMask
-                  ),
-                  pb.vec3(0)
-                );
-              }).$elseif(pb.equal(this.debugView, 12), function () {
-                this.result = this.$choice(
-                  this.profileActive,
-                  this.debugThinLighting,
-                  pb.vec3(0)
-                );
-              }).$elseif(pb.equal(this.debugView, 13), function () {
-                this.result = this.$choice(
-                  this.profileActive,
-                  pb.vec3(
-                    this.debugTransmissionShadow,
-                    this.debugTransmissionShadow,
-                    this.debugTransmissionShadow
-                  ),
-                  pb.vec3(0)
-                );
-              });
+              })
+                .$elseif(pb.equal(this.debugView, 2), function () {
+                  this.result = this.$choice(
+                    this.profileActive,
+                    pb.vec3(this.scatterSoftnessAuthor),
+                    pb.vec3(0)
+                  );
+                })
+                .$elseif(pb.equal(this.debugView, 3), function () {
+                  this.$l.debugSlot = this.readProfileSlot(this.param);
+                  this.result = this.$choice(
+                    this.profileActive,
+                    pb.clamp(
+                      pb.div(this.readProfileRadius(this.debugSlot), pb.vec3(8)),
+                      pb.vec3(0),
+                      pb.vec3(1)
+                    ),
+                    pb.vec3(0)
+                  );
+                })
+                .$elseif(pb.equal(this.debugView, 4), function () {
+                  this.$l.debugSlot = this.readProfileSlot(this.param);
+                  this.result = this.$choice(
+                    this.profileActive,
+                    pb.clamp(this.readProfileFalloff(this.debugSlot), pb.vec3(0), pb.vec3(1)),
+                    pb.vec3(0)
+                  );
+                })
+                .$elseif(pb.equal(this.debugView, 5), function () {
+                  this.result = this.$choice(this.profileActive, this.debugProfileEnergy, pb.vec3(0));
+                })
+                .$elseif(pb.equal(this.debugView, 6), function () {
+                  this.result = this.$choice(this.profileActive, this.debugProfileTransmission, pb.vec3(0));
+                })
+                .$elseif(pb.equal(this.debugView, 7), function () {
+                  this.result = this.$choice(this.profileActive, this.debugProfileBoundary, pb.vec3(0));
+                })
+                .$elseif(pb.equal(this.debugView, 8), function () {
+                  this.result = this.baseDiffuseColor;
+                })
+                .$elseif(pb.equal(this.debugView, 9), function () {
+                  this.result = this.$choice(
+                    this.profileActive,
+                    pb.textureSampleLevel(this.blurTex, this.uv, 0).rgb,
+                    pb.vec3(0)
+                  );
+                })
+                .$elseif(pb.equal(this.debugView, 10), function () {
+                  this.result = this.$choice(this.profileActive, this.debugThinnessLayers, pb.vec3(0));
+                })
+                .$elseif(pb.equal(this.debugView, 11), function () {
+                  this.result = this.$choice(
+                    this.profileActive,
+                    pb.vec3(
+                      this.debugTransmissionMask,
+                      this.debugTransmissionMask,
+                      this.debugTransmissionMask
+                    ),
+                    pb.vec3(0)
+                  );
+                })
+                .$elseif(pb.equal(this.debugView, 12), function () {
+                  this.result = this.$choice(this.profileActive, this.debugThinLighting, pb.vec3(0));
+                })
+                .$elseif(pb.equal(this.debugView, 13), function () {
+                  this.result = this.$choice(
+                    this.profileActive,
+                    pb.vec3(
+                      this.debugTransmissionShadow,
+                      this.debugTransmissionShadow,
+                      this.debugTransmissionShadow
+                    ),
+                    pb.vec3(0)
+                  );
+                });
             }).$else(function () {
               this.result = pb.vec3(0);
             });

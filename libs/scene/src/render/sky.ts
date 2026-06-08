@@ -814,7 +814,7 @@ export class SkyRenderer extends Disposable {
     const device = getDevice();
     const currentFramebuffer = device.getFramebuffer();
     const colorBuffer = currentFramebuffer?.getColorAttachments()[0] ?? null;
-    const depthBuffer = withDepth ? currentFramebuffer?.getDepthAttachment() ?? null : null;
+    const depthBuffer = withDepth ? (currentFramebuffer?.getDepthAttachment() ?? null) : null;
     if (!currentFramebuffer || currentFramebuffer.getColorAttachments().length <= 1 || !colorBuffer) {
       return null;
     }

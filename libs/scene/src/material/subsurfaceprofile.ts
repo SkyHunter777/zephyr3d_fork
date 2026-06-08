@@ -155,7 +155,10 @@ const SUBSURFACE_PROFILE_PRESET_TEMPLATE: Record<
   }
 };
 
-const SUBSURFACE_PROFILE_PRESET_TINT_BIAS: Record<CanonicalSubsurfaceProfilePreset, [number, number, number]> = {
+const SUBSURFACE_PROFILE_PRESET_TINT_BIAS: Record<
+  CanonicalSubsurfaceProfilePreset,
+  [number, number, number]
+> = {
   skin_thin: [1, 0.56, 0.46],
   skin_default: [1, 0.62, 0.5],
   skin_heavy_makeup: [1, 0.5, 0.42],

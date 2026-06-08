@@ -1209,7 +1209,11 @@ export class GLTFImporter extends AbstractModelImporter {
       if (primitives) {
         for (let i = 0; i < primitives.length; i++) {
           const p = primitives[i];
-          const subMeshName = meshName ? (primitives.length > 1 ? `${meshName}_${i}` : meshName) : `mesh_${meshIndex}_${i}`;
+          const subMeshName = meshName
+            ? primitives.length > 1
+              ? `${meshName}_${i}`
+              : meshName
+            : `mesh_${meshIndex}_${i}`;
           const subMeshData: AssetSubMeshData = {
             name: subMeshName,
             primitive: null,

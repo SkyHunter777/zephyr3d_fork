@@ -12,7 +12,15 @@ import {
 } from '@zephyr3d/scene';
 import { FontGlyph } from '../core/fontglyph';
 import type { GenericConstructor, Nullable, RequireOptionals } from '@zephyr3d/base';
-import { AABB, ASSERT, degree2radian, Interpolator, Observable, Quaternion, radian2degree } from '@zephyr3d/base';
+import {
+  AABB,
+  ASSERT,
+  degree2radian,
+  Interpolator,
+  Observable,
+  Quaternion,
+  radian2degree
+} from '@zephyr3d/base';
 import { RotationEditor } from './rotationeditor';
 import { Dialog } from '../views/dlg/dlg';
 import { ProjectService } from '../core/services/project';
@@ -520,12 +528,12 @@ export class PropertyEditor extends Observable<{
               group.prop.delete!.call(group.object, group.index);
               this.dispatchEvent('object_property_changed', group.object, group.prop);
               this.refresh();
-                if (editable) {
-                  if (group.prop.options?.edit === 'aabb') {
-                    this.dispatchEvent('end_edit_aabb', group.value.object[0] as AABB);
-                  } else if (group.prop.options?.edit === 'curve1f') {
-                    this.dispatchEvent('end_edit_curve1f', group.value.object[0] as Interpolator, null);
-                  } else if (group.prop.options?.edit === 'proptrack') {
+              if (editable) {
+                if (group.prop.options?.edit === 'aabb') {
+                  this.dispatchEvent('end_edit_aabb', group.value.object[0] as AABB);
+                } else if (group.prop.options?.edit === 'curve1f') {
+                  this.dispatchEvent('end_edit_curve1f', group.value.object[0] as Interpolator, null);
+                } else if (group.prop.options?.edit === 'proptrack') {
                   const animation: unknown = group.object;
                   ASSERT(
                     animation instanceof AnimationClip,
@@ -683,7 +691,9 @@ export class PropertyEditor extends Observable<{
     }
     if (deletable) {
       ImGui.SameLine(0, 0);
-      if (ImGui.Button(`${FontGlyph.glyphs['cancel']}##delete`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))) {
+      if (
+        ImGui.Button(`${FontGlyph.glyphs['cancel']}##delete`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))
+      ) {
         group.prop.delete!.call(group.object, group.index);
         this.dispatchEvent('object_property_changed', group.object, group.prop);
         this.refresh();

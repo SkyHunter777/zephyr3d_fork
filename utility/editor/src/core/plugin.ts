@@ -210,7 +210,10 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
   private readonly _editToolFactories: RuntimeEditorEditToolFactory[] = [];
   private readonly _nodeProxyFactories: RuntimeEditorNodeProxyFactory[] = [];
   private readonly _propertyAccessorProviders = new Map<string, RuntimeEditorPropertyAccessorProvider>();
-  private readonly _scriptInspectorAccessorProviders = new Map<string, RuntimeEditorScriptInspectorAccessorProvider>();
+  private readonly _scriptInspectorAccessorProviders = new Map<
+    string,
+    RuntimeEditorScriptInspectorAccessorProvider
+  >();
 
   constructor(editor: Editor) {
     super();
@@ -372,7 +375,9 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
 
   async getScriptInspectorAccessors(context: EditorScriptInspectorContext) {
     const results = await Promise.all(
-      [...this._scriptInspectorAccessorProviders.values()].map((provider) => Promise.resolve(provider(context)))
+      [...this._scriptInspectorAccessorProviders.values()].map((provider) =>
+        Promise.resolve(provider(context))
+      )
     );
     return results.flatMap((props) => props ?? []);
   }
@@ -538,7 +543,15 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
         selectProjectFolders: async (title, rootDir, multi, width, height) =>
           await Dialog.openFolder(title, ProjectService.VFS, rootDir, multi, width, height),
         saveProjectFile: async (title, rootDir, filter, defaultName, width, height) =>
-          await Dialog.saveFile(title, ProjectService.VFS, rootDir, filter, width ?? 520, height ?? 620, defaultName)
+          await Dialog.saveFile(
+            title,
+            ProjectService.VFS,
+            rootDir,
+            filter,
+            width ?? 520,
+            height ?? 620,
+            defaultName
+          )
       },
       getSceneContext: () => {
         const controller = this._editor.moduleManager.currentModule?.controller;
@@ -587,7 +600,10 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
         context.subscriptions.push(new EditorPluginSubscription(dispose));
         return dispose;
       },
-      registerScriptInspectorExtension: (providerId: string, provider: EditorScriptInspectorAccessorProvider) => {
+      registerScriptInspectorExtension: (
+        providerId: string,
+        provider: EditorScriptInspectorAccessorProvider
+      ) => {
         const dispose = this.addScriptInspectorAccessorProvider(`${plugin.id}:${providerId}`, provider);
         context.subscriptions.push(new EditorPluginSubscription(dispose));
         return dispose;

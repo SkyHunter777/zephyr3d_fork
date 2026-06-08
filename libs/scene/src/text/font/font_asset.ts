@@ -1,6 +1,8 @@
 import type { FontAssetFetchOptions } from '../../asset/assetmanager';
 import { SFNTReader } from './sfnt_reader';
 import type { FontMetrics, GlyphContour, GlyphData, GlyphPoint } from './types';
+import type { CFFGlyphProvider } from './cff_font';
+import { parseCFFGlyphProvider } from './cff_font';
 
 /**
  * MSDF atlas settings associated with a font asset.
@@ -87,7 +89,8 @@ const DEFAULT_MSDF_GLYPH_SIZE = 32;
 export class FontAsset {
   private readonly _reader: SFNTReader;
   private readonly _tables: Map<string, TableRecord>;
-  private readonly _glyphOffsets: Uint32Array<ArrayBuffer>;
+  private readonly _glyphOffsets: Uint32Array<ArrayBuffer> | null;
+  private readonly _cffGlyphProvider: CFFGlyphProvider | null;
   private readonly _advanceWidths: Uint16Array<ArrayBuffer>;
   private readonly _leftSideBearings: Int16Array<ArrayBuffer>;
   private readonly _glyphCache: Map<number, GlyphData | null>;
@@ -105,8 +108,9 @@ export class FontAsset {
     const maxp = this.requireTable('maxp');
     const hhea = this.requireTable('hhea');
     const hmtx = this.requireTable('hmtx');
-    const loca = this.requireTable('loca');
-    this.requireTable('glyf');
+    const loca = this.getTable('loca');
+    const glyf = this.getTable('glyf');
+    const cff = this.getTable('CFF ');
     this.requireTable('cmap');
     this._numberOfHMetrics = this._reader.uint16(hhea.offset + 34);
     this._metrics = {
@@ -116,12 +120,20 @@ export class FontAsset {
       lineGap: this._reader.int16(hhea.offset + 8),
       glyphCount: this._reader.uint16(maxp.offset + 4)
     };
-    this._glyphOffsets = parseGlyphOffsets(
-      this._reader,
-      loca.offset,
-      this._metrics.glyphCount,
-      this._reader.int16(head.offset + 50)
-    );
+    if (loca && glyf) {
+      this._glyphOffsets = parseGlyphOffsets(
+        this._reader,
+        loca.offset,
+        this._metrics.glyphCount,
+        this._reader.int16(head.offset + 50)
+      );
+      this._cffGlyphProvider = null;
+    } else if (cff) {
+      this._glyphOffsets = null;
+      this._cffGlyphProvider = parseCFFGlyphProvider(this._reader, cff.offset, this._metrics.glyphCount);
+    } else {
+      throw new Error('Unsupported font outline: neither TrueType glyf/loca nor OpenType CFF table found');
+    }
     const metrics = parseHorizontalMetrics(
       this._reader,
       hmtx.offset,
@@ -203,9 +215,12 @@ export class FontAsset {
     if (depth > 16) {
       throw new Error(`Composite glyph nesting too deep: ${glyphIndex}`);
     }
+    if (this._cffGlyphProvider) {
+      return this._cffGlyphProvider.getGlyph(glyphIndex, this._advanceWidths, this._leftSideBearings);
+    }
     const glyf = this.requireTable('glyf');
-    const offset = this._glyphOffsets[glyphIndex];
-    const nextOffset = this._glyphOffsets[glyphIndex + 1];
+    const offset = this._glyphOffsets![glyphIndex];
+    const nextOffset = this._glyphOffsets![glyphIndex + 1];
     if (offset === nextOffset) {
       return buildGlyphData(glyphIndex, this._advanceWidths, this._leftSideBearings, [], 0, 0, 0, 0);
     }

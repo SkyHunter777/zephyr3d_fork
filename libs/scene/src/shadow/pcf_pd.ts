@@ -1,9 +1,6 @@
 import type { PBInsideFunctionScope, PBShaderExp, TextureSampler } from '@zephyr3d/device';
 import { ShadowImpl } from './shadow_impl';
-import {
-  computeShadowMapDepth,
-  filterShadowPCF,
-} from '../shaders/shadow';
+import { computeShadowMapDepth, filterShadowPCF } from '../shaders/shadow';
 import type { ShadowMapParams, ShadowMapType } from './shadowmapper';
 import { decodeNormalizedFloatFromRGBA } from '../shaders/misc';
 import { LIGHT_TYPE_POINT } from '../values';

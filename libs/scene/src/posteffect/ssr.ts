@@ -101,7 +101,10 @@ export class SSR extends AbstractPostEffect {
     this._combineBindGroup.setTexture('zGGXLut', getGGXLUT(1024), fetchSampler('clamp_nearest_nomip'));
     this._combineBindGroup.setValue('ssrMaxRoughness', ctx.camera.ssrMaxRoughness);
     this._combineBindGroup.setValue('ssrStrengthMode', 0);
-    this._combineBindGroup.setValue('cameraNearFar', new Vector2(ctx.camera.getNearPlane(), ctx.camera.getFarPlane()));
+    this._combineBindGroup.setValue(
+      'cameraNearFar',
+      new Vector2(ctx.camera.getNearPlane(), ctx.camera.getFarPlane())
+    );
     this._combineBindGroup.setValue('viewMatrix', ctx.camera.viewMatrix);
     this._combineBindGroup.setValue('invProjMatrix', Matrix4x4.invert(ctx.camera.getProjectionMatrix()));
     this._combineBindGroup.setValue(
@@ -286,16 +289,31 @@ export class SSR extends AbstractPostEffect {
       this._temporalBindGroup = device.createBindGroup(program.bindGroupLayouts[0]);
     }
     this._temporalBindGroup.setTexture('historyColorTex', prevReflectTex, fetchSampler('clamp_linear_nomip'));
-    this._temporalBindGroup.setTexture('currentColorTex', currentReflectTex, fetchSampler('clamp_nearest_nomip'));
-    this._temporalBindGroup.setTexture('currentDepthTex', sceneDepthTexture, fetchSampler('clamp_nearest_nomip'));
+    this._temporalBindGroup.setTexture(
+      'currentColorTex',
+      currentReflectTex,
+      fetchSampler('clamp_nearest_nomip')
+    );
+    this._temporalBindGroup.setTexture(
+      'currentDepthTex',
+      sceneDepthTexture,
+      fetchSampler('clamp_nearest_nomip')
+    );
     this._temporalBindGroup.setTexture(
       'motionVector',
       ctx.motionVectorTexture!,
       fetchSampler('clamp_nearest_nomip')
     );
-    this._temporalBindGroup.setTexture('prevMotionVector', prevMotionVectorTex, fetchSampler('clamp_nearest_nomip'));
+    this._temporalBindGroup.setTexture(
+      'prevMotionVector',
+      prevMotionVectorTex,
+      fetchSampler('clamp_nearest_nomip')
+    );
     this._temporalBindGroup.setValue('flip', this.needFlip(device) ? 1 : 0);
-    this._temporalBindGroup.setValue('texSize', new Vector2(sceneDepthTexture.width, sceneDepthTexture.height));
+    this._temporalBindGroup.setValue(
+      'texSize',
+      new Vector2(sceneDepthTexture.width, sceneDepthTexture.height)
+    );
     this._temporalBindGroup.setValue('temporalWeight', ctx.camera.ssrTemporalWeight);
     device.setFramebuffer(outFramebuffer);
     device.setProgram(program);
@@ -485,7 +503,10 @@ export class SSR extends AbstractPostEffect {
           });
           this.$l.viewPos = this.pos.xyz;
           this.$l.viewVec = pb.neg(pb.normalize(this.viewPos));
-          this.$l.worldNormal = pb.sub(pb.mul(pb.textureSampleLevel(this.normalTex, this.uv, 0).rgb, 2), pb.vec3(1));
+          this.$l.worldNormal = pb.sub(
+            pb.mul(pb.textureSampleLevel(this.normalTex, this.uv, 0).rgb, 2),
+            pb.vec3(1)
+          );
           this.$l.viewNormal = pb.normalize(pb.mul(this.viewMatrix, pb.vec4(this.worldNormal, 0)).xyz);
           this.$l.NoV = pb.clamp(pb.dot(this.viewNormal, this.viewVec), 0.0001, 1);
           this.$l.baseColor = this.base.rgb;
@@ -519,20 +540,22 @@ export class SSR extends AbstractPostEffect {
             this.$l.strength = pb.vec3();
             this.$if(pb.equal(this.ssrStrengthMode, 0), function () {
               this.strength = pb.clamp(this.roughnessValue.rgb, pb.vec3(0), pb.vec3(1));
-            }).$elseif(pb.equal(this.ssrStrengthMode, 1), function () {
-              this.$l.roughAtten = pb.clamp(
-                pb.sub(1, pb.div(this.roughnessValue.a, pb.max(this.ssrMaxRoughness, 1e-4))),
-                0,
-                1
-              );
-              this.$l.metallic = pb.clamp(this.roughnessValue.r, 0, 1);
-              this.$l.specStrength = pb.clamp(this.roughnessValue.b, 0, 1);
-              this.$l.f0 = pb.mix(pb.mul(0.04, this.specStrength), 1, this.metallic);
-              this.$l.s = pb.mul(this.roughAtten, this.roughAtten, this.f0);
-              this.strength = pb.vec3(this.s);
-            }).$else(function () {
-              this.strength = this.resolveDeferredStrength(this.uv, this.roughnessValue);
-            });
+            })
+              .$elseif(pb.equal(this.ssrStrengthMode, 1), function () {
+                this.$l.roughAtten = pb.clamp(
+                  pb.sub(1, pb.div(this.roughnessValue.a, pb.max(this.ssrMaxRoughness, 1e-4))),
+                  0,
+                  1
+                );
+                this.$l.metallic = pb.clamp(this.roughnessValue.r, 0, 1);
+                this.$l.specStrength = pb.clamp(this.roughnessValue.b, 0, 1);
+                this.$l.f0 = pb.mix(pb.mul(0.04, this.specStrength), 1, this.metallic);
+                this.$l.s = pb.mul(this.roughAtten, this.roughAtten, this.f0);
+                this.strength = pb.vec3(this.s);
+              })
+              .$else(function () {
+                this.strength = this.resolveDeferredStrength(this.uv, this.roughnessValue);
+              });
             this.color = pb.add(
               pb.mul(this.r, this.strength),
               pb.mul(this.sceneColor, pb.sub(pb.vec3(1), this.strength))
@@ -549,7 +572,12 @@ export class SSR extends AbstractPostEffect {
             this.combined = this.sceneColor;
           }).$else(function () {
             this.$l.reflectance = pb.textureSampleLevel(this.reflectanceTex, this.screenUV, 0).rgb;
-            this.combined = this.resolveSample(this.screenUV, this.sceneColor, this.reflectance, this.roughnessInfo);
+            this.combined = this.resolveSample(
+              this.screenUV,
+              this.sceneColor,
+              this.reflectance,
+              this.roughnessInfo
+            );
           });
           this.$if(pb.equal(this.srgbOut, 0), function () {
             this.$outputs.outColor = pb.vec4(this.combined, 1);
@@ -665,20 +693,22 @@ export class SSR extends AbstractPostEffect {
             this.$l.strength = pb.vec3();
             this.$if(pb.equal(this.ssrStrengthMode, 0), function () {
               this.strength = pb.clamp(this.roughnessValue.rgb, pb.vec3(0), pb.vec3(1));
-            }).$elseif(pb.equal(this.ssrStrengthMode, 1), function () {
-              this.$l.roughAtten = pb.clamp(
-                pb.sub(1, pb.div(this.roughnessValue.a, pb.max(this.ssrMaxRoughness, 1e-4))),
-                0,
-                1
-              );
-              this.$l.metallic = pb.clamp(this.roughnessValue.r, 0, 1);
-              this.$l.specStrength = pb.clamp(this.roughnessValue.b, 0, 1);
-              this.$l.f0 = pb.mix(pb.mul(0.04, this.specStrength), 1, this.metallic);
-              this.$l.s = pb.mul(this.roughAtten, this.roughAtten, this.f0);
-              this.strength = pb.vec3(this.s);
-            }).$else(function () {
-              this.strength = this.resolveDeferredStrength(this.uv, this.roughnessValue);
-            });
+            })
+              .$elseif(pb.equal(this.ssrStrengthMode, 1), function () {
+                this.$l.roughAtten = pb.clamp(
+                  pb.sub(1, pb.div(this.roughnessValue.a, pb.max(this.ssrMaxRoughness, 1e-4))),
+                  0,
+                  1
+                );
+                this.$l.metallic = pb.clamp(this.roughnessValue.r, 0, 1);
+                this.$l.specStrength = pb.clamp(this.roughnessValue.b, 0, 1);
+                this.$l.f0 = pb.mix(pb.mul(0.04, this.specStrength), 1, this.metallic);
+                this.$l.s = pb.mul(this.roughAtten, this.roughAtten, this.f0);
+                this.strength = pb.vec3(this.s);
+              })
+              .$else(function () {
+                this.strength = this.resolveDeferredStrength(this.uv, this.roughnessValue);
+              });
             this.color = pb.add(
               pb.mul(this.r, this.strength),
               pb.mul(this.sceneColor, pb.sub(pb.vec3(1), this.strength))
@@ -741,7 +771,11 @@ export class SSR extends AbstractPostEffect {
               this.$l.indirectRoughnessInfo = pb.textureSampleLevel(this.roughnessTex, this.hitUV, 0);
               this.$l.indirectReflectance = pb.vec3();
               this.$if(pb.greaterThan(this.indirectAlpha, 0), function () {
-                this.$l.indirectReflectSceneColor = pb.textureSampleLevel(this.colorTex, this.indirectUV, 0).rgb;
+                this.$l.indirectReflectSceneColor = pb.textureSampleLevel(
+                  this.colorTex,
+                  this.indirectUV,
+                  0
+                ).rgb;
                 this.indirectReflectance = this.resolveReflectance(
                   this.hitUV,
                   this.indirectReflectSceneColor,
@@ -960,51 +994,59 @@ export class SSR extends AbstractPostEffect {
               });
               this.$l.t = pb.float(0.05);
               this.$l.hitInfo = pb.vec4(0);
-              this.$for(pb.float('i'), 0, pb.getDevice().type === 'webgl' ? 256 : this.maxIterations, function () {
-                if (pb.getDevice().type === 'webgl') {
-                  this.$if(pb.greaterThanEqual(this.i, this.maxIterations), function () {
-                    this.$break();
-                  });
-                }
-                this.$if(pb.greaterThan(this.t, this.maxDistance), function () {
-                  this.$break();
-                });
-                this.$l.p = pb.add(this.rayOrigin, pb.mul(this.rayDir, this.t));
-                this.$l.sd = pb.float(1e6);
-                this.$for(pb.int('b'), 0, SSR._sdfMaxBoxes, function () {
-                  this.$if(pb.greaterThanEqual(this.b, this.ssrSDFBoxCount), function () {
-                    this.$break();
-                  });
-                  this.$l.bmin = this.zSDFBoxes.at(pb.mul(this.b, 2)).xyz;
-                  this.$l.bmax = this.zSDFBoxes.at(pb.add(pb.mul(this.b, 2), 1)).xyz;
-                  this.sd = pb.min(this.sd, this.sdAABB(this.p, this.bmin, this.bmax));
-                });
-                this.$if(pb.lessThan(this.sd, 0.02), function () {
-                  this.$l.clip = pb.mul(this.projMatrix, pb.vec4(this.p, 1));
-                  this.$if(pb.lessThan(pb.abs(this.clip.w), 1e-5), function () {
-                    this.$break();
-                  });
-                  this.$l.uv = pb.add(pb.mul(pb.div(this.clip.xy, this.clip.w), 0.5), pb.vec2(0.5));
-                  this.$if(
-                    pb.or(pb.any(pb.lessThan(this.uv, pb.vec2(0))), pb.any(pb.greaterThan(this.uv, pb.vec2(1)))),
-                    function () {
+              this.$for(
+                pb.float('i'),
+                0,
+                pb.getDevice().type === 'webgl' ? 256 : this.maxIterations,
+                function () {
+                  if (pb.getDevice().type === 'webgl') {
+                    this.$if(pb.greaterThanEqual(this.i, this.maxIterations), function () {
                       this.$break();
-                    }
-                  );
-                  this.$l.sceneDepth01 = ShaderHelper.sampleLinearDepth(this, this.depthTex, this.uv, 0);
-                  this.$if(pb.lessThan(this.sceneDepth01, 1), function () {
-                    this.$l.sceneDepth = pb.mul(this.sceneDepth01, this.cameraNearFar.y);
-                    this.$l.hitDepth = pb.max(pb.neg(this.p.z), 0);
-                    this.$l.depthDelta = pb.abs(pb.sub(this.sceneDepth, this.hitDepth));
-                    this.$l.depthTol = pb.max(pb.mul(this.thickness, this.cameraNearFar.y), 0.25);
-                    this.$l.alpha = pb.sub(1, pb.smoothStep(0, this.depthTol, this.depthDelta));
-                    this.hitInfo = pb.vec4(this.uv, this.t, pb.clamp(this.alpha, 0, 1));
+                    });
+                  }
+                  this.$if(pb.greaterThan(this.t, this.maxDistance), function () {
+                    this.$break();
                   });
-                  this.$break();
-                });
-                this.$l.step = pb.max(pb.mul(this.sd, pb.max(this.stepScale, 0.25)), 0.02);
-                this.t = pb.add(this.t, this.step);
-              });
+                  this.$l.p = pb.add(this.rayOrigin, pb.mul(this.rayDir, this.t));
+                  this.$l.sd = pb.float(1e6);
+                  this.$for(pb.int('b'), 0, SSR._sdfMaxBoxes, function () {
+                    this.$if(pb.greaterThanEqual(this.b, this.ssrSDFBoxCount), function () {
+                      this.$break();
+                    });
+                    this.$l.bmin = this.zSDFBoxes.at(pb.mul(this.b, 2)).xyz;
+                    this.$l.bmax = this.zSDFBoxes.at(pb.add(pb.mul(this.b, 2), 1)).xyz;
+                    this.sd = pb.min(this.sd, this.sdAABB(this.p, this.bmin, this.bmax));
+                  });
+                  this.$if(pb.lessThan(this.sd, 0.02), function () {
+                    this.$l.clip = pb.mul(this.projMatrix, pb.vec4(this.p, 1));
+                    this.$if(pb.lessThan(pb.abs(this.clip.w), 1e-5), function () {
+                      this.$break();
+                    });
+                    this.$l.uv = pb.add(pb.mul(pb.div(this.clip.xy, this.clip.w), 0.5), pb.vec2(0.5));
+                    this.$if(
+                      pb.or(
+                        pb.any(pb.lessThan(this.uv, pb.vec2(0))),
+                        pb.any(pb.greaterThan(this.uv, pb.vec2(1)))
+                      ),
+                      function () {
+                        this.$break();
+                      }
+                    );
+                    this.$l.sceneDepth01 = ShaderHelper.sampleLinearDepth(this, this.depthTex, this.uv, 0);
+                    this.$if(pb.lessThan(this.sceneDepth01, 1), function () {
+                      this.$l.sceneDepth = pb.mul(this.sceneDepth01, this.cameraNearFar.y);
+                      this.$l.hitDepth = pb.max(pb.neg(this.p.z), 0);
+                      this.$l.depthDelta = pb.abs(pb.sub(this.sceneDepth, this.hitDepth));
+                      this.$l.depthTol = pb.max(pb.mul(this.thickness, this.cameraNearFar.y), 0.25);
+                      this.$l.alpha = pb.sub(1, pb.smoothStep(0, this.depthTol, this.depthDelta));
+                      this.hitInfo = pb.vec4(this.uv, this.t, pb.clamp(this.alpha, 0, 1));
+                    });
+                    this.$break();
+                  });
+                  this.$l.step = pb.max(pb.mul(this.sd, pb.max(this.stepScale, 0.25)), 0.02);
+                  this.t = pb.add(this.t, this.step);
+                }
+              );
               this.$return(this.hitInfo);
             }
           );
@@ -1019,184 +1061,190 @@ export class SSR extends AbstractPostEffect {
           this.$l.color = pb.vec3(0);
           this.$l.a = pb.float(0);
           this.$if(pb.lessThan(this.roughness, this.ssrMaxRoughness), function () {
-          this.$l.pos = this.getPosition(this.screenUV, this.invProjMatrix);
-          this.$l.linearDepth = this.pos.w;
-          this.$if(pb.greaterThanEqual(this.linearDepth, 1), function () {
-            if (!blur) {
-              this.color = this.sceneColor;
-              this.a = 1;
-            }
-          }).$else(function () {
-            this.$l.viewPos = this.pos.xyz;
-            this.$l.worldNormal = pb.sub(
-              pb.mul(pb.textureSampleLevel(this.normalTex, this.screenUV, 0).rgb, 2),
-              pb.vec3(1)
-            );
-            this.$l.viewVec = pb.normalize(this.viewPos);
-            this.$l.viewNormal = pb.mul(this.viewMatrix, pb.vec4(this.worldNormal, 0)).xyz;
-            this.$l.reflectVec = pb.add(
-              pb.reflect(this.viewVec, this.viewNormal),
-              SSR_calcJitter(this, this.viewPos, this.roughness)
-            );
-            this.$l.hitInfo = pb.vec4(0);
-            if (ctx.HiZTexture) {
-              this.hitInfo = screenSpaceRayTracing_HiZ(
-                this,
-                this.viewPos,
-                this.reflectVec,
-                this.viewMatrix,
-                this.projMatrix,
-                this.invProjMatrix,
-                this.cameraNearFar,
-                this.depthMipLevels,
-                this.ssrParams.y,
-                this.ssrParams.z,
-                this.targetSize,
-                this.hizTex,
-                this.normalTex
+            this.$l.pos = this.getPosition(this.screenUV, this.invProjMatrix);
+            this.$l.linearDepth = this.pos.w;
+            this.$if(pb.greaterThanEqual(this.linearDepth, 1), function () {
+              if (!blur) {
+                this.color = this.sceneColor;
+                this.a = 1;
+              }
+            }).$else(function () {
+              this.$l.viewPos = this.pos.xyz;
+              this.$l.worldNormal = pb.sub(
+                pb.mul(pb.textureSampleLevel(this.normalTex, this.screenUV, 0).rgb, 2),
+                pb.vec3(1)
               );
-              this.$if(
-                pb.and(
-                  pb.notEqual(this.ssrHiZFallback, 0),
-                  pb.lessThanEqual(pb.clamp(this.hitInfo.w, 0, 1), 0)
-                ),
-                function () {
-                  this.$l.hitInfoFallback = pb.vec4(0);
-                  this.$if(pb.greaterThan(this.ssrSDFBoxCount, 0), function () {
-                    this.hitInfoFallback = this.traceSDFBoxes(
-                      this.viewPos,
-                      this.reflectVec,
-                      this.ssrParams.x,
-                      this.ssrHiZFallbackSteps,
-                      this.ssrParams.z,
-                      this.ssrHiZFallbackStride,
-                      this.cameraNearFar,
-                      this.projMatrix,
-                      this.targetSize
-                    );
-                  }).$else(function () {
-                    this.hitInfoFallback = screenSpaceRayTracing_Linear2D(
-                      this,
-                      this.viewPos,
-                      this.reflectVec,
-                      this.viewMatrix,
-                      this.projMatrix,
-                      this.invProjMatrix,
-                      this.cameraNearFar,
-                      this.ssrParams.x,
-                      this.ssrHiZFallbackSteps,
-                      this.ssrParams.z,
-                      this.ssrHiZFallbackStride,
-                      this.targetSize,
-                      this.depthTex,
-                      this.normalTex,
-                      !!ctx.camera.ssrCalcThickness
-                    );
-                  });
-                  this.$if(pb.lessThanEqual(pb.clamp(this.hitInfoFallback.w, 0, 1), 0), function () {
-                    this.hitInfoFallback = screenSpaceRayTracing_Linear2D(
-                      this,
-                      this.viewPos,
-                      this.reflectVec,
-                      this.viewMatrix,
-                      this.projMatrix,
-                      this.invProjMatrix,
-                      this.cameraNearFar,
-                      this.ssrParams.x,
-                      this.ssrHiZFallbackSteps,
-                      this.ssrParams.z,
-                      this.ssrHiZFallbackStride,
-                      this.targetSize,
-                      this.depthTex,
-                      this.normalTex,
-                      !!ctx.camera.ssrCalcThickness
-                    );
-                  });
-                  this.$if(pb.greaterThan(this.hitInfoFallback.w, this.hitInfo.w), function () {
-                    this.hitInfo = this.hitInfoFallback;
-                  });
-                }
+              this.$l.viewVec = pb.normalize(this.viewPos);
+              this.$l.viewNormal = pb.mul(this.viewMatrix, pb.vec4(this.worldNormal, 0)).xyz;
+              this.$l.reflectVec = pb.add(
+                pb.reflect(this.viewVec, this.viewNormal),
+                SSR_calcJitter(this, this.viewPos, this.roughness)
               );
-            } else {
-              this.hitInfo = screenSpaceRayTracing_Linear2D(
-                this,
-                this.viewPos,
-                this.reflectVec,
-                this.viewMatrix,
-                this.projMatrix,
-                this.invProjMatrix,
-                this.cameraNearFar,
-                this.ssrParams.x,
-                this.ssrParams.y,
-                this.ssrParams.z,
-                this.ssrStride,
-                this.targetSize,
-                this.depthTex,
-                this.normalTex,
-                !!ctx.camera.ssrCalcThickness
-              );
-            }
-            this.$l.hitAlpha = pb.clamp(this.hitInfo.w, 0, 1);
-            this.$l.hitUV = pb.clamp(this.hitInfo.xy, pb.vec2(0), pb.vec2(1));
-            if (blur) {
-              this.blurRadius = pb.float(0);
-              this.$if(pb.greaterThan(this.roughness, 0.001), function () {
-                this.$l.coneAngle = pb.mul(pb.min(this.roughness, 0.999), Math.PI * 0.5);
-                this.$l.coneLen = this.$choice(
-                  pb.greaterThan(this.hitAlpha, 0),
-                  this.hitInfo.z,
-                  pb.min(this.targetSize.z, this.targetSize.w)
+              this.$l.hitInfo = pb.vec4(0);
+              if (ctx.HiZTexture) {
+                this.hitInfo = screenSpaceRayTracing_HiZ(
+                  this,
+                  this.viewPos,
+                  this.reflectVec,
+                  this.viewMatrix,
+                  this.projMatrix,
+                  this.invProjMatrix,
+                  this.cameraNearFar,
+                  this.depthMipLevels,
+                  this.ssrParams.y,
+                  this.ssrParams.z,
+                  this.targetSize,
+                  this.hizTex,
+                  this.normalTex
                 );
-                this.$l.opLen = pb.mul(pb.tan(this.coneAngle), this.coneLen, 2);
-                this.$l.a2 = pb.mul(this.opLen, this.opLen);
-                this.$l.fh2 = pb.mul(this.coneLen, this.coneLen, 4);
-                this.blurRadius = pb.div(
-                  pb.mul(this.opLen, pb.sub(pb.sqrt(pb.add(this.a2, this.fh2)), this.opLen)),
-                  pb.mul(this.coneLen, 4)
-                );
-              });
-              this.a = this.hitAlpha;
-              this.color = pb.vec3(this.hitUV, pb.clamp(pb.div(this.blurRadius, 255), 0, 1));
-            } else {
-              if (ctx.env!.light.envLight?.hasRadiance()) {
-                this.$l.reflectVecW = pb.mul(this.invViewMatrix, pb.vec4(this.reflectVec, 0)).xyz;
-                this.$l.env = pb.mul(
-                  ctx.env!.light.envLight.getRadiance(this, this.reflectVecW, this.roughness)!,
-                  this.envLightStrength,
-                  this.envLightSpecularStrength
+                this.$if(
+                  pb.and(
+                    pb.notEqual(this.ssrHiZFallback, 0),
+                    pb.lessThanEqual(pb.clamp(this.hitInfo.w, 0, 1), 0)
+                  ),
+                  function () {
+                    this.$l.hitInfoFallback = pb.vec4(0);
+                    this.$if(pb.greaterThan(this.ssrSDFBoxCount, 0), function () {
+                      this.hitInfoFallback = this.traceSDFBoxes(
+                        this.viewPos,
+                        this.reflectVec,
+                        this.ssrParams.x,
+                        this.ssrHiZFallbackSteps,
+                        this.ssrParams.z,
+                        this.ssrHiZFallbackStride,
+                        this.cameraNearFar,
+                        this.projMatrix,
+                        this.targetSize
+                      );
+                    }).$else(function () {
+                      this.hitInfoFallback = screenSpaceRayTracing_Linear2D(
+                        this,
+                        this.viewPos,
+                        this.reflectVec,
+                        this.viewMatrix,
+                        this.projMatrix,
+                        this.invProjMatrix,
+                        this.cameraNearFar,
+                        this.ssrParams.x,
+                        this.ssrHiZFallbackSteps,
+                        this.ssrParams.z,
+                        this.ssrHiZFallbackStride,
+                        this.targetSize,
+                        this.depthTex,
+                        this.normalTex,
+                        !!ctx.camera.ssrCalcThickness
+                      );
+                    });
+                    this.$if(pb.lessThanEqual(pb.clamp(this.hitInfoFallback.w, 0, 1), 0), function () {
+                      this.hitInfoFallback = screenSpaceRayTracing_Linear2D(
+                        this,
+                        this.viewPos,
+                        this.reflectVec,
+                        this.viewMatrix,
+                        this.projMatrix,
+                        this.invProjMatrix,
+                        this.cameraNearFar,
+                        this.ssrParams.x,
+                        this.ssrHiZFallbackSteps,
+                        this.ssrParams.z,
+                        this.ssrHiZFallbackStride,
+                        this.targetSize,
+                        this.depthTex,
+                        this.normalTex,
+                        !!ctx.camera.ssrCalcThickness
+                      );
+                    });
+                    this.$if(pb.greaterThan(this.hitInfoFallback.w, this.hitInfo.w), function () {
+                      this.hitInfo = this.hitInfoFallback;
+                    });
+                  }
                 );
               } else {
-                this.$l.env = pb.vec3(0);
-              }
-              this.$l.reflectance = pb.mix(
-                this.env,
-                pb.textureSampleLevel(this.colorTex, this.hitUV, 0).rgb,
-                this.hitAlpha
-              );
-              this.$l.reflectance = pb.div(this.$l.reflectance, pb.add(this.$l.reflectance, pb.vec3(1)));
-              this.$l.strength = pb.vec3();
-              this.$if(pb.equal(this.ssrStrengthMode, 0), function () {
-                this.strength = pb.clamp(this.roughnessValue.rgb, pb.vec3(0), pb.vec3(1));
-              }).$elseif(pb.equal(this.ssrStrengthMode, 1), function () {
-                this.$l.roughAtten = pb.clamp(
-                  pb.sub(1, pb.div(this.roughness, pb.max(this.ssrMaxRoughness, 1e-4))),
-                  0,
-                  1
+                this.hitInfo = screenSpaceRayTracing_Linear2D(
+                  this,
+                  this.viewPos,
+                  this.reflectVec,
+                  this.viewMatrix,
+                  this.projMatrix,
+                  this.invProjMatrix,
+                  this.cameraNearFar,
+                  this.ssrParams.x,
+                  this.ssrParams.y,
+                  this.ssrParams.z,
+                  this.ssrStride,
+                  this.targetSize,
+                  this.depthTex,
+                  this.normalTex,
+                  !!ctx.camera.ssrCalcThickness
                 );
-                this.$l.metallic = pb.clamp(this.roughnessValue.r, 0, 1);
-                this.$l.specStrength = pb.clamp(this.roughnessValue.b, 0, 1);
-                this.$l.f0 = pb.mix(pb.mul(0.04, this.specStrength), 1, this.metallic);
-                this.$l.s = pb.mul(this.roughAtten, this.roughAtten, this.f0);
-                this.strength = pb.vec3(this.s);
-              }).$else(function () {
-                this.strength = this.resolveDeferredStrength(this.screenUV, this.roughnessValue, this.pos);
-              });
-              this.color = pb.add(
-                pb.mul(this.reflectance, this.strength),
-                pb.mul(this.sceneColor, pb.sub(pb.vec3(1), this.strength))
-              );
-            }
-          });
+              }
+              this.$l.hitAlpha = pb.clamp(this.hitInfo.w, 0, 1);
+              this.$l.hitUV = pb.clamp(this.hitInfo.xy, pb.vec2(0), pb.vec2(1));
+              if (blur) {
+                this.blurRadius = pb.float(0);
+                this.$if(pb.greaterThan(this.roughness, 0.001), function () {
+                  this.$l.coneAngle = pb.mul(pb.min(this.roughness, 0.999), Math.PI * 0.5);
+                  this.$l.coneLen = this.$choice(
+                    pb.greaterThan(this.hitAlpha, 0),
+                    this.hitInfo.z,
+                    pb.min(this.targetSize.z, this.targetSize.w)
+                  );
+                  this.$l.opLen = pb.mul(pb.tan(this.coneAngle), this.coneLen, 2);
+                  this.$l.a2 = pb.mul(this.opLen, this.opLen);
+                  this.$l.fh2 = pb.mul(this.coneLen, this.coneLen, 4);
+                  this.blurRadius = pb.div(
+                    pb.mul(this.opLen, pb.sub(pb.sqrt(pb.add(this.a2, this.fh2)), this.opLen)),
+                    pb.mul(this.coneLen, 4)
+                  );
+                });
+                this.a = this.hitAlpha;
+                this.color = pb.vec3(this.hitUV, pb.clamp(pb.div(this.blurRadius, 255), 0, 1));
+              } else {
+                if (ctx.env!.light.envLight?.hasRadiance()) {
+                  this.$l.reflectVecW = pb.mul(this.invViewMatrix, pb.vec4(this.reflectVec, 0)).xyz;
+                  this.$l.env = pb.mul(
+                    ctx.env!.light.envLight.getRadiance(this, this.reflectVecW, this.roughness)!,
+                    this.envLightStrength,
+                    this.envLightSpecularStrength
+                  );
+                } else {
+                  this.$l.env = pb.vec3(0);
+                }
+                this.$l.reflectance = pb.mix(
+                  this.env,
+                  pb.textureSampleLevel(this.colorTex, this.hitUV, 0).rgb,
+                  this.hitAlpha
+                );
+                this.$l.reflectance = pb.div(this.$l.reflectance, pb.add(this.$l.reflectance, pb.vec3(1)));
+                this.$l.strength = pb.vec3();
+                this.$if(pb.equal(this.ssrStrengthMode, 0), function () {
+                  this.strength = pb.clamp(this.roughnessValue.rgb, pb.vec3(0), pb.vec3(1));
+                })
+                  .$elseif(pb.equal(this.ssrStrengthMode, 1), function () {
+                    this.$l.roughAtten = pb.clamp(
+                      pb.sub(1, pb.div(this.roughness, pb.max(this.ssrMaxRoughness, 1e-4))),
+                      0,
+                      1
+                    );
+                    this.$l.metallic = pb.clamp(this.roughnessValue.r, 0, 1);
+                    this.$l.specStrength = pb.clamp(this.roughnessValue.b, 0, 1);
+                    this.$l.f0 = pb.mix(pb.mul(0.04, this.specStrength), 1, this.metallic);
+                    this.$l.s = pb.mul(this.roughAtten, this.roughAtten, this.f0);
+                    this.strength = pb.vec3(this.s);
+                  })
+                  .$else(function () {
+                    this.strength = this.resolveDeferredStrength(
+                      this.screenUV,
+                      this.roughnessValue,
+                      this.pos
+                    );
+                  });
+                this.color = pb.add(
+                  pb.mul(this.reflectance, this.strength),
+                  pb.mul(this.sceneColor, pb.sub(pb.vec3(1), this.strength))
+                );
+              }
+            });
           });
           this.$if(pb.equal(this.srgbOut, 0), function () {
             this.$outputs.outColor = pb.vec4(this.color, this.a);

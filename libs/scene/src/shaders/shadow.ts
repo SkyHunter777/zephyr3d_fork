@@ -215,7 +215,10 @@ function getRandomRotationMatrix(scope: PBInsideFunctionScope, sampleCoord: PBSh
   const funcNameGetRandomRotationMatrix = 'lib_getRandomRotationMatrix';
   const pb = scope.$builder;
   pb.func(funcNameGetRandomRotationMatrix, [pb.vec2('sampleCoord')], function () {
-    this.$l.randomAngle = pb.mul(smoothNoise3D(this, pb.vec3(pb.mul(this.sampleCoord, 0.35), 0)), 2 * Math.PI);
+    this.$l.randomAngle = pb.mul(
+      smoothNoise3D(this, pb.vec3(pb.mul(this.sampleCoord, 0.35), 0)),
+      2 * Math.PI
+    );
     this.$l.randomBase = pb.vec2(pb.cos(this.randomAngle), pb.sin(this.randomAngle));
     this.$return(pb.mat2(this.randomBase.x, this.randomBase.y, pb.neg(this.randomBase.y), this.randomBase.x));
   });

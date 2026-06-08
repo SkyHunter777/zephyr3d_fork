@@ -84,7 +84,9 @@ export class ResourceService {
     const prefabName = name.endsWith('.zprefab') ? name : `${name}.zprefab`;
     const prefabPath = manager.VFS.join(path, prefabName);
     if (!saveOptions?.rebuildPrefab && (await manager.VFS.exists(prefabPath))) {
-      console.info(`Prefab already exists, keep existing prefab and refresh referenced assets only: ${prefabPath}`);
+      console.info(
+        `Prefab already exists, keep existing prefab and refresh referenced assets only: ${prefabPath}`
+      );
       return;
     }
     const saveMeshes = saveOptions?.importMeshes ?? true;

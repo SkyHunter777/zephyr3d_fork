@@ -10,7 +10,7 @@ import { MaterialBlueprintIR } from '../utility/blueprint/material/ir';
 import type { DrawContext } from '../render/drawable';
 import { PBRBlockNode, VertexBlockNode } from '../utility/blueprint/material/pbr';
 import type { PBRReflectionMode } from './mixins/lightmodel/pbrmetallicroughness';
-import { SubsurfaceProfile } from './subsurfaceprofile';
+import type { SubsurfaceProfile } from './subsurfaceprofile';
 
 const PBR_REFLECTION_MODE: Record<PBRReflectionMode, number> = {
   none: 0,
@@ -388,7 +388,7 @@ export class PBRBluePrintMaterial
             !!this._subsurfaceProfile &&
             !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE);
           scope.$l.sssProfile = writeSSSProfile ? this.buildSubsurfaceProfile(scope) : pb.vec4(0);
-          scope.$l.sssParams = writeSSSProfile ? scope.sssParams ?? pb.vec4(0) : pb.vec4(0);
+          scope.$l.sssParams = writeSSSProfile ? (scope.sssParams ?? pb.vec4(0)) : pb.vec4(0);
           this.outputFragmentColor(
             scope,
             scope.$inputs.worldPos,
@@ -422,7 +422,7 @@ export class PBRBluePrintMaterial
             !!this._subsurfaceProfile &&
             !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE);
           scope.$l.sssProfile = writeSSSProfile ? this.buildSubsurfaceProfile(scope) : pb.vec4(0);
-          scope.$l.sssParams = writeSSSProfile ? scope.sssParams ?? pb.vec4(0) : pb.vec4(0);
+          scope.$l.sssParams = writeSSSProfile ? (scope.sssParams ?? pb.vec4(0)) : pb.vec4(0);
           this.outputFragmentColor(
             scope,
             scope.$inputs.worldPos,
@@ -468,10 +468,7 @@ export class PBRBluePrintMaterial
       for (const u of this._uniformTextures) {
         bindGroup.setTexture(u.name, u.finalTexture!.get()!, u.finalSampler);
       }
-      if (
-        !!this._subsurfaceProfile &&
-        ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT
-      ) {
+      if (!!this._subsurfaceProfile && ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
         const profile = this._subsurfaceProfile;
         bindGroup.setValue('zSubsurfaceProfileId', profile?.slot ?? 0);
         bindGroup.setValue('zSubsurfaceProfileScale', profile?.scale ?? 0);
@@ -571,11 +568,7 @@ export class PBRBluePrintMaterial
     );
     scope.$l.sssStrength = pb.mul(scope.zSubsurfaceProfileStrength, scope.sssScatterStrengthMask);
     scope.$l.sssWidthBase = pb.mul(scope.zSubsurfaceProfileScale, scope.sssScatterWidthMask);
-    scope.$l.sssWidth = pb.clamp(
-      pb.div(scope.sssWidthBase, pb.add(scope.sssWidthBase, 1)),
-      0,
-      0.999
-    );
+    scope.$l.sssWidth = pb.clamp(pb.div(scope.sssWidthBase, pb.add(scope.sssWidthBase, 1)), 0, 0.999);
     scope.sssTransmissionMask = pb.clamp(
       pb.add(
         pb.mul(scope.sssMask, 0.12),
@@ -592,11 +585,6 @@ export class PBRBluePrintMaterial
       scope.sssPresetEncoded,
       pb.add(0.75, pb.mul(scope.sssScatterSoftness, 0.25))
     );
-    return pb.vec4(
-      scope.sssStrength,
-      scope.sssStrength,
-      scope.sssStrength,
-      scope.sssTransmissionMask
-    );
+    return pb.vec4(scope.sssStrength, scope.sssStrength, scope.sssStrength, scope.sssTransmissionMask);
   }
 }

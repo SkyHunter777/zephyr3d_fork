@@ -2,7 +2,15 @@ import { LightPass } from './lightpass';
 import { ShadowMapPass } from './shadowmap_pass';
 import { DepthPass } from './depthpass';
 import type { Nullable } from '@zephyr3d/base';
-import { Quaternion, degree2radian, isPowerOf2, Matrix4x4, nextPowerOf2, Vector3, Vector4 } from '@zephyr3d/base';
+import {
+  Quaternion,
+  degree2radian,
+  isPowerOf2,
+  Matrix4x4,
+  nextPowerOf2,
+  Vector3,
+  Vector4
+} from '@zephyr3d/base';
 import type {
   BindGroup,
   ColorState,
@@ -168,11 +176,15 @@ export class SceneRenderer {
         SSRNormalTexture: needSurfaceMRT
           ? device.pool.fetchTemporalTexture2D(true, glossySurfaceFormat, renderWidth, renderHeight)
           : null,
-        SSSProfileTexture: SSS ? device.pool.fetchTemporalTexture2D(true, 'rgba16f', renderWidth, renderHeight) : null,
+        SSSProfileTexture: SSS
+          ? device.pool.fetchTemporalTexture2D(true, 'rgba16f', renderWidth, renderHeight)
+          : null,
         SSSParamTexture: SSS
           ? device.pool.fetchTemporalTexture2D(true, 'rgba8unorm', renderWidth, renderHeight)
           : null,
-        SSSDiffuseTexture: SSS ? device.pool.fetchTemporalTexture2D(true, colorFormat, renderWidth, renderHeight) : null,
+        SSSDiffuseTexture: SSS
+          ? device.pool.fetchTemporalTexture2D(true, colorFormat, renderWidth, renderHeight)
+          : null,
         SSSTransmissionTexture: SSS
           ? device.pool.fetchTemporalTexture2D(true, colorFormat, renderWidth, renderHeight)
           : null,
@@ -501,10 +513,6 @@ export class SceneRenderer {
       ctx.sunLight!.color = sunLightColor;
     }
   }
-  /** @internal */
-  protected static _renderSceneDeferred(ctx: DrawContext, hybridTransparent: boolean) {
-    this._renderSceneForward(ctx);
-  }
   private static renderForwardSSSProfile(ctx: DrawContext, renderQueue: RenderQueue) {
     if (!ctx.SSSProfileTexture || !ctx.SSSParamTexture || !ctx.depthTexture) {
       return;
@@ -616,7 +624,10 @@ export class SceneRenderer {
     });
     return filtered;
   }
-  private static cloneActualSSSListInfo(source: RenderItemListInfo, targetQueue: RenderQueue): RenderItemListInfo {
+  private static cloneActualSSSListInfo(
+    source: RenderItemListInfo,
+    _targetQueue: RenderQueue
+  ): RenderItemListInfo {
     return {
       itemList: this.filterActualSSSItemList(source.itemList),
       skinItemList: this.filterActualSSSItemList(source.skinItemList),

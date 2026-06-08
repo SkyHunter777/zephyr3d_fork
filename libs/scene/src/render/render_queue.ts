@@ -237,7 +237,13 @@ export class RenderQueue extends Disposable {
     const color = light.diffuseAndIntensity;
     const luma = color.x * 0.2126 + color.y * 0.7152 + color.z * 0.0722;
     const range = Math.max(1, light.positionAndRange.w);
-    const typeWeight = light.isSpotLight() ? 1.2 : light.isPointLight() ? 1.08 : light.isRectLight() ? 1.02 : 1;
+    const typeWeight = light.isSpotLight()
+      ? 1.2
+      : light.isPointLight()
+        ? 1.08
+        : light.isRectLight()
+          ? 1.02
+          : 1;
     return Math.max(color.w, 0) * Math.max(luma, 0) * Math.sqrt(range) * typeWeight;
   }
   /** @internal */
@@ -312,10 +318,7 @@ export class RenderQueue extends Disposable {
       this._unshadowedLightList.push(light);
     }
     if (light.isDirectionLight()) {
-      if (
-        !this._primaryDirectionalLight ||
-        light.intensity > this._primaryDirectionalLight.intensity
-      ) {
+      if (!this._primaryDirectionalLight || light.intensity > this._primaryDirectionalLight.intensity) {
         this._primaryDirectionalLight = light;
       }
       if (light.sunLight) {
@@ -355,7 +358,8 @@ export class RenderQueue extends Disposable {
     this._sunLight ||= queue._sunLight;
     if (
       queue._primaryDirectionalLight &&
-      (!this._primaryDirectionalLight || queue._primaryDirectionalLight.intensity > this._primaryDirectionalLight.intensity)
+      (!this._primaryDirectionalLight ||
+        queue._primaryDirectionalLight.intensity > this._primaryDirectionalLight.intensity)
     ) {
       this._primaryDirectionalLight = queue._primaryDirectionalLight;
     }
@@ -382,7 +386,8 @@ export class RenderQueue extends Disposable {
       }
       const material = drawable.getMaterial();
       const trans =
-        this._renderPass.type === RENDER_PASS_TYPE_SHADOWMAP && material?.useTransparentShadowCasterForPass?.(this._renderPass.type)
+        this._renderPass.type === RENDER_PASS_TYPE_SHADOWMAP &&
+        material?.useTransparentShadowCasterForPass?.(this._renderPass.type)
           ? false
           : drawable.getQueueType() === QUEUE_TRANSPARENT;
       const unlit = drawable.isUnlit();

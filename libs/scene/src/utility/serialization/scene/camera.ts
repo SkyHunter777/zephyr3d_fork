@@ -986,9 +986,9 @@ export function getCameraClass(): SerializableClass {
           phase: 0,
           default: 'none',
           options: {
-              label: 'DebugView',
-              group: 'PostProcessing/SSS',
-              enum: {
+            label: 'DebugView',
+            group: 'PostProcessing/SSS',
+            enum: {
               labels: [
                 'None',
                 'ScatterMask',
@@ -1021,8 +1021,8 @@ export function getCameraClass(): SerializableClass {
                 'thin_lighting',
                 'transmission_shadow'
               ]
-              }
-            },
+            }
+          },
           get(this: Camera, value) {
             value.str[0] = this.sssDebugView;
           },

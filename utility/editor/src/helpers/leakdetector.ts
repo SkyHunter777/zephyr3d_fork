@@ -1,6 +1,7 @@
 declare const __DEV__: boolean;
 
-import { TraceMap, originalPositionFor } from '@jridgewell/trace-mapping';
+import type { TraceMap } from '@jridgewell/trace-mapping';
+import { originalPositionFor } from '@jridgewell/trace-mapping';
 import type { GPUObject } from '@zephyr3d/device';
 import { getDevice } from '@zephyr3d/scene';
 

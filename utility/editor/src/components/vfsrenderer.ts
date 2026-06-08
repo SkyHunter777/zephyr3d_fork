@@ -1588,7 +1588,8 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     for (const path of normalizedPaths) {
       this.removePathFromDirectory(this._filesystem, path);
       if (this.selectedDir && this._vfs.normalizePath(this.selectedDir.path) === path) {
-        const fallbackDir = this.findDirectoryByPath(this._filesystem, this._vfs.dirname(path)) ?? this._filesystem;
+        const fallbackDir =
+          this.findDirectoryByPath(this._filesystem, this._vfs.dirname(path)) ?? this._filesystem;
         this._nav.selectNode(fallbackDir);
       }
     }
@@ -1663,7 +1664,9 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     await this.ensureDirectoryLoaded(current);
     for (const part of relative.split('/').filter(Boolean)) {
       const nextPath = this._vfs.join(current.path, part);
-      let next = current.subDir.find((dir) => this._vfs.normalizePath(dir.path) === this._vfs.normalizePath(nextPath));
+      let next = current.subDir.find(
+        (dir) => this._vfs.normalizePath(dir.path) === this._vfs.normalizePath(nextPath)
+      );
       if (!next) {
         await this.ensureDirectoryLoaded(current);
         next = current.subDir.find(

@@ -975,7 +975,9 @@ export class SharedModel extends Disposable {
       if (
         extensions.has(ext) &&
         (normalizedPath === normalizedDestPath ||
-          normalizedPath.startsWith(normalizedDestPath.endsWith('/') ? normalizedDestPath : `${normalizedDestPath}/`))
+          normalizedPath.startsWith(
+            normalizedDestPath.endsWith('/') ? normalizedDestPath : `${normalizedDestPath}/`
+          ))
       ) {
         out.add(normalizedPath);
       }
@@ -1027,7 +1029,9 @@ export class SharedModel extends Disposable {
     for (const path of materialAndMeshPaths) {
       this.registerReusableResourcePath(pools, path);
     }
-    const materialPaths = Array.from(materialAndMeshPaths).filter((path) => PathUtils.extname(path).toLowerCase() === '.zmtl');
+    const materialPaths = Array.from(materialAndMeshPaths).filter(
+      (path) => PathUtils.extname(path).toLowerCase() === '.zmtl'
+    );
     const imageExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tga', '.hdr', '.ktx', '.ktx2']);
     for (const materialPath of materialPaths) {
       const texturePaths = await this.collectReferencedAssetPathsFromJsonFile(
@@ -1260,7 +1264,8 @@ export class SharedModel extends Disposable {
   ): Promise<void> {
     const destName = name;
     const usedPaths = new Set<string>();
-    const rebuildMaterial = (this as SharedModelWithPreprocessOptions)._preprocessOptions?.rebuildMaterial ?? true;
+    const rebuildMaterial =
+      (this as SharedModelWithPreprocessOptions)._preprocessOptions?.rebuildMaterial ?? true;
     const prefabName = name.endsWith('.zprefab') ? name : `${name}.zprefab`;
     const prefabPath = dstVFS.join(destPath, prefabName);
     const reusableResourcePools = await this.createReimportResourcePools(dstVFS, destPath, prefabPath);
@@ -1291,7 +1296,10 @@ export class SharedModel extends Disposable {
           continue;
         }
         ASSERT(!!ext, `Unknown image mime type: ${mimeType}`);
-        const baseName = this.sanitizeResourceName(this.getImageBaseName(img, i, destName), `${destName}_texture_${i}`);
+        const baseName = this.sanitizeResourceName(
+          this.getImageBaseName(img, i, destName),
+          `${destName}_texture_${i}`
+        );
         const path =
           (await this.tryReuseExactResourcePath(
             dstVFS,
@@ -1302,7 +1310,14 @@ export class SharedModel extends Disposable {
             `${destName}_texture_${i}`
           )) ??
           this.consumeReusableResourcePath(reusableResourcePools, baseName, ext, usedPaths) ??
-          (await this.createUniqueResourcePath(dstVFS, destPath, baseName, ext, usedPaths, `${destName}_texture_${i}`));
+          (await this.createUniqueResourcePath(
+            dstVFS,
+            destPath,
+            baseName,
+            ext,
+            usedPaths,
+            `${destName}_texture_${i}`
+          ));
         if (img.uri) {
           img.data = new Uint8Array((await srcVFS.readFile(img.uri, { encoding: 'binary' })) as ArrayBuffer);
         }
@@ -1363,7 +1378,10 @@ export class SharedModel extends Disposable {
         if (!info) {
           continue;
         }
-        const baseName = this.sanitizeResourceName(this.getPrimitiveBaseName(info, i, destName), `${destName}_mesh_${i}`);
+        const baseName = this.sanitizeResourceName(
+          this.getPrimitiveBaseName(info, i, destName),
+          `${destName}_mesh_${i}`
+        );
         const path =
           (await this.tryReuseExactResourcePath(
             dstVFS,

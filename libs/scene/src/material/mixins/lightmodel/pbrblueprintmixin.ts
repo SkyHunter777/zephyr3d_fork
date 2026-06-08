@@ -218,10 +218,7 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
                 const sample = (u: number, v: number) => {
                   this.samplePos = pb.add(
                     this.center,
-                    pb.add(
-                      pb.mul(this.ax, pb.sub(pb.mul(u, 2), 1)),
-                      pb.mul(this.ay, pb.sub(pb.mul(v, 2), 1))
-                    )
+                    pb.add(pb.mul(this.ax, pb.sub(pb.mul(u, 2), 1)), pb.mul(this.ay, pb.sub(pb.mul(v, 2), 1)))
                   );
                   this.Lvec = pb.sub(this.samplePos, this.worldPos);
                   this.dist = pb.length(this.Lvec);
@@ -300,7 +297,10 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
               this.$l.NoL = pb.clamp(pb.dot(this.pbrData.normal, this.lightDir), 0, 1);
               this.$l.lightColor = pb.mul(colorIntensity.rgb, colorIntensity.a, this.lightAtten, this.NoL);
               if (shadow) {
-                this.lightColor = pb.mul(this.lightColor, that.calculateShadow(this, this.worldPos, this.NoL));
+                this.lightColor = pb.mul(
+                  this.lightColor,
+                  that.calculateShadow(this, this.worldPos, this.NoL)
+                );
               }
               if (outSSSDiffuse) {
                 that.directLighting(
@@ -546,7 +546,11 @@ export function mixinPBRBluePrint<T extends typeof MeshMaterial>(BaseCls: T) {
             });
             this.outColor = pb.add(this.outColor, this.specular);
             this.$l.diffuseBRDF = pb.mul(pb.sub(pb.vec3(1), this.F), pb.div(this.data.diffuse.rgb, Math.PI));
-            this.$l.diffuse = pb.mul(this.lightColor, pb.max(this.diffuseBRDF, pb.vec3(0)), this.diffuseScale);
+            this.$l.diffuse = pb.mul(
+              this.lightColor,
+              pb.max(this.diffuseBRDF, pb.vec3(0)),
+              this.diffuseScale
+            );
             this.outColor = pb.add(this.outColor, this.diffuse);
             if (outDiffuseColor) {
               this.outDiffuseColor = pb.add(this.outDiffuseColor, this.diffuse);

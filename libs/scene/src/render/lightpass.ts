@@ -92,9 +92,9 @@ export class LightPass extends RenderPass {
   protected _getGlobalBindGroupHash(ctx: DrawContext, camera: Camera) {
     return `${this._shadowMapHash}:${ctx.currentShadowLight?.runtimeId ?? 0}:${
       ctx.lightBlending ? 1 : 0
-    }:${camera.oit?.calculateHash() ?? ''}:${
-      ctx.env!.getHash(ctx)
-    }:${ctx.materialFlags}:${ctx.linearDepthTexture?.uid ?? 0}:${ctx.sceneColorTexture?.uid ?? 0}:${
+    }:${camera.oit?.calculateHash() ?? ''}:${ctx.env!.getHash(
+      ctx
+    )}:${ctx.materialFlags}:${ctx.linearDepthTexture?.uid ?? 0}:${ctx.sceneColorTexture?.uid ?? 0}:${
       ctx.HiZTexture?.uid ?? 0
     }`;
   }
@@ -164,13 +164,11 @@ export class LightPass extends RenderPass {
     ctx.flip = this.isAutoFlip(ctx);
     const surfaceMRT =
       ctx.materialFlags &
-      (
-        MaterialVaryingFlags.SSR_STORE_ROUGHNESS |
+      (MaterialVaryingFlags.SSR_STORE_ROUGHNESS |
         MaterialVaryingFlags.SSS_STORE_PROFILE |
         MaterialVaryingFlags.SSS_STORE_DIFFUSE |
         MaterialVaryingFlags.SSS_STORE_NORMAL |
-        MaterialVaryingFlags.SSS_STORE_TRANSMISSION
-      );
+        MaterialVaryingFlags.SSS_STORE_TRANSMISSION);
     const tmpFramebuffer = surfaceMRT
       ? ctx.device.pool.fetchTemporalFramebuffer(
           false,
@@ -296,7 +294,11 @@ export class LightPass extends RenderPass {
             i === 0 ? PostEffectLayer.opaque : PostEffectLayer.transparent,
             ctx.linearDepthTexture!
           );
-          if (i === 0 && surfaceMRT && (ctx.device.getFramebuffer()?.getColorAttachments().length ?? 0) <= 1) {
+          if (
+            i === 0 &&
+            surfaceMRT &&
+            (ctx.device.getFramebuffer()?.getColorAttachments().length ?? 0) <= 1
+          ) {
             ctx.materialFlags &= ~surfaceMRT;
           }
         }

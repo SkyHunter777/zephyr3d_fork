@@ -80,7 +80,10 @@ function mixinAlbedoColor<T extends typeof MeshMaterial>(BaseCls: T) {
     }
     fragmentShader(scope: PBFunctionScope) {
       super.fragmentShader(scope);
-      if (this.needFragmentColorInput() && !(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING)) {
+      if (
+        this.needFragmentColorInput() &&
+        !(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING)
+      ) {
         const pb = scope.$builder;
         scope.zAlbedo = pb.vec4().uniform(2);
       }

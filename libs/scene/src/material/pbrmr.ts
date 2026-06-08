@@ -8,7 +8,7 @@ import { MaterialVaryingFlags, RENDER_PASS_TYPE_LIGHT } from '../values';
 import type { Clonable } from '@zephyr3d/base';
 import { Vector3 } from '@zephyr3d/base';
 import type { DrawContext } from '../render';
-import { SubsurfaceProfile } from './subsurfaceprofile';
+import type { SubsurfaceProfile } from './subsurfaceprofile';
 
 /**
  * PBRMetallicRoughnessMaterial class
@@ -110,15 +110,21 @@ export class PBRMetallicRoughnessMaterial
   }
   private getSubsurfaceProfileScale(scope: PBInsideFunctionScope): PBShaderExp {
     const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-    return (instancing ? scope.$inputs.zSubsurfaceProfileScale : scope.zSubsurfaceProfileScale) as PBShaderExp;
+    return (
+      instancing ? scope.$inputs.zSubsurfaceProfileScale : scope.zSubsurfaceProfileScale
+    ) as PBShaderExp;
   }
   private getSubsurfaceProfileStrength(scope: PBInsideFunctionScope): PBShaderExp {
     const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-    return (instancing ? scope.$inputs.zSubsurfaceProfileStrength : scope.zSubsurfaceProfileStrength) as PBShaderExp;
+    return (
+      instancing ? scope.$inputs.zSubsurfaceProfileStrength : scope.zSubsurfaceProfileStrength
+    ) as PBShaderExp;
   }
   private getSubsurfaceProfilePreset(scope: PBInsideFunctionScope): PBShaderExp {
     const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-    return (instancing ? scope.$inputs.zSubsurfaceProfilePreset : scope.zSubsurfaceProfilePreset) as PBShaderExp;
+    return (
+      instancing ? scope.$inputs.zSubsurfaceProfilePreset : scope.zSubsurfaceProfilePreset
+    ) as PBShaderExp;
   }
   vertexShader(scope: PBFunctionScope) {
     super.vertexShader(scope);
@@ -267,7 +273,7 @@ export class PBRMetallicRoughnessMaterial
             !!this._subsurfaceProfile &&
             !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE);
           scope.$l.sssProfile = writeSSSProfile ? this.buildSubsurfaceProfile(scope) : pb.vec4(0);
-          scope.$l.sssParams = writeSSSProfile ? scope.sssParams ?? pb.vec4(0) : pb.vec4(0);
+          scope.$l.sssParams = writeSSSProfile ? (scope.sssParams ?? pb.vec4(0)) : pb.vec4(0);
           /*
           scope.outRoughness = pb.vec4(
             pb.add(pb.mul(scope.normalInfo.normal, 0.5), pb.vec3(0.5)),
@@ -348,7 +354,7 @@ export class PBRMetallicRoughnessMaterial
             !!this._subsurfaceProfile &&
             !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE);
           scope.$l.sssProfile = writeSSSProfile ? this.buildSubsurfaceProfile(scope) : pb.vec4(0);
-          scope.$l.sssParams = writeSSSProfile ? scope.sssParams ?? pb.vec4(0) : pb.vec4(0);
+          scope.$l.sssParams = writeSSSProfile ? (scope.sssParams ?? pb.vec4(0)) : pb.vec4(0);
           this.outputFragmentColor(
             scope,
             scope.$inputs.worldPos,
@@ -429,10 +435,7 @@ export class PBRMetallicRoughnessMaterial
       1
     );
     scope.sssTransmissionMask = pb.clamp(
-      pb.max(
-        scope.sssTransmissionMask,
-        scope.sssAuthoredTransmissionMask
-      ),
+      pb.max(scope.sssTransmissionMask, scope.sssAuthoredTransmissionMask),
       0,
       1
     );
@@ -448,11 +451,7 @@ export class PBRMetallicRoughnessMaterial
     );
     scope.$l.sssStrength = pb.mul(this.getSubsurfaceProfileStrength(scope), scope.sssScatterStrengthMask);
     scope.$l.sssWidthBase = pb.mul(this.getSubsurfaceProfileScale(scope), scope.sssScatterWidthMask);
-    scope.$l.sssWidth = pb.clamp(
-      pb.div(scope.sssWidthBase, pb.add(scope.sssWidthBase, 1)),
-      0,
-      0.999
-    );
+    scope.$l.sssWidth = pb.clamp(pb.div(scope.sssWidthBase, pb.add(scope.sssWidthBase, 1)), 0, 0.999);
     if (!hasExplicitTransmissionAuthoring) {
       scope.$l.sssProfileFallbackMask = pb.clamp(
         pb.add(
@@ -472,11 +471,6 @@ export class PBRMetallicRoughnessMaterial
       scope.sssPresetEncoded,
       pb.add(0.75, pb.mul(scope.sssScatterSoftness, 0.25))
     );
-    return pb.vec4(
-      scope.sssStrength,
-      scope.sssStrength,
-      scope.sssStrength,
-      scope.sssTransmissionMask
-    );
+    return pb.vec4(scope.sssStrength, scope.sssStrength, scope.sssStrength, scope.sssTransmissionMask);
   }
 }

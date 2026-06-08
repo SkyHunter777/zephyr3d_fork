@@ -51,8 +51,10 @@ function createVirtualFileName(pkg: MonacoPackage, sourceUrl: string) {
   const normalizedDevRoot = resolveBrowserUrl(pkg.devRoot).replace(/\\/g, '/').replace(/\/+$/, '');
   const relativePath = normalizedSourceUrl.startsWith(normalizedDevRoot)
     ? normalizedSourceUrl.slice(normalizedDevRoot.length).replace(/^\/+/, '')
-    : normalizedSourceUrl.split('/').pop() ?? 'index.ts';
-  return relativePath ? `${normalizeVirtualRoot(pkg)}/${relativePath}` : `${normalizeVirtualRoot(pkg)}/index.ts`;
+    : (normalizedSourceUrl.split('/').pop() ?? 'index.ts');
+  return relativePath
+    ? `${normalizeVirtualRoot(pkg)}/${relativePath}`
+    : `${normalizeVirtualRoot(pkg)}/index.ts`;
 }
 
 function ensureMonacoCss() {
@@ -207,7 +209,10 @@ async function loadProdTypes(pkg: MonacoPackage, monaco: any) {
   const url = resolveEditorAssetUrl(pkg.prodDts);
   try {
     const content = await fetchText(url);
-    monaco.languages.typescript.typescriptDefaults.addExtraLib(content, `${normalizeVirtualRoot(pkg)}/index.d.ts`);
+    monaco.languages.typescript.typescriptDefaults.addExtraLib(
+      content,
+      `${normalizeVirtualRoot(pkg)}/index.d.ts`
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`Failed to load ${url}:`, message);
