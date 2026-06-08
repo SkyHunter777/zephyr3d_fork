@@ -410,8 +410,12 @@ export class PropertyEditor extends Observable<{
     prop.get.call(this._inspectedGroup.object, value);
     return value.object[this._inspectedGroup.index ?? 0];
   }
+  get scrollToTopRequested() {
+    return this._scrollToTopRequested;
+  }
   private resetInspectedGroup() {
     this._inspectedGroup = this._rootGroup;
+    this._groupOpenStates.clear();
     this._scrollToTopRequested = true;
     this.invalidateRows();
   }
@@ -693,9 +697,7 @@ export class PropertyEditor extends Observable<{
       return;
     }
     const opened = this._groupOpenStates.get(group.statePath);
-    if (opened !== undefined) {
-      group.opened = opened;
-    }
+    group.opened = opened ?? this.getNearestObjectGroup(group) === this._rootGroup;
   }
   private getPropertyHeight(property: Property<any>) {
     return this.getTableRowHeight(property.value?.options?.multiline ? 100 : undefined);

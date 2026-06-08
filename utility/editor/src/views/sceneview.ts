@@ -162,6 +162,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   private _springBoneGizmo: LineGizmo;
   private _springBoneColliderGizmo: ShapeGizmo;
   private _springBone: JointDynamicsModifier;
+  private _propGridScrollTopFrames: number;
   constructor(controller: SceneController) {
     super(controller);
     this._cmdManager = new CommandManager();
@@ -187,6 +188,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     this._springBoneGizmo = null;
     this._springBoneColliderGizmo = null;
     this._springBone = null;
+    this._propGridScrollTopFrames = 0;
     this._currentEditTool = new DRef();
     this._cameraAnimationEyeFrom = new Vector3();
     this._cameraAnimationTargetFrom = new Vector3();
@@ -1108,9 +1110,19 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
 
     if (this._rightDockPanel.begin('##PropertyGridPanel')) {
       if (ImGui.BeginChild('##PropGridRegion', new ImGui.ImVec2(-1, 0), false)) {
+        if (this._propGrid.scrollToTopRequested) {
+          this._propGridScrollTopFrames = 3;
+        }
+        if (this._propGridScrollTopFrames > 0) {
+          ImGui.SetScrollY(0);
+        }
         this._propGrid.render();
         ImGui.Separator();
         this._scriptPanel.render();
+        if (this._propGridScrollTopFrames > 0) {
+          ImGui.SetScrollY(0);
+          this._propGridScrollTopFrames--;
+        }
       }
       ImGui.EndChild();
     }
