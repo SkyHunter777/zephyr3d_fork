@@ -206,6 +206,9 @@ export class ScriptPanel {
           attachmentIndex: this._selectedScriptIndex
         }
       : null;
+    if (this._scriptConfigEditorHost?.scriptPath) {
+      clearScriptPropertyAccessorCache(this._scriptConfigEditorHost.scriptPath);
+    }
     this._scriptConfigGrid.object = this._scriptConfigEditorHost;
     this._scriptConfigGrid.setExtraPropertiesProvider(
       'script-config',
