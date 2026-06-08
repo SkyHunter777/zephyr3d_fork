@@ -791,10 +791,12 @@ export class ResourceManager {
    *
    * @returns A Promise resolving to the loaded model object, or `null` if failed.
    */
-  async fetchModel(id: string, scene: Scene, options?: ModelFetchOptions) {
+  async fetchModel(path: string, scene: Scene, options?: ModelFetchOptions) {
+    const id = this.VFS.normalizePath(path);
     const model = await this._assetManager.fetchModel(scene, id, options);
     if (model) {
-      this._allocated.set((model as any).group ?? model, id);
+      model.prefabId = id;
+      this._allocated.set(model, id);
     }
     return model;
   }
