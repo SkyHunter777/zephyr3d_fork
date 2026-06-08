@@ -56,12 +56,17 @@ export const LIGHT_TYPE_POINT = 2;
  * @public
  */
 export const LIGHT_TYPE_SPOT = 3;
-
 /**
  * Rectangular area light type
  * @public
  */
 export const LIGHT_TYPE_RECT = 4;
+
+/**
+ * Max light size for clustered lighting
+ * @public
+ */
+export const MAX_CLUSTERED_LIGHTS = 255;
 
 /**
  * Opaque render queue type
@@ -117,7 +122,11 @@ export const enum MaterialVaryingFlags {
   SKIN_ANIMATION = 1 << 1,
   INSTANCING = 1 << 2,
   SSR_STORE_ROUGHNESS = 1 << 3,
-  APPLY_FOG = 1 << 4
+  APPLY_FOG = 1 << 4,
+  SSS_STORE_PROFILE = 1 << 5,
+  SSS_STORE_DIFFUSE = 1 << 6,
+  SSS_STORE_NORMAL = 1 << 7,
+  SSS_STORE_TRANSMISSION = 1 << 8
 }
 
 /**

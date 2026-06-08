@@ -102,7 +102,7 @@ export class SkeletonView {
     if (ImGui.IsItemHovered()) {
       const x = io.MousePos.x - cursorScreenPos.x;
       const y = io.MousePos.y - cursorScreenPos.y;
-      const ray = this._scene.get().mainCamera!.constructRay(x, y, size.x, size.y);
+      const ray = this._scene.get().mainCamera!.constructRay(x, y);
       const pickResult = this._scene.get()!.raycast(ray);
       if (pickResult?.target?.node) {
         console.log(pickResult.target.node.name);

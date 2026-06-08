@@ -173,11 +173,11 @@ export abstract class AmbientLight extends BaseLight {
  */
 export class PunctualLight extends BaseLight {
   /** @internal */
-  protected _color: Vector4;
+  protected _color!: Vector4;
   /** @internal */
-  protected _castShadow: boolean;
+  protected _castShadow!: boolean;
   /** @internal */
-  protected _shadowMapper: ShadowMapper;
+  protected _shadowMapper!: ShadowMapper;
   /**
    * Creates an instance of punctual light
    * @param scene - The scene to which the punctual light belongs
@@ -185,12 +185,23 @@ export class PunctualLight extends BaseLight {
    */
   constructor(scene: Scene, type: number) {
     super(scene, type);
-    this._color = Vector4.one();
-    this._castShadow = false;
-    this._shadowMapper = new ShadowMapper(this);
+    this.ensurePunctualState();
+  }
+  /** @internal */
+  protected ensurePunctualState() {
+    if (!this._color) {
+      this._color = Vector4.one();
+    }
+    if (this._castShadow == null) {
+      this._castShadow = false;
+    }
+    if (!this._shadowMapper) {
+      this._shadowMapper = new ShadowMapper(this);
+    }
   }
   /** Color of the light */
   get color() {
+    this.ensurePunctualState();
     return this._color.clone();
   }
   set color(color) {
@@ -202,12 +213,14 @@ export class PunctualLight extends BaseLight {
    * @returns self
    */
   setColor(color: Vector4 | Vector3) {
+    this.ensurePunctualState();
     this._color.set(color);
     this.invalidateUniforms();
     return this;
   }
   /** Whether this light casts shadows */
   get castShadow() {
+    this.ensurePunctualState();
     return this._castShadow;
   }
   set castShadow(b) {
@@ -218,7 +231,8 @@ export class PunctualLight extends BaseLight {
    * @param b - true if the light casts shadows
    * @returns self
    */
-  setCastShadow(b: boolean): this {
+  setCastShadow(b: boolean) {
+    this.ensurePunctualState();
     if (this._castShadow !== !!b) {
       this._castShadow = !!b;
       if (this._castShadow && this.isDirectionLight() && !this.shadow.shadowRegion) {
@@ -229,6 +243,7 @@ export class PunctualLight extends BaseLight {
   }
   /** The shadow mapper for this light */
   get shadow() {
+    this.ensurePunctualState();
     return this._shadowMapper;
   }
   /**

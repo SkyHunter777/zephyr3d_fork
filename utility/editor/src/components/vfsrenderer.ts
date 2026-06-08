@@ -46,6 +46,8 @@ export type DirectoryInfo = {
   subDir: DirectoryInfo[];
   parent: DirectoryInfo;
   open: boolean;
+  loaded?: boolean;
+  hasChildrenHint?: boolean;
 };
 
 interface AreaBounds {
@@ -98,6 +100,9 @@ class VFSDirData extends TreeViewData<DirectoryInfo> {
   }
   getChildren(parent: DirectoryInfo): DirectoryInfo[] {
     return parent?.subDir ?? [];
+  }
+  hasChildren(parent: DirectoryInfo): boolean {
+    return parent?.hasChildrenHint ?? parent?.subDir?.length > 0;
   }
   getParent(node: DirectoryInfo): DirectoryInfo {
     return node.parent;
@@ -430,7 +435,17 @@ export class DirTreeView extends TreeView<{}, DirectoryInfo> {
     this._renderer.refreshFileView();
   }
   protected onNodeSelected(): void {
-    this._renderer.refreshFileView();
+    void this._renderer.ensureDirectoryLoaded(this.selectedNode).finally(() => {
+      this._renderer.refreshFileView();
+    });
+  }
+  protected onNodeOpenChanged(node: DirectoryInfo, open: boolean) {
+    node.open = open;
+    if (open) {
+      void this._renderer.ensureDirectoryLoaded(node).catch((err) => {
+        console.error(`Load directory ${node.path} failed: ${err}`);
+      });
+    }
   }
   protected onDrawContextMenu(dir: DirectoryInfo) {
     this._renderer.renderPluginContextMenu('asset-directory', dir);
@@ -481,9 +496,13 @@ export class DirTreeView extends TreeView<{}, DirectoryInfo> {
       if (ImGui.MenuItem('Delete##VFSDeleteFolder')) {
         this._renderer.VFS.deleteDirectory(dir.path, true)
           .then(() => {
+            this._renderer.removePathsFromFileSystem([dir.path]);
             if (dir === this.selectedNode) {
               this.selectNode(null);
             }
+            this._renderer.refreshFileView();
+            this._renderer.emitSelectedChanged();
+            this._renderer.queueFileSystemReload(true);
           })
           .catch((err) => {
             DlgMessage.messageBox('Error', `Delete directory failed: ${err}`);
@@ -534,6 +553,8 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   private _reloadQueued = false;
   private _reloadQueuedPreserveSelection = false;
   private _reloadingFileSystem = false;
+  private _vfsBatchDepth = 0;
+  private _vfsBatchReloadPending = false;
   private readonly _options: VFSRendererOptions = null;
 
   constructor(vfs: VFS, fileFilter: string[] = [], treePanelWidth = 200, options?: VFSRendererOptions) {
@@ -603,6 +624,21 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   }
   get currentDirContent() {
     return this._currentDirContent;
+  }
+  async runWithVFSBatchUpdate<T>(task: () => Promise<T>): Promise<T> {
+    this._vfsBatchDepth++;
+    try {
+      return await task();
+    } finally {
+      this._vfsBatchDepth--;
+      if (this._vfsBatchDepth <= 0) {
+        this._vfsBatchDepth = 0;
+        if (this._vfsBatchReloadPending) {
+          this._vfsBatchReloadPending = false;
+          this.queueFileSystemReload(true);
+        }
+      }
+    }
   }
   get revealInFileManagerLabel() {
     return getDesktopAPI()?.platform === 'win32' ? 'Show in Explorer' : 'Reveal in File Manager';
@@ -1212,8 +1248,12 @@ export class VFSRenderer extends makeObservable(Disposable)<{
 
     Promise.all(deletePromises)
       .then(() => {
+        const deletedPaths = items.map((item) => ('subDir' in item ? item.path : item.meta.path));
+        this.removePathsFromFileSystem(deletedPaths);
         this._contentView.deselectAll();
+        this.refreshFileView();
         this.emitSelectedChanged();
+        this.queueFileSystemReload(true);
       })
       .catch((err) => {
         DlgMessage.messageBox('Error', `Delete failed: ${err}`);
@@ -1367,6 +1407,10 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   }
 
   private revealAsset(path: string) {
+    void this.revealAssetAsync(path);
+  }
+
+  private async revealAssetAsync(path: string) {
     if (!path) {
       return;
     }
@@ -1375,15 +1419,16 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       this._pendingRevealAssetPath = normalizedPath;
       return;
     }
-    this.selectAssetByPath(normalizedPath);
+    await this.selectAssetByPath(normalizedPath);
   }
 
-  private selectAssetByPath(path: string) {
+  private async selectAssetByPath(path: string) {
     if (!path) {
       return;
     }
     const normalizedPath = this._vfs.normalizePath(path);
     const dirPath = this._vfs.dirname(normalizedPath);
+    await this.ensureDirectoryChainLoaded(dirPath);
     const dir = this.findDirectoryByPath(this._filesystem, dirPath);
     if (!dir) {
       return;
@@ -1407,7 +1452,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     if (this.selectedDir === dir) {
       flags |= ImGui.TreeNodeFlags.Selected;
     }
-    if (dir.subDir.length === 0) {
+    if (!dir.hasChildrenHint && dir.subDir.length === 0) {
       flags |= ImGui.TreeNodeFlags.Leaf;
     }
     const forceExpanded = this.selectedDir ? this.isParentOf(dir, this.selectedDir) : false;
@@ -1457,9 +1502,13 @@ export class VFSRenderer extends makeObservable(Disposable)<{
             this._vfs
               .deleteDirectory(dir.path, true)
               .then(() => {
+                this.removePathsFromFileSystem([dir.path]);
                 if (dir === this.selectedDir) {
                   this._nav.selectNode(null);
                 }
+                this.refreshFileView();
+                this.emitSelectedChanged();
+                this.queueFileSystemReload(true);
               })
               .catch((err) => {
                 DlgMessage.messageBox('Error', `Delete directory failed: ${err}`);
@@ -1481,7 +1530,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   }
 
   async loadFileSystem() {
-    const rootDir = await this.loadDirectoryInfo(this._options.rootDir);
+    const rootDir = await this.loadDirectoryInfo(this._options.rootDir, 1);
     this._filesystem = rootDir;
     this._forceNavRefresh = true;
 
@@ -1494,13 +1543,13 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     if (this._pendingRevealAssetPath) {
       const path = this._pendingRevealAssetPath;
       this._pendingRevealAssetPath = null;
-      this.selectAssetByPath(path);
+      await this.selectAssetByPath(path);
     }
 
     this.dispatchEvent('loaded');
   }
 
-  private queueFileSystemReload(preserveSelection = false) {
+  queueFileSystemReload(preserveSelection = false) {
     this._reloadQueued = true;
     this._reloadQueuedPreserveSelection = this._reloadQueuedPreserveSelection || preserveSelection;
     if (this._reloadTimer) {
@@ -1531,6 +1580,40 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     }
   }
 
+  removePathsFromFileSystem(paths: string[]) {
+    if (!this._filesystem || !paths?.length) {
+      return;
+    }
+    const normalizedPaths = paths.map((path) => this._vfs.normalizePath(path));
+    for (const path of normalizedPaths) {
+      this.removePathFromDirectory(this._filesystem, path);
+      if (this.selectedDir && this._vfs.normalizePath(this.selectedDir.path) === path) {
+        const fallbackDir =
+          this.findDirectoryByPath(this._filesystem, this._vfs.dirname(path)) ?? this._filesystem;
+        this._nav.selectNode(fallbackDir);
+      }
+    }
+  }
+
+  private removePathFromDirectory(dir: DirectoryInfo, targetPath: string): boolean {
+    const subDirIndex = dir.subDir.findIndex((subDir) => this._vfs.normalizePath(subDir.path) === targetPath);
+    if (subDirIndex >= 0) {
+      dir.subDir.splice(subDirIndex, 1);
+      return true;
+    }
+    const fileIndex = dir.files.findIndex((file) => this._vfs.normalizePath(file.meta.path) === targetPath);
+    if (fileIndex >= 0) {
+      dir.files.splice(fileIndex, 1);
+      return true;
+    }
+    for (const subDir of dir.subDir) {
+      if (this.removePathFromDirectory(subDir, targetPath)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private findDirectoryByPath(root: DirectoryInfo, path: string): DirectoryInfo | null {
     if (root.path === path) {
       return root;
@@ -1546,6 +1629,60 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     return null;
   }
 
+  async ensureDirectoryLoaded(dir: DirectoryInfo) {
+    if (!dir || dir.loaded) {
+      return;
+    }
+    const refreshed = await this.loadDirectoryInfo(dir.path, 1);
+    if (!refreshed) {
+      return;
+    }
+    dir.files = refreshed.files;
+    dir.subDir = refreshed.subDir;
+    dir.loaded = true;
+    dir.hasChildrenHint = refreshed.hasChildrenHint;
+    for (const subDir of dir.subDir) {
+      subDir.parent = dir;
+    }
+    if (this.selectedDir === dir) {
+      this.refreshFileView();
+    }
+  }
+
+  private async ensureDirectoryChainLoaded(path: string) {
+    if (!this._filesystem) {
+      return;
+    }
+    const rootPath = this._vfs.normalizePath(this._filesystem.path);
+    const normalizedPath = this._vfs.normalizePath(path);
+    if (normalizedPath === rootPath) {
+      await this.ensureDirectoryLoaded(this._filesystem);
+      return;
+    }
+    const relative = normalizedPath.slice(rootPath.length).replace(/^\/+/, '');
+    let current = this._filesystem;
+    await this.ensureDirectoryLoaded(current);
+    for (const part of relative.split('/').filter(Boolean)) {
+      const nextPath = this._vfs.join(current.path, part);
+      let next = current.subDir.find(
+        (dir) => this._vfs.normalizePath(dir.path) === this._vfs.normalizePath(nextPath)
+      );
+      if (!next) {
+        await this.ensureDirectoryLoaded(current);
+        next = current.subDir.find(
+          (dir) => this._vfs.normalizePath(dir.path) === this._vfs.normalizePath(nextPath)
+        );
+      }
+      if (!next) {
+        return;
+      }
+      current.open = true;
+      next.parent = current;
+      await this.ensureDirectoryLoaded(next);
+      current = next;
+    }
+  }
+
   private isParentOf(parent: DirectoryInfo, child: DirectoryInfo) {
     while (child.parent) {
       if (parent.path === child.parent.path) {
@@ -1555,7 +1692,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     }
     return false;
   }
-  async loadDirectoryInfo(path: string): Promise<DirectoryInfo> {
+  async loadDirectoryInfo(path: string, depth = Number.POSITIVE_INFINITY): Promise<DirectoryInfo> {
     if (!this._vfs) {
       return null;
     }
@@ -1566,7 +1703,9 @@ export class VFSRenderer extends makeObservable(Disposable)<{
         subDir: [],
         parent: null,
         open: false,
-        path
+        path,
+        loaded: depth > 0,
+        hasChildrenHint: false
       };
 
       const content: FileMetadata[] =
@@ -1579,10 +1718,24 @@ export class VFSRenderer extends makeObservable(Disposable)<{
 
       for (const entry of content) {
         if (entry.type === 'directory') {
-          const dirInfo = await this.loadDirectoryInfo(entry.path);
-          if (dirInfo) {
-            info.subDir.push(dirInfo);
-            dirInfo.parent = info;
+          info.hasChildrenHint = true;
+          if (depth > 0) {
+            const dirInfo =
+              depth > 1
+                ? await this.loadDirectoryInfo(entry.path, depth - 1)
+                : {
+                    files: [],
+                    subDir: [],
+                    parent: info,
+                    open: false,
+                    path: entry.path,
+                    loaded: false,
+                    hasChildrenHint: true
+                  };
+            if (dirInfo) {
+              info.subDir.push(dirInfo);
+              dirInfo.parent = info;
+            }
           }
         } else if (entry.type === 'file') {
           info.files.push({
@@ -1703,21 +1856,27 @@ export class VFSRenderer extends makeObservable(Disposable)<{
             if (saveOptions) {
               const dlgProgressBar = new DlgProgress('Write File##ImportProgress', 300);
               dlgProgressBar.showModal();
-              for (let i = 0; i < result.paths.length; i++) {
-                dlgProgressBar.setProgress(i + 1, result.paths.length);
-                try {
-                  await ResourceService.savePrefab(
-                    models[i],
-                    getEngine().resourceManager,
-                    PathUtils.basename(result.paths[i], PathUtils.extname(result.paths[i])),
-                    info.targetDirectory.path,
-                    dtVFS,
-                    saveOptions[i]
-                  );
-                } catch (err) {
-                  console.error(`Write model ${result.paths[i]} failed: ${err}`);
+              await this.runWithVFSBatchUpdate(async () => {
+                for (let i = 0; i < result.paths.length; i++) {
+                  dlgProgressBar.setProgress(i + 1, result.paths.length);
+                  try {
+                    await ResourceService.savePrefab(
+                      models[i],
+                      getEngine().resourceManager,
+                      PathUtils.basename(result.paths[i], PathUtils.extname(result.paths[i])),
+                      info.targetDirectory.path,
+                      dtVFS,
+                      {
+                        ...saveOptions[i],
+                        rebuildPrefab: !!result.rebuildPrefab,
+                        rebuildMaterial: !!result.rebuildMaterial
+                      }
+                    );
+                  } catch (err) {
+                    console.error(`Write model ${result.paths[i]} failed: ${err}`);
+                  }
                 }
-              }
+              });
               dlgProgressBar.close();
             }
           }
@@ -1946,6 +2105,11 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       !this._vfs.isParentOf(rootPath, changedPath) &&
       !this._vfs.isParentOf(changedPath, rootPath)
     ) {
+      return;
+    }
+    if (this._vfsBatchDepth > 0) {
+      this._reloadQueuedPreserveSelection = true;
+      this._vfsBatchReloadPending = true;
       return;
     }
     this.queueFileSystemReload(true);

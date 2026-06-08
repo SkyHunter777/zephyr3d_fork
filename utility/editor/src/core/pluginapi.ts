@@ -78,6 +78,16 @@ export type EditorPropertyAccessorProvider = (
   object: unknown
 ) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>;
 
+export type EditorScriptInspectorContext = {
+  scriptHost: Scene | SceneNode;
+  scriptPath: string;
+  attachmentIndex: number;
+};
+
+export type EditorScriptInspectorAccessorProvider = (
+  context: EditorScriptInspectorContext
+) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>;
+
 export type EditorProxy = {
   createProxy(node: SceneNode): SceneNode | undefined;
   updateProxy(proxy: SceneNode): void;
@@ -245,6 +255,14 @@ export type EditorPluginContext = {
       width?: number,
       height?: number
     ): Promise<EditorDirectoryInfo[]>;
+    saveProjectFile(
+      title: string,
+      rootDir: string,
+      filter: string,
+      defaultName?: string,
+      width?: number,
+      height?: number
+    ): Promise<string>;
   };
   getSceneContext(): EditorSceneContext;
   refreshProperties(): void;
@@ -254,6 +272,7 @@ export type EditorPluginContext = {
   registerEditTool(factory: EditorEditToolFactory): () => void;
   registerNodeProxyFactory(factory: EditorNodeProxyFactory): () => void;
   registerPropertyAccessors(id: string, provider: EditorPropertyAccessorProvider): () => void;
+  registerScriptInspectorExtension(id: string, provider: EditorScriptInspectorAccessorProvider): () => void;
   on<K extends keyof EditorEventMap>(
     type: K,
     listener: (...args: EditorEventMap[K]) => void,

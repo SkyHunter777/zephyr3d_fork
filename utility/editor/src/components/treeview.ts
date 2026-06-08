@@ -11,6 +11,9 @@ export abstract class TreeViewData<T = unknown> {
   abstract getDragSourcePayloadType(node: T): string;
   abstract getDragSourcePayload(node: T): unknown;
   abstract getDragTargetPayloadType(node: T): string;
+  hasChildren(parent: T): boolean {
+    return this.getChildren(parent).length > 0;
+  }
 }
 
 type VisibleRow<T = unknown> = {
@@ -119,7 +122,7 @@ export class TreeView<P extends EventMap, T = unknown> extends Observable<P> {
 
     const dfs = (node: T, depth: number) => {
       const children = this._data.getChildren(node);
-      const leaf = children.length === 0;
+      const leaf = !this._data.hasChildren(node);
       const defaultOpen = !this._data.getParent(node);
 
       out.push({ node, depth, leaf, defaultOpen });
@@ -221,6 +224,7 @@ export class TreeView<P extends EventMap, T = unknown> extends Observable<P> {
         const nowOpen = clickedOpen;
         this._openState.set(id, nowOpen);
         this._visibleDirty = true;
+        this.onNodeOpenChanged(node, nowOpen);
       }
     }
 
@@ -289,6 +293,7 @@ export class TreeView<P extends EventMap, T = unknown> extends Observable<P> {
   protected onNodeSelected(_node: T) {}
   protected onSelectionChanged(_selectedNodes: Set<T>, _activeNode: Nullable<T>) {}
   protected onNodeDblClicked(_node: T) {}
+  protected onNodeOpenChanged(_node: T, _open: boolean) {}
   protected onGetNodeTextColor(_node: T): Nullable<ImGui.ImVec4> {
     return null;
   }

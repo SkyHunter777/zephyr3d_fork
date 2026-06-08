@@ -32,6 +32,7 @@ export class ABufferOIT extends Disposable implements OIT {
   private static _compositeProgram: Nullable<GPUProgram> = null;
   private static _compositeBindGroup: Nullable<BindGroup> = null;
   private static _compositeRenderStates: Nullable<RenderStateSet> = null;
+  private static _compositeAdditiveRenderStates: Nullable<RenderStateSet> = null;
   private static _ubAlignment = 0;
   private _nodeBuffer: Nullable<GPUDataBuffer>;
   private _headStagingBuffer: Nullable<GPUDataBuffer>;
@@ -180,7 +181,7 @@ export class ABufferOIT extends Disposable implements OIT {
       readBuffer.getBufferSubData(data).then(() => {
         const uint = new Uint32Array(data.buffer);
         for (let i = 0; i < uint.length; i++) {
-          if (uint[i] !== 0) {
+          if (uint[i] !== 0xffffffff) {
             console.error('Clear head buffer failed');
             break;
           }
@@ -209,8 +210,11 @@ export class ABufferOIT extends Disposable implements OIT {
     bindGroup.setBuffer('headBuffer', this._headBuffer!);
     bindGroup.setBuffer('nodeBuffer', this._nodeBuffer!);
     bindGroup.setValue('screenWidth', this._screenSize[0]);
+    bindGroup.setValue('additiveOnly', ctx.lightBlending ? 1 : 0);
     device.setBindGroup(0, bindGroup);
-    drawFullscreenQuad(ABufferOIT._compositeRenderStates!);
+    drawFullscreenQuad(
+      ctx.lightBlending ? ABufferOIT._compositeAdditiveRenderStates! : ABufferOIT._compositeRenderStates!
+    );
     device.setBindGroup(0, lastBindGroup[0], lastBindGroup[1]);
   }
   /**
@@ -308,6 +312,7 @@ export class ABufferOIT extends Disposable implements OIT {
           this.headBuffer = pb.uint[0]().storageBuffer(0);
           this.nodeBuffer = pb.uvec4[0]().storageBuffer(0);
           this.screenWidth = pb.uint().uniform(0);
+          this.additiveOnly = pb.int().uniform(0);
           pb.func('unpackColor', [pb.uvec4('x')], function () {
             this.$l.colorNorm = pb.unpack4x8unorm(this.x.x);
             this.$l.colorScale = pb.uintBitsToFloat(this.x.y);
@@ -360,7 +365,10 @@ export class ABufferOIT extends Disposable implements OIT {
                 }
                 this.a_dst = pb.mul(this.a_dst, pb.sub(1, this.c.a));
               });
-              this.$outputs.outColor = pb.vec4(this.c_dst, this.a_dst);
+              this.$outputs.outColor = pb.vec4(
+                this.c_dst,
+                pb.equal(this.additiveOnly, 0) ? this.a_dst : pb.float(0)
+              );
             });
           });
         }
@@ -374,6 +382,13 @@ export class ABufferOIT extends Disposable implements OIT {
         .setBlendFuncRGB('one', 'src-alpha')
         .setBlendFuncAlpha('zero', 'one');
       this._compositeRenderStates.useDepthState().enableTest(false).enableWrite(false);
+      this._compositeAdditiveRenderStates = device.createRenderStateSet();
+      this._compositeAdditiveRenderStates
+        .useBlendingState()
+        .enable(true)
+        .setBlendFuncRGB('one', 'one')
+        .setBlendFuncAlpha('zero', 'one');
+      this._compositeAdditiveRenderStates.useDepthState().enableTest(false).enableWrite(false);
       const stencilStates = this._compositeRenderStates.useStencilState();
       stencilStates.enable(false);
       stencilStates.setFrontCompareFunc('always');
@@ -382,6 +397,14 @@ export class ABufferOIT extends Disposable implements OIT {
       stencilStates.setBackOp('keep', 'keep', 'replace');
       stencilStates.setReference(0);
       stencilStates.setReadMask(0xff);
+      const additiveStencilStates = this._compositeAdditiveRenderStates.useStencilState();
+      additiveStencilStates.enable(false);
+      additiveStencilStates.setFrontCompareFunc('always');
+      additiveStencilStates.setBackCompareFunc('always');
+      additiveStencilStates.setFrontOp('keep', 'keep', 'replace');
+      additiveStencilStates.setBackOp('keep', 'keep', 'replace');
+      additiveStencilStates.setReference(0);
+      additiveStencilStates.setReadMask(0xff);
     }
     return this._compositeProgram;
   }

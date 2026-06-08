@@ -810,13 +810,45 @@ export class SkyRenderer extends Disposable {
     }
   }
   /** @internal */
+  private _beginSingleColorPass(withDepth: boolean) {
+    const device = getDevice();
+    const currentFramebuffer = device.getFramebuffer();
+    const colorBuffer = currentFramebuffer?.getColorAttachments()[0] ?? null;
+    const depthBuffer = withDepth ? (currentFramebuffer?.getDepthAttachment() ?? null) : null;
+    if (!currentFramebuffer || currentFramebuffer.getColorAttachments().length <= 1 || !colorBuffer) {
+      return null;
+    }
+    const framebuffer = device.pool.fetchTemporalFramebuffer(false, 0, 0, colorBuffer, depthBuffer, false);
+    const vp = device.getViewport();
+    const scissor = device.getScissor();
+    device.pushDeviceStates();
+    device.setFramebuffer(framebuffer);
+    device.setViewport(vp);
+    device.setScissor(scissor);
+    return framebuffer;
+  }
+  /** @internal */
+  private _endSingleColorPass(framebuffer: Nullable<FrameBuffer>) {
+    if (!framebuffer) {
+      return;
+    }
+    const device = getDevice();
+    device.popDeviceStates();
+    device.pool.releaseFrameBuffer(framebuffer);
+  }
+  /** @internal */
   renderSky(ctx: DrawContext) {
     let skyCamera = ctx.camera;
     if (!skyCamera.isPerspective()) {
       skyCamera = SkyRenderer._skyCamera;
       ctx.camera.worldMatrix.decompose(null, skyCamera.rotation, null);
     }
-    this._renderSky(skyCamera, true);
+    const framebuffer = this._beginSingleColorPass(true);
+    try {
+      this._renderSky(skyCamera, true);
+    } finally {
+      this._endSingleColorPass(framebuffer);
+    }
   }
   /** Disposes resources of this SkyRenderer */
   protected onDispose() {

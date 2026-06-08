@@ -8,6 +8,14 @@ export type SaveOptions = {
   importSkeletons: boolean;
   importAnimations: boolean;
   importJointDynamics: boolean;
+  rebuildPrefab?: boolean;
+  rebuildMaterial?: boolean;
+};
+
+type SharedModelWithPreprocessOptions = SharedModel & {
+  _preprocessOptions?: {
+    rebuildMaterial?: boolean;
+  };
 };
 
 export class ResourceService {
@@ -64,7 +72,23 @@ export class ResourceService {
     srcVFS: VFS,
     saveOptions?: SaveOptions
   ) {
-    await model.preprocess(manager, name, path, srcVFS, getEngine().resourceManager.VFS);
+    const modelWithOptions = model as SharedModelWithPreprocessOptions;
+    modelWithOptions._preprocessOptions = {
+      rebuildMaterial: saveOptions?.rebuildMaterial ?? true
+    };
+    try {
+      await model.preprocess(manager, name, path, srcVFS, getEngine().resourceManager.VFS);
+    } finally {
+      delete modelWithOptions._preprocessOptions;
+    }
+    const prefabName = name.endsWith('.zprefab') ? name : `${name}.zprefab`;
+    const prefabPath = manager.VFS.join(path, prefabName);
+    if (!saveOptions?.rebuildPrefab && (await manager.VFS.exists(prefabPath))) {
+      console.info(
+        `Prefab already exists, keep existing prefab and refresh referenced assets only: ${prefabPath}`
+      );
+      return;
+    }
     const saveMeshes = saveOptions?.importMeshes ?? true;
     const saveSkeletons = saveOptions?.importSkeletons ?? true;
     const saveAnimations = saveOptions?.importAnimations ?? true;

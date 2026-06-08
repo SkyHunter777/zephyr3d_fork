@@ -3,6 +3,7 @@ import {
   LIGHT_TYPE_DIRECTIONAL,
   LIGHT_TYPE_POINT,
   LIGHT_TYPE_RECT,
+  // LIGHT_TYPE_SPOT,
   RENDER_PASS_TYPE_LIGHT
 } from '../../values';
 import type { DrawContext } from '../../render';
@@ -452,7 +453,8 @@ export function mixinLight<T extends typeof MeshMaterial>(BaseCls: T) {
       return this.drawContext.env!.light.envLight.hasRadiance()
         ? (scope.$builder.mul(
             this.drawContext.env!.light.envLight.getRadiance(scope, reflectVec, roughness)!.rgb,
-            ShaderHelper.getEnvLightStrength(scope)
+            ShaderHelper.getEnvLightStrength(scope),
+            ShaderHelper.getEnvLightSpecularStrength(scope)
           ) as PBShaderExp)
         : scope.$builder.vec3(0);
     }

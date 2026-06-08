@@ -2,6 +2,7 @@ import type { CubeFace, Immutable, Nullable, Plane } from '@zephyr3d/base';
 import { DRef, Vector2, Matrix4x4, Frustum, Vector4, Vector3, Ray, halton23 } from '@zephyr3d/base';
 import { SceneNode } from '../scene/scene_node';
 import type { Drawable, PickTarget } from '../render/drawable';
+import type { BaseTexture } from '@zephyr3d/device';
 import { Compositor } from '../posteffect/compositor';
 import type { Scene } from '../scene/scene';
 import type {
@@ -17,6 +18,7 @@ import type {
 import type { OIT } from '../render/oit';
 import { TAA } from '../posteffect/taa';
 import { SSR } from '../posteffect/ssr';
+import { SSS } from '../posteffect/sss';
 import { Tonemap } from '../posteffect/tonemap';
 import { FXAA } from '../posteffect/fxaa';
 import { Bloom } from '../posteffect/bloom';
@@ -49,11 +51,86 @@ export type PickResult = {
 };
 
 /**
- * Camera OIT mode
+ * Temporal history resources used by reprojection (TAA, motion blur).
  *
  * @public
  */
+export type CameraHistoryData = {
+  prevColorTex: Nullable<BaseTexture>;
+  prevMotionVectorTex: Nullable<BaseTexture>;
+  prevSSRReflectTex: Nullable<BaseTexture>;
+  prevSSRMotionVectorTex: Nullable<BaseTexture>;
+};
+
+/**
+ * Camera render path mode.
+ * @public
+ */
+export type RenderPath = 'forward';
 export type CameraOITMode = 'none' | 'weighted' | 'abuffer';
+export type SSSDebugView =
+  | 'none'
+  | 'scatter_mask'
+  | 'scatter_softness'
+  | 'scatter_radius'
+  | 'scatter_falloff'
+  | 'profile_energy'
+  | 'profile_transmission'
+  | 'profile_boundary'
+  | 'diffuse'
+  | 'blur'
+  | 'screen_thinness'
+  | 'thin_transmission_mask'
+  | 'thin_lighting'
+  | 'transmission_shadow';
+export type SSSQualityPreset = 'quality' | 'balanced' | 'performance';
+export type SSSResolvedSettings = {
+  halfRes: boolean;
+  blurKernelSize: number;
+  blurStdDev: number;
+  blurDepthCutoff: number;
+  normalCutoff: number;
+};
+
+type SSSDefaultSettings = {
+  blurScale: number;
+  strength: number;
+  transmissionStrength: number;
+  transmissionPower: number;
+  multiScatter: number;
+};
+
+const SSS_DEFAULT_SETTINGS: SSSDefaultSettings = {
+  blurScale: 11,
+  strength: 0.65,
+  transmissionStrength: 0.18,
+  transmissionPower: 2.1,
+  multiScatter: 0.08
+};
+
+const SSS_QUALITY_PRESET_SETTINGS: Record<SSSQualityPreset, SSSResolvedSettings> = {
+  quality: {
+    halfRes: false,
+    blurKernelSize: 11,
+    blurStdDev: 3.5,
+    blurDepthCutoff: 0.24,
+    normalCutoff: 0.82
+  },
+  balanced: {
+    halfRes: false,
+    blurKernelSize: 9,
+    blurStdDev: 3,
+    blurDepthCutoff: 0.26,
+    normalCutoff: 0.78
+  },
+  performance: {
+    halfRes: true,
+    blurKernelSize: 7,
+    blurStdDev: 2.4,
+    blurDepthCutoff: 0.32,
+    normalCutoff: 0.72
+  }
+};
 
 /**
  * A renderable camera node that manages view/projection math, frusta,
@@ -63,7 +140,7 @@ export type CameraOITMode = 'none' | 'weighted' | 'abuffer';
  * - Maintains projection, view, VP, and inverse VP matrices and lazily recomputes them when invalidated.
  * - Provides world- and view-space frusta for culling and clipping.
  * - Supports perspective and orthographic projections.
- * - Integrates with post effects (Tonemap, FXAA, TAA, Bloom, SSR, SSAO, Motion Blur) through an internal `Compositor`.
+ * - Integrates with post effects (Tonemap, FXAA, TAA, Bloom, SSR, SSS, SSAO, Motion Blur) through an internal `Compositor`.
  * - Handles temporal jitter and history state when TAA or motion blur are enabled.
  * - Emits picking rays from screen coordinates and supports async GPU picking.
  * - Optional controller integration for user input handling.
@@ -77,6 +154,8 @@ export type CameraOITMode = 'none' | 'weighted' | 'abuffer';
 export class Camera extends SceneNode {
   /** @internal Halton 2-3 sequence used for TAA jittering. */
   private static readonly _halton23 = halton23(16);
+  /** @internal Per-camera history resources. */
+  private static readonly _historyData: WeakMap<Camera, CameraHistoryData> = new WeakMap();
   /** @internal Per-camera history resource manager. */
   private static readonly _historyResourceManager: WeakMap<Camera, HistoryResourceManager> = new WeakMap();
   /** @internal Screen adapter for this camera */
@@ -129,6 +208,8 @@ export class Camera extends SceneNode {
   protected _oitABufferLayers: number;
   /** @internal Whether to perform a depth pre-pass. */
   protected _depthPrePass: boolean;
+  /** @internal Render path selection for scene renderer. */
+  protected _renderPath: RenderPath;
   /** @internal Whether command buffers may be reused for optimization. */
   protected _commandBufferReuse: boolean;
   /** @internal Hi-Z acceleration enable (primarily for SSR). */
@@ -161,7 +242,6 @@ export class Camera extends SceneNode {
   protected _bloomThresholdKnee: number;
   /** @internal Bloom intensity. */
   protected _bloomIntensity: number;
-
   /** @internal Color adjustment enable flag (via post effect). */
   protected _colorAdjustEnabled: boolean;
   /** @internal Color adjustment post effect reference. */
@@ -186,6 +266,8 @@ export class Camera extends SceneNode {
   protected _postEffectTAA: DRef<TAA>;
   /** @internal TAA debug mode (implementation-defined). */
   protected _TAADebug: number;
+  /** @internal Cascaded shadow debug visualization flag. */
+  protected _shadowDebugCascades: boolean;
 
   /** @internal SSR enable flag (via post effect). */
   protected _SSR: boolean;
@@ -209,7 +291,36 @@ export class Camera extends SceneNode {
   protected _ssrBlurKernelSize: number;
   /** @internal SSR Gaussian blur standard deviation. */
   protected _ssrBlurStdDev: number;
-
+  /** @internal Whether HiZ miss falls back to linear SSR tracing. */
+  protected _ssrHiZFallback: boolean;
+  /** @internal Max iterations for HiZ miss linear SSR fallback. */
+  protected _ssrHiZFallbackSteps: number;
+  /** @internal Stride for HiZ miss linear SSR fallback. */
+  protected _ssrHiZFallbackStride: number;
+  /** @internal Whether SSR temporal accumulation is enabled. */
+  protected _ssrTemporal: boolean;
+  /** @internal SSR temporal blending weight in [0, 1]. */
+  protected _ssrTemporalWeight: number;
+  /** @internal SSS enable flag (via post effect). */
+  protected _SSS: boolean;
+  /** @internal SSS post effect reference. */
+  protected _postEffectSSS: DRef<SSS>;
+  /** @internal SSS blur scale in pixels per authored width unit. */
+  protected _sssBlurScale: number;
+  /** @internal High-level preset that resolves SSS blur quality controls. */
+  protected _sssQualityPreset: SSSQualityPreset;
+  /** @internal SSS composite strength. */
+  protected _sssStrength: number;
+  /** @internal SSS thin-shell transmission strength. */
+  protected _sssTransmissionStrength: number;
+  /** @internal SSS thin-shell transmission exponent. */
+  protected _sssTransmissionPower: number;
+  /** @internal SSS multi-scatter energy compensation. */
+  protected _sssMultiScatter: number;
+  /** @internal Cached runtime SSS settings after applying the quality preset. */
+  protected _sssResolvedSettings: SSSResolvedSettings;
+  /** @internal SSS debug visualization mode. */
+  protected _sssDebugView: SSSDebugView;
   /** @internal SSAO enable flag (via post effect). */
   protected _SSAO: boolean;
   /** @internal SSAO post effect reference. */
@@ -290,6 +401,7 @@ export class Camera extends SceneNode {
     this._oitMode = 'none';
     this._oitABufferLayers = 20;
     this._depthPrePass = false;
+    this._renderPath = 'forward';
     this._screenAdapter = new ScreenAdapter();
     this._adapted = false;
     this._HiZ = false;
@@ -318,17 +430,41 @@ export class Camera extends SceneNode {
     this._TAA = false;
     this._postEffectTAA = new DRef();
     this._TAADebug = 0;
+    this._shadowDebugCascades = false;
     this._SSR = false;
     this._postEffectSSR = new DRef();
-    this._ssrParams = new Vector4(100, 120, 0.5, 0);
-    this._ssrMaxRoughness = 0.8;
+    this._ssrParams = new Vector4(64, 96, 0.9, 0);
+    this._ssrMaxRoughness = 0.55;
     this._ssrRoughnessFactor = 1;
-    this._ssrStride = 2;
+    this._ssrStride = 1;
     this._ssrCalcThickness = false;
-    this._ssrBlurriness = 0.01;
+    this._ssrBlurriness = 0.008;
     this._ssrBlurDepthCutoff = 2;
-    this._ssrBlurKernelSize = 10;
-    this._ssrBlurStdDev = 10;
+    this._ssrBlurKernelSize = 5;
+    this._ssrBlurStdDev = 4;
+    this._ssrHiZFallback = true;
+    this._ssrHiZFallbackSteps = 24;
+    this._ssrHiZFallbackStride = 1;
+    this._ssrTemporal = true;
+    this._ssrTemporalWeight = 0.85;
+    this._SSS = false;
+    this._postEffectSSS = new DRef();
+    this._sssBlurScale = SSS_DEFAULT_SETTINGS.blurScale;
+    this._sssQualityPreset = 'balanced';
+    this._sssStrength = SSS_DEFAULT_SETTINGS.strength;
+    this._sssTransmissionStrength = SSS_DEFAULT_SETTINGS.transmissionStrength;
+    this._sssTransmissionPower = SSS_DEFAULT_SETTINGS.transmissionPower;
+    this._sssMultiScatter = SSS_DEFAULT_SETTINGS.multiScatter;
+    const defaultSSSQualityPreset = SSS_QUALITY_PRESET_SETTINGS.balanced;
+    this._sssResolvedSettings = {
+      halfRes: defaultSSSQualityPreset.halfRes,
+      blurKernelSize: defaultSSSQualityPreset.blurKernelSize,
+      blurStdDev: defaultSSSQualityPreset.blurStdDev,
+      blurDepthCutoff: defaultSSSQualityPreset.blurDepthCutoff,
+      normalCutoff: defaultSSSQualityPreset.normalCutoff
+    };
+    this.updateSSSResolvedSettings();
+    this._sssDebugView = 'none';
     this._SSAO = false;
     this._postEffectSSAO = new DRef();
     this._SSAOScale = 10;
@@ -409,6 +545,15 @@ export class Camera extends SceneNode {
   }
   set HiZ(val) {
     this._HiZ = !!val;
+  }
+  /**
+   * Render path used by the scene renderer.
+   */
+  get renderPath() {
+    return this._renderPath;
+  }
+  set renderPath(_val: RenderPath) {
+    this._renderPath = 'forward';
   }
   /**
    * Whether HDR backbuffer is enabled.
@@ -605,6 +750,15 @@ export class Camera extends SceneNode {
     this._TAADebug = val;
   }
   /**
+   * Enables cascade debug visualization for directional shadows.
+   */
+  get shadowDebugCascades() {
+    return this._shadowDebugCascades;
+  }
+  set shadowDebugCascades(val) {
+    this._shadowDebugCascades = !!val;
+  }
+  /**
    * Gets whether Screen Space Reflections (SSR) is enabled.
    */
   get SSR() {
@@ -723,6 +877,123 @@ export class Camera extends SceneNode {
   set ssrBlurStdDev(val) {
     this._ssrBlurStdDev = val;
   }
+  /**
+   * Gets whether HiZ miss should fall back to linear SSR tracing.
+   */
+  get ssrHiZFallback() {
+    return this._ssrHiZFallback;
+  }
+  set ssrHiZFallback(val) {
+    this._ssrHiZFallback = !!val;
+  }
+  /**
+   * Gets maximum steps for HiZ miss linear SSR fallback.
+   */
+  get ssrHiZFallbackSteps() {
+    return this._ssrHiZFallbackSteps;
+  }
+  set ssrHiZFallbackSteps(val) {
+    this._ssrHiZFallbackSteps = Math.max(1, val ?? 1);
+  }
+  /**
+   * Gets stride for HiZ miss linear SSR fallback.
+   */
+  get ssrHiZFallbackStride() {
+    return this._ssrHiZFallbackStride;
+  }
+  set ssrHiZFallbackStride(val) {
+    this._ssrHiZFallbackStride = Math.max(1, val ?? 1);
+  }
+  /**
+   * Gets whether SSR temporal accumulation is enabled.
+   */
+  get ssrTemporal() {
+    return this._ssrTemporal;
+  }
+  set ssrTemporal(val) {
+    this._ssrTemporal = !!val;
+  }
+  /**
+   * Gets SSR temporal blending weight in [0, 1].
+   * Higher values rely more on reprojected history.
+   */
+  get ssrTemporalWeight() {
+    return this._ssrTemporalWeight;
+  }
+  set ssrTemporalWeight(val) {
+    this._ssrTemporalWeight = Math.max(0, Math.min(1, val ?? 0));
+  }
+  /**
+   * Gets whether Screen Space Subsurface Scattering (SSS) is enabled.
+   */
+  get SSS() {
+    return this._postEffectSSS.get()!.enabled;
+  }
+  set SSS(val) {
+    this._postEffectSSS.get()!.enabled = !!val;
+  }
+  /** Global blur scale for screen-space SSS. */
+  get sssBlurScale() {
+    return this._sssBlurScale;
+  }
+  set sssBlurScale(val) {
+    this._sssBlurScale = Math.max(0, val ?? 0);
+  }
+  /**
+   * High-level quality preset for SSS blur controls.
+   *
+   * This is the primary user-facing SSS quality control and only affects
+   * the blur sampling quality/performance tradeoff, not the authored look.
+   */
+  get sssQualityPreset() {
+    return this._sssQualityPreset;
+  }
+  set sssQualityPreset(val: SSSQualityPreset) {
+    const next = Camera.resolveSSSQualityPreset(val);
+    if (next !== this._sssQualityPreset) {
+      this._sssQualityPreset = next;
+      this.updateSSSResolvedSettings();
+    }
+  }
+  /** Final SSS composite strength. */
+  get sssStrength() {
+    return this._sssStrength;
+  }
+  set sssStrength(val) {
+    this._sssStrength = Math.max(0, val ?? 0);
+  }
+  /** Thin-shell transmission strength. */
+  get sssTransmissionStrength() {
+    return this._sssTransmissionStrength;
+  }
+  set sssTransmissionStrength(val) {
+    this._sssTransmissionStrength = Math.max(0, val ?? 0);
+  }
+  /** Thin-shell transmission exponent. */
+  get sssTransmissionPower() {
+    return this._sssTransmissionPower;
+  }
+  set sssTransmissionPower(val) {
+    this._sssTransmissionPower = Math.max(0.1, val ?? 0.1);
+  }
+  /** Multi-scatter energy compensation factor. */
+  get sssMultiScatter() {
+    return this._sssMultiScatter;
+  }
+  set sssMultiScatter(val) {
+    this._sssMultiScatter = Math.max(0, val ?? 0);
+  }
+  /** Resolved SSS blur settings after applying the quality preset. */
+  get sssResolvedSettings(): Readonly<SSSResolvedSettings> {
+    return this._sssResolvedSettings;
+  }
+  /** Debug visualization for screen-space SSS buffers. */
+  get sssDebugView() {
+    return this._sssDebugView;
+  }
+  set sssDebugView(val: SSSDebugView) {
+    this._sssDebugView = val ?? 'none';
+  }
   /** @internal */
   get ssrParams(): Immutable<Vector4> {
     return this._ssrParams;
@@ -800,7 +1071,7 @@ export class Camera extends SceneNode {
   set commandBufferReuse(val) {
     this._commandBufferReuse = !!val;
   }
-  /** Whether this camera is adapted to screen settings */
+  /** Whether this camera is adapted to screen settins */
   get adapted() {
     return this._adapted;
   }
@@ -948,13 +1219,11 @@ export class Camera extends SceneNode {
    *
    * @param x - The x-component of the screen coordinates, relative to the top-left corner of the viewport.
    * @param y - The y-component of the screen coordinates, relative to the top-left corner of the viewport.
-   * @param viewportWidth - Optional width of the viewport for normalizing screen coordinates. If not provided, it will be derived from the camera's viewport or the device's viewport.
-   * @param viewportHeight - Optional height of the viewport for normalizing screen coordinates. If not provided, it will be derived from the camera's viewport or the device's viewport.
    * @returns The ray originating from the camera position and passing through the given screen coordinates.
    */
-  constructRay(x: number, y: number, viewportWidth?: number, viewportHeight?: number): Ray {
-    const width = viewportWidth ?? (this.viewport ? this.viewport[2] : getDevice().getViewport().width);
-    const height = viewportHeight ?? (this.viewport ? this.viewport[3] : getDevice().getViewport().height);
+  constructRay(x: number, y: number) {
+    const width = this.viewport ? this.viewport[2] : getDevice().getViewport().width;
+    const height = this.viewport ? this.viewport[3] : getDevice().getViewport().height;
     const ndcX = (2 * x) / width - 1;
     const ndcY = 1 - (2 * y) / height;
     const nearClip = new Vector4(ndcX, ndcY, -1, 1);
@@ -1146,36 +1415,42 @@ export class Camera extends SceneNode {
     return this.getProjectionMatrix().isOrtho();
   }
   /**
-   * Gets the camera history resource manager for temporal effects
-   * @returns History resource manager
+   * Gets the camera history data which is used in temporal reprojection
+   * @returns Camera history data
    */
-  getHistoryResourceManager(): Nullable<HistoryResourceManager> {
-    let manager = Camera._historyResourceManager.get(this);
-    if (!manager) {
-      // Import dynamically to avoid circular dependency
-      // The actual import happens in forward_plus_builder.ts
-      return null;
+  getHistoryData() {
+    let data = Camera._historyData.get(this);
+    if (!data) {
+      data = {
+        prevColorTex: null,
+        prevMotionVectorTex: null,
+        prevSSRReflectTex: null,
+        prevSSRMotionVectorTex: null
+      };
+      Camera._historyData.set(this, data);
     }
-    return manager;
-  }
-  /**
-   * Sets the camera history resource manager for temporal effects
-   * @internal
-   */
-  setHistoryResourceManager(manager: HistoryResourceManager): void {
-    Camera._historyResourceManager.set(this, manager);
+    return data;
   }
   /**
    * Clears the camera history data which is used in temporal reprojection
    */
   clearHistoryData() {
-    // Clear history resource manager
-    const manager = Camera._historyResourceManager.get(this);
-    if (manager) {
-      manager.dispose();
-      Camera._historyResourceManager.delete(this);
+    const data = Camera._historyData.get(this);
+    if (data) {
+      if (data.prevColorTex) {
+        getDevice().pool.releaseTexture(data.prevColorTex);
+      }
+      if (data.prevMotionVectorTex) {
+        getDevice().pool.releaseTexture(data.prevMotionVectorTex);
+      }
+      if (data.prevSSRReflectTex) {
+        getDevice().pool.releaseTexture(data.prevSSRReflectTex);
+      }
+      if (data.prevSSRMotionVectorTex) {
+        getDevice().pool.releaseTexture(data.prevSSRMotionVectorTex);
+      }
+      Camera._historyData.delete(this);
     }
-
     this._prevVPMatrix = null;
     this._prevPosition = null;
     this._prevJitteredVPMatrix = null;
@@ -1189,6 +1464,12 @@ export class Camera extends SceneNode {
       ssr.enabled = false;
       this._postEffectSSR.set(ssr);
       this._compositor.appendPostEffect(ssr);
+    }
+    if (!this._postEffectSSS.get()) {
+      const sss = new SSS();
+      sss.enabled = false;
+      this._postEffectSSS.set(sss);
+      this._compositor.appendPostEffect(sss);
     }
     if (!this._postEffectSSAO.get()) {
       const ssao = new SAO();
@@ -1249,6 +1530,26 @@ export class Camera extends SceneNode {
       this._compositor.appendPostEffect(bloom);
     }
   }
+
+  private static resolveSSSQualityPreset(val: SSSQualityPreset) {
+    switch (val) {
+      case 'quality':
+      case 'balanced':
+      case 'performance':
+        return val;
+      default:
+        return 'balanced';
+    }
+  }
+
+  private updateSSSResolvedSettings() {
+    const source = SSS_QUALITY_PRESET_SETTINGS[this._sssQualityPreset];
+    this._sssResolvedSettings.halfRes = source.halfRes;
+    this._sssResolvedSettings.blurKernelSize = source.blurKernelSize;
+    this._sssResolvedSettings.blurStdDev = source.blurStdDev;
+    this._sssResolvedSettings.blurDepthCutoff = source.blurDepthCutoff;
+    this._sssResolvedSettings.normalCutoff = source.normalCutoff;
+  }
   /**
    * Renders a scene
    * @param scene - The scene to be rendered
@@ -1257,7 +1558,8 @@ export class Camera extends SceneNode {
   render(scene: Scene) {
     const device = getDevice();
     //this.updatePostProcessing(device);
-    const useMotionVector = (this.TAA || this.motionBlur) && device.type !== 'webgl';
+    const useMotionVector =
+      (this.TAA || this.motionBlur || (this.SSR && this.ssrTemporal)) && device.type !== 'webgl';
     const useTAA = useMotionVector && this.TAA;
     scene.dispatchEvent('startrender', scene, this, this._compositor);
     if (useMotionVector) {
@@ -1370,6 +1672,20 @@ export class Camera extends SceneNode {
   get prevPosition(): Nullable<Immutable<Vector3>> {
     return this._prevPosition;
   }
+  /**
+   * Gets the camera history resource manager for temporal effects.
+   */
+  getHistoryResourceManager(): Nullable<HistoryResourceManager> {
+    return Camera._historyResourceManager.get(this) ?? null;
+  }
+  /**
+   * Sets the camera history resource manager for temporal effects.
+   *
+   * @internal
+   */
+  setHistoryResourceManager(manager: HistoryResourceManager): void {
+    Camera._historyResourceManager.set(this, manager);
+  }
   /** @internal */
   private setController(controller: Nullable<BaseCameraController>) {
     if (this._controller !== controller) {
@@ -1419,6 +1735,7 @@ export class Camera extends SceneNode {
     this._postEffectFXAA.dispose();
     this._postEffectMotionBlur.dispose();
     this._postEffectSSAO.dispose();
+    this._postEffectSSS.dispose();
     this._postEffectSSR.dispose();
     this._postEffectTAA.dispose();
     this._postEffectTonemap.dispose();

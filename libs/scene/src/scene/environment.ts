@@ -23,6 +23,7 @@ export class EnvLightWrapper extends Disposable {
   private readonly _irradianceSHFB: DRef<FrameBuffer>;
   private readonly _irradianceWindow: Vector3;
   private _strength: number;
+  private _specularStrength: number;
   /** @internal */
   constructor() {
     super();
@@ -49,6 +50,7 @@ export class EnvLightWrapper extends Disposable {
     this._irradianceSHFB = new DRef();
     this._irradianceWindow = new Vector3();
     this._strength = 1;
+    this._specularStrength = 1;
   }
   /** @internal */
   getHash(ctx?: DrawContext) {
@@ -76,6 +78,13 @@ export class EnvLightWrapper extends Disposable {
   }
   set strength(val) {
     this._strength = val;
+  }
+  /** The strength of environment specular lighting */
+  get specularStrength() {
+    return this._specularStrength;
+  }
+  set specularStrength(val) {
+    this._specularStrength = val;
   }
   /** Ambient light color for environment light type constant */
   get ambientColor(): Vector4 {

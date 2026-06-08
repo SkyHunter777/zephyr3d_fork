@@ -5,9 +5,10 @@ import { mixinPBRMetallicRoughness } from './mixins/lightmodel/pbrmetallicroughn
 import { mixinTextureProps } from './mixins/texture';
 import { ShaderHelper } from './shader/helper';
 import { MaterialVaryingFlags, RENDER_PASS_TYPE_LIGHT } from '../values';
-import type { Clonable, Immutable } from '@zephyr3d/base';
+import type { Clonable } from '@zephyr3d/base';
 import { Vector3 } from '@zephyr3d/base';
 import type { DrawContext } from '../render';
+import type { SubsurfaceProfile } from './subsurfaceprofile';
 
 /**
  * PBRMetallicRoughnessMaterial class
@@ -26,23 +27,16 @@ export class PBRMetallicRoughnessMaterial
   private static readonly FEATURE_VERTEX_NORMAL = this.defineFeature();
   /** @internal */
   private static readonly FEATURE_VERTEX_TANGENT = this.defineFeature();
-  /** @internal */
-  private static readonly FEATURE_SUBSURFACE_SCATTERING = this.defineFeature();
-  private readonly _subsurfaceColor: Vector3;
-  private _subsurfaceScale: number;
-  private _subsurfacePower: number;
-  private _subsurfaceIntensity: number;
+  private readonly _subsurfaceProfileChanged: () => void;
+  private _subsurfaceProfile: SubsurfaceProfile | null;
   /**
    * Creates an instance of PBRMetallicRoughnessMaterial class
    */
   constructor() {
     super();
-    this._subsurfaceColor = new Vector3(1, 0.3, 0.2);
-    this._subsurfaceScale = 0.5;
-    this._subsurfacePower = 1.5;
-    this._subsurfaceIntensity = 0.5;
+    this._subsurfaceProfileChanged = () => this.uniformChanged();
+    this._subsurfaceProfile = null;
     this.useFeature(PBRMetallicRoughnessMaterial.FEATURE_VERTEX_NORMAL, true);
-    this.useFeature(PBRMetallicRoughnessMaterial.FEATURE_SUBSURFACE_SCATTERING, false);
     this.transmission = false;
     this.transmissionFactor = 0.2;
     this.thicknessFactor = 0.35;
@@ -58,11 +52,7 @@ export class PBRMetallicRoughnessMaterial
     super.copyFrom(other);
     this.vertexNormal = other.vertexNormal;
     this.vertexTangent = other.vertexTangent;
-    this.subsurfaceScattering = other.subsurfaceScattering;
-    this.subsurfaceColor = other.subsurfaceColor;
-    this.subsurfaceScale = other.subsurfaceScale;
-    this.subsurfacePower = other.subsurfacePower;
-    this.subsurfaceIntensity = other.subsurfaceIntensity;
+    this.subsurfaceProfile = other.subsurfaceProfile;
   }
   /** true if vertex normal attribute presents */
   get vertexNormal() {
@@ -78,68 +68,29 @@ export class PBRMetallicRoughnessMaterial
   set vertexTangent(val) {
     this.useFeature(PBRMetallicRoughnessMaterial.FEATURE_VERTEX_TANGENT, !!val);
   }
-  /** true if subsurface scattering is enabled */
-  get subsurfaceScattering() {
-    return this.featureUsed<boolean>(PBRMetallicRoughnessMaterial.FEATURE_SUBSURFACE_SCATTERING);
+  /** shared profile asset driving channel radius/falloff */
+  get subsurfaceProfile() {
+    return this._subsurfaceProfile;
   }
-  set subsurfaceScattering(val) {
-    this.useFeature(PBRMetallicRoughnessMaterial.FEATURE_SUBSURFACE_SCATTERING, !!val);
-  }
-  /** subsurface scattering color tint */
-  get subsurfaceColor(): Immutable<Vector3> {
-    return this._subsurfaceColor;
-  }
-  set subsurfaceColor(val: Immutable<Vector3>) {
-    if (!val.equalsTo(this._subsurfaceColor)) {
-      this._subsurfaceColor.set(val);
-      this.uniformChanged();
+  set subsurfaceProfile(val: SubsurfaceProfile | null) {
+    if (val !== this._subsurfaceProfile) {
+      this._subsurfaceProfile?.removeChangeListener(this._subsurfaceProfileChanged);
+      this._subsurfaceProfile = val ?? null;
+      this._subsurfaceProfile?.addChangeListener(this._subsurfaceProfileChanged);
+      this.optionChanged(true);
     }
   }
-  /** wrap factor for the scattering profile */
-  get subsurfaceScale() {
-    return this._subsurfaceScale;
+  private getSubsurfaceProfileId(scope: PBInsideFunctionScope): PBShaderExp {
+    return scope.zSubsurfaceProfileId as PBShaderExp;
   }
-  set subsurfaceScale(val: number) {
-    if (val !== this._subsurfaceScale) {
-      this._subsurfaceScale = val;
-      this.uniformChanged();
-    }
+  private getSubsurfaceProfileScale(scope: PBInsideFunctionScope): PBShaderExp {
+    return scope.zSubsurfaceProfileScale as PBShaderExp;
   }
-  /** profile exponent for the scattering profile */
-  get subsurfacePower() {
-    return this._subsurfacePower;
+  private getSubsurfaceProfileStrength(scope: PBInsideFunctionScope): PBShaderExp {
+    return scope.zSubsurfaceProfileStrength as PBShaderExp;
   }
-  set subsurfacePower(val: number) {
-    if (val !== this._subsurfacePower) {
-      this._subsurfacePower = val;
-      this.uniformChanged();
-    }
-  }
-  /** final intensity of scattering contribution */
-  get subsurfaceIntensity() {
-    return this._subsurfaceIntensity;
-  }
-  set subsurfaceIntensity(val: number) {
-    if (val !== this._subsurfaceIntensity) {
-      this._subsurfaceIntensity = val;
-      this.uniformChanged();
-    }
-  }
-  private getSubsurfaceColor(scope: PBInsideFunctionScope): PBShaderExp {
-    const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-    return (instancing ? scope.$inputs.zSubsurfaceColor : scope.zSubsurfaceColor) as PBShaderExp;
-  }
-  private getSubsurfaceScale(scope: PBInsideFunctionScope): PBShaderExp {
-    const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-    return (instancing ? scope.$inputs.zSubsurfaceScale : scope.zSubsurfaceScale) as PBShaderExp;
-  }
-  private getSubsurfacePower(scope: PBInsideFunctionScope): PBShaderExp {
-    const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-    return (instancing ? scope.$inputs.zSubsurfacePower : scope.zSubsurfacePower) as PBShaderExp;
-  }
-  private getSubsurfaceIntensity(scope: PBInsideFunctionScope): PBShaderExp {
-    const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-    return (instancing ? scope.$inputs.zSubsurfaceIntensity : scope.zSubsurfaceIntensity) as PBShaderExp;
+  private getSubsurfaceProfilePreset(scope: PBInsideFunctionScope): PBShaderExp {
+    return scope.zSubsurfaceProfilePreset as PBShaderExp;
   }
   vertexShader(scope: PBFunctionScope) {
     super.vertexShader(scope);
@@ -176,22 +127,19 @@ export class PBRMetallicRoughnessMaterial
   fragmentShader(scope: PBFunctionScope) {
     super.fragmentShader(scope);
     const pb = scope.$builder;
-    if (
-      this.subsurfaceScattering &&
-      this.needFragmentColor() &&
-      this.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT
-    ) {
-      scope.zSubsurfaceColor = pb.vec3().uniform(2);
-      scope.zSubsurfaceScale = pb.float().uniform(2);
-      scope.zSubsurfacePower = pb.float().uniform(2);
-      scope.zSubsurfaceIntensity = pb.float().uniform(2);
+    const renderPassType = this.drawContext.renderPass!.type;
+    if (!!this._subsurfaceProfile && this.needFragmentColor() && renderPassType === RENDER_PASS_TYPE_LIGHT) {
+      scope.zSubsurfaceProfileId = pb.float().uniform(2);
+      scope.zSubsurfaceProfileScale = pb.float().uniform(2);
+      scope.zSubsurfaceProfileStrength = pb.float().uniform(2);
+      scope.zSubsurfaceProfilePreset = pb.float().uniform(2);
     }
-    if (this.needFragmentColor()) {
+    if (this.needFragmentColorInput()) {
       scope.$l.albedo = this.calculateAlbedoColor(scope);
       if (this.vertexColor) {
         scope.albedo = pb.mul(scope.albedo, this.getVertexColor(scope));
       }
-      if (this.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
+      if (renderPassType === RENDER_PASS_TYPE_LIGHT) {
         scope.$l.normalInfo = this.calculateNormalAndTBN(
           scope,
           scope.$inputs.worldPos,
@@ -202,37 +150,69 @@ export class PBRMetallicRoughnessMaterial
         scope.$l.viewVec = this.calculateViewVector(scope, scope.$inputs.worldPos);
         if (this.drawContext.materialFlags & MaterialVaryingFlags.SSR_STORE_ROUGHNESS) {
           scope.$l.outRoughness = pb.vec4();
-          scope.$l.litColor = this.PBRLight(
-            scope,
-            scope.$inputs.worldPos,
-            scope.normalInfo.normal,
-            scope.viewVec,
-            scope.albedo,
-            scope.normalInfo.TBN,
-            scope.outRoughness
-          );
-          if (this.subsurfaceScattering) {
-            scope.$l.NoV = pb.clamp(pb.dot(scope.normalInfo.normal, scope.viewVec), 0, 1);
-            scope.$l.wrapNdotV = pb.clamp(
-              pb.div(
-                pb.add(pb.sub(1, scope.NoV), this.getSubsurfaceScale(scope)),
-                pb.add(1, this.getSubsurfaceScale(scope))
-              ),
-              0,
-              1
+          const writeSSSDiffuse =
+            !!this._subsurfaceProfile &&
+            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_DIFFUSE);
+          const writeSSSTransmission =
+            !!this._subsurfaceProfile &&
+            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_TRANSMISSION);
+          if (writeSSSDiffuse) {
+            scope.$l.sssDiffuse = pb.vec4();
+          }
+          if (writeSSSTransmission) {
+            scope.$l.sssTransmission = pb.vec4();
+          }
+          if (writeSSSDiffuse && writeSSSTransmission) {
+            scope.$l.litColor = this.PBRLight(
+              scope,
+              scope.$inputs.worldPos,
+              scope.normalInfo.normal,
+              scope.viewVec,
+              scope.albedo,
+              scope.normalInfo.TBN,
+              scope.outRoughness,
+              scope.sssDiffuse,
+              scope.sssTransmission
             );
-            scope.$l.sssFactor = pb.mul(
-              pb.pow(scope.wrapNdotV, this.getSubsurfacePower(scope)),
-              this.getSubsurfaceIntensity(scope)
+          } else if (writeSSSDiffuse) {
+            scope.$l.litColor = this.PBRLight(
+              scope,
+              scope.$inputs.worldPos,
+              scope.normalInfo.normal,
+              scope.viewVec,
+              scope.albedo,
+              scope.normalInfo.TBN,
+              scope.outRoughness,
+              scope.sssDiffuse
             );
-            if (this.subsurfaceTexture) {
-              scope.sssFactor = pb.mul(scope.sssFactor, this.sampleSubsurfaceTexture(scope).r);
-            }
-            scope.litColor = pb.add(
-              scope.litColor,
-              pb.mul(scope.albedo.rgb, this.getSubsurfaceColor(scope), scope.sssFactor)
+          } else if (writeSSSTransmission) {
+            scope.$l.litColor = this.PBRLight(
+              scope,
+              scope.$inputs.worldPos,
+              scope.normalInfo.normal,
+              scope.viewVec,
+              scope.albedo,
+              scope.normalInfo.TBN,
+              scope.outRoughness,
+              undefined,
+              scope.sssTransmission
+            );
+          } else {
+            scope.$l.litColor = this.PBRLight(
+              scope,
+              scope.$inputs.worldPos,
+              scope.normalInfo.normal,
+              scope.viewVec,
+              scope.albedo,
+              scope.normalInfo.TBN,
+              scope.outRoughness
             );
           }
+          const writeSSSProfile =
+            !!this._subsurfaceProfile &&
+            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE);
+          scope.$l.sssProfile = writeSSSProfile ? this.buildSubsurfaceProfile(scope) : pb.vec4(0);
+          scope.$l.sssParams = writeSSSProfile ? (scope.sssParams ?? pb.vec4(0)) : pb.vec4(0);
           /*
           scope.outRoughness = pb.vec4(
             pb.add(pb.mul(scope.normalInfo.normal, 0.5), pb.vec3(0.5)),
@@ -244,40 +224,88 @@ export class PBRMetallicRoughnessMaterial
             scope.$inputs.worldPos,
             pb.vec4(scope.litColor, scope.albedo.a),
             scope.outRoughness,
-            pb.vec4(pb.add(pb.mul(scope.normalInfo.normal, 0.5), pb.vec3(0.5)), 1)
+            pb.vec4(pb.add(pb.mul(scope.normalInfo.normal, 0.5), pb.vec3(0.5)), 1),
+            scope.sssProfile,
+            scope.sssParams,
+            writeSSSDiffuse ? scope.sssDiffuse : undefined,
+            writeSSSTransmission ? scope.sssTransmission : undefined,
+            writeSSSProfile
           );
         } else {
-          scope.$l.litColor = this.PBRLight(
-            scope,
-            scope.$inputs.worldPos,
-            scope.normalInfo.normal,
-            scope.viewVec,
-            scope.albedo,
-            scope.normalInfo.TBN
-          );
-          if (this.subsurfaceScattering) {
-            scope.$l.NoV = pb.clamp(pb.dot(scope.normalInfo.normal, scope.viewVec), 0, 1);
-            scope.$l.wrapNdotV = pb.clamp(
-              pb.div(
-                pb.add(pb.sub(1, scope.NoV), this.getSubsurfaceScale(scope)),
-                pb.add(1, this.getSubsurfaceScale(scope))
-              ),
-              0,
-              1
+          const writeSSSDiffuse =
+            !!this._subsurfaceProfile &&
+            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_DIFFUSE);
+          const writeSSSTransmission =
+            !!this._subsurfaceProfile &&
+            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_TRANSMISSION);
+          if (writeSSSDiffuse) {
+            scope.$l.sssDiffuse = pb.vec4();
+          }
+          if (writeSSSTransmission) {
+            scope.$l.sssTransmission = pb.vec4();
+          }
+          if (writeSSSDiffuse && writeSSSTransmission) {
+            scope.$l.litColor = this.PBRLight(
+              scope,
+              scope.$inputs.worldPos,
+              scope.normalInfo.normal,
+              scope.viewVec,
+              scope.albedo,
+              scope.normalInfo.TBN,
+              undefined,
+              scope.sssDiffuse,
+              scope.sssTransmission
             );
-            scope.$l.sssFactor = pb.mul(
-              pb.pow(scope.wrapNdotV, this.getSubsurfacePower(scope)),
-              this.getSubsurfaceIntensity(scope)
+          } else if (writeSSSDiffuse) {
+            scope.$l.litColor = this.PBRLight(
+              scope,
+              scope.$inputs.worldPos,
+              scope.normalInfo.normal,
+              scope.viewVec,
+              scope.albedo,
+              scope.normalInfo.TBN,
+              undefined,
+              scope.sssDiffuse
             );
-            if (this.subsurfaceTexture) {
-              scope.sssFactor = pb.mul(scope.sssFactor, this.sampleSubsurfaceTexture(scope).r);
-            }
-            scope.litColor = pb.add(
-              scope.litColor,
-              pb.mul(scope.albedo.rgb, this.getSubsurfaceColor(scope), scope.sssFactor)
+          } else if (writeSSSTransmission) {
+            scope.$l.litColor = this.PBRLight(
+              scope,
+              scope.$inputs.worldPos,
+              scope.normalInfo.normal,
+              scope.viewVec,
+              scope.albedo,
+              scope.normalInfo.TBN,
+              undefined,
+              undefined,
+              scope.sssTransmission
+            );
+          } else {
+            scope.$l.litColor = this.PBRLight(
+              scope,
+              scope.$inputs.worldPos,
+              scope.normalInfo.normal,
+              scope.viewVec,
+              scope.albedo,
+              scope.normalInfo.TBN
             );
           }
-          this.outputFragmentColor(scope, scope.$inputs.worldPos, pb.vec4(scope.litColor, scope.albedo.a));
+          const writeSSSProfile =
+            !!this._subsurfaceProfile &&
+            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE);
+          scope.$l.sssProfile = writeSSSProfile ? this.buildSubsurfaceProfile(scope) : pb.vec4(0);
+          scope.$l.sssParams = writeSSSProfile ? (scope.sssParams ?? pb.vec4(0)) : pb.vec4(0);
+          this.outputFragmentColor(
+            scope,
+            scope.$inputs.worldPos,
+            pb.vec4(scope.litColor, scope.albedo.a),
+            undefined,
+            undefined,
+            scope.sssProfile,
+            scope.sssParams,
+            writeSSSDiffuse ? scope.sssDiffuse : undefined,
+            writeSSSTransmission ? scope.sssTransmission : undefined,
+            writeSSSProfile
+          );
         }
       } else {
         this.outputFragmentColor(scope, scope.$inputs.worldPos, scope.albedo);
@@ -289,15 +317,98 @@ export class PBRMetallicRoughnessMaterial
   applyUniformValues(bindGroup: BindGroup, ctx: DrawContext, pass: number) {
     super.applyUniformValues(bindGroup, ctx, pass);
     if (
-      this.subsurfaceScattering &&
+      !!this._subsurfaceProfile &&
       this.needFragmentColor(ctx) &&
-      ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT &&
-      !(ctx.materialFlags & MaterialVaryingFlags.INSTANCING)
+      ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT
     ) {
-      bindGroup.setValue('zSubsurfaceColor', this._subsurfaceColor);
-      bindGroup.setValue('zSubsurfaceScale', this._subsurfaceScale);
-      bindGroup.setValue('zSubsurfacePower', this._subsurfacePower);
-      bindGroup.setValue('zSubsurfaceIntensity', this._subsurfaceIntensity);
+      const profile = this._subsurfaceProfile;
+      bindGroup.setValue('zSubsurfaceProfileId', profile?.slot ?? 0);
+      bindGroup.setValue('zSubsurfaceProfileScale', profile?.scale ?? 0);
+      bindGroup.setValue('zSubsurfaceProfileStrength', profile?.strength ?? 0);
+      bindGroup.setValue('zSubsurfaceProfilePreset', profile?.presetIndex ?? 0);
     }
+  }
+  protected _createHash() {
+    return `${super._createHash()}:${this._subsurfaceProfile ? 1 : 0}`;
+  }
+  private buildSubsurfaceProfile(scope: PBInsideFunctionScope) {
+    const pb = scope.$builder;
+    const hasExplicitTransmissionAuthoring = !!(this.transmissionTexture || this.thicknessTexture);
+    scope.$l.sssMask = pb.float(1);
+    scope.$l.sssScatterSoftness = pb.float(0);
+    scope.$l.sssTransmissionMask = pb.float(0);
+    scope.$l.sssTransmissionAuthor = pb.float(1);
+    scope.$l.sssThicknessScale = pb.clamp(
+      pb.div(scope.zThicknessFactor ?? 0, pb.add(scope.zThicknessFactor ?? 0, 1)),
+      0,
+      1
+    );
+    scope.$l.sssThinAuthorMask = pb.sub(1, scope.sssThicknessScale);
+    if (this.subsurfaceTexture) {
+      scope.$l.sssTexel = this.sampleSubsurfaceTexture(scope);
+      scope.sssMask = pb.clamp(scope.sssTexel.r, 0, 1);
+      scope.sssScatterSoftness = pb.clamp(scope.sssTexel.g, 0, 1);
+    }
+    if (this.transmissionTexture) {
+      scope.sssTransmissionAuthor = pb.mul(
+        scope.sssTransmissionAuthor,
+        pb.clamp(this.sampleTransmissionTexture(scope).r, 0, 1)
+      );
+    }
+    if (this.thicknessTexture) {
+      scope.$l.sssThicknessSample = pb.clamp(this.sampleThicknessTexture(scope).g, 0, 1);
+      scope.sssThinAuthorMask = pb.clamp(
+        pb.mix(
+          pb.sub(1, scope.sssThicknessSample),
+          pb.sub(1, pb.mul(scope.sssThicknessSample, scope.sssThicknessScale)),
+          pb.add(0.35, pb.mul(scope.sssThicknessScale, 0.65))
+        ),
+        0,
+        1
+      );
+    }
+    scope.$l.sssAuthoredTransmissionMask = pb.clamp(
+      pb.mul(scope.sssTransmissionAuthor, scope.sssThinAuthorMask),
+      0,
+      1
+    );
+    scope.sssTransmissionMask = pb.clamp(
+      pb.max(scope.sssTransmissionMask, scope.sssAuthoredTransmissionMask),
+      0,
+      1
+    );
+    scope.$l.sssScatterStrengthMask = pb.clamp(
+      pb.add(pb.mul(scope.sssMask, 0.82), pb.mul(scope.sssScatterSoftness, 0.38)),
+      0,
+      1
+    );
+    scope.$l.sssScatterWidthMask = pb.clamp(
+      pb.max(scope.sssMask, pb.mul(scope.sssScatterSoftness, 0.9)),
+      0,
+      1
+    );
+    scope.$l.sssStrength = pb.mul(this.getSubsurfaceProfileStrength(scope), scope.sssScatterStrengthMask);
+    scope.$l.sssWidthBase = pb.mul(this.getSubsurfaceProfileScale(scope), scope.sssScatterWidthMask);
+    scope.$l.sssWidth = pb.clamp(pb.div(scope.sssWidthBase, pb.add(scope.sssWidthBase, 1)), 0, 0.999);
+    if (!hasExplicitTransmissionAuthoring) {
+      scope.$l.sssProfileFallbackMask = pb.clamp(
+        pb.add(
+          pb.mul(scope.sssMask, 0.12),
+          pb.add(pb.mul(scope.sssStrength, 0.18), pb.mul(scope.sssWidth, 0.24))
+        ),
+        0,
+        0.42
+      );
+      scope.sssTransmissionMask = pb.max(scope.sssTransmissionMask, scope.sssProfileFallbackMask);
+    }
+    scope.$l.sssSlotEncoded = pb.div(this.getSubsurfaceProfileId(scope), 255);
+    scope.$l.sssPresetEncoded = pb.div(this.getSubsurfaceProfilePreset(scope), 255);
+    scope.$l.sssParams = pb.vec4(
+      scope.sssSlotEncoded,
+      scope.sssWidth,
+      scope.sssPresetEncoded,
+      pb.add(0.75, pb.mul(scope.sssScatterSoftness, 0.25))
+    );
+    return pb.vec4(scope.sssStrength, scope.sssStrength, scope.sssStrength, scope.sssTransmissionMask);
   }
 }

@@ -194,7 +194,7 @@ export function mixinTextureProps<U extends string>(name: U) {
       }
       vertexShader(scope: PBFunctionScope) {
         super.vertexShader(scope);
-        if (vertex || this.needFragmentColor()) {
+        if (vertex || this.needFragmentColorInput()) {
           const pb = scope.$builder;
           const that = this as any;
           if (this.featureUsed(feature)) {
@@ -221,7 +221,7 @@ export function mixinTextureProps<U extends string>(name: U) {
       }
       fragmentShader(scope: PBFunctionScope) {
         super.fragmentShader(scope);
-        if (this.needFragmentColor()) {
+        if (this.needFragmentColorInput()) {
           const pb = scope.$builder;
           if (this.featureUsed(feature)) {
             scope[`z${capName}Tex`] = pb.tex2D().uniform(2);
@@ -230,7 +230,7 @@ export function mixinTextureProps<U extends string>(name: U) {
       }
       applyUniformValues(bindGroup: BindGroup, ctx: DrawContext, pass: number) {
         super.applyUniformValues(bindGroup, ctx, pass);
-        if (this.needFragmentColor(ctx)) {
+        if (this.needFragmentColorInput(ctx)) {
           if (this.featureUsed(feature)) {
             const that = this as any;
             bindGroup.setTexture(`z${capName}Tex`, that[`${name}Texture`], that[`${name}TextureSampler`]);

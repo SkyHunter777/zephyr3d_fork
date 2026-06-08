@@ -1,5 +1,5 @@
-import type { FaceMode, Texture2D } from '@zephyr3d/device';
-import type { BlendMode, PBRReflectionMode } from '../../../material';
+﻿import type { FaceMode, Texture2D } from '@zephyr3d/device';
+import type { BlendMode } from '../../../material';
 import {
   BlinnMaterial,
   LambertMaterial,
@@ -8,6 +8,8 @@ import {
   PBRBluePrintMaterial,
   PBRMetallicRoughnessMaterial,
   PBRSpecularGlossinessMaterial,
+  SubsurfaceProfile,
+  type SubsurfaceProfilePreset,
   SpriteBlueprintMaterial,
   UnlitMaterial
 } from '../../../material';
@@ -19,12 +21,238 @@ import type { ResourceManager } from '../manager';
 import { getMeshMaterialInstanceUniformsClass } from './common';
 import { SpriteMaterial } from '../../../material/sprite';
 import { StandardSpriteMaterial } from '../../../material/sprite_std';
+import type { PBRReflectionMode } from '../../../material/mixins/lightmodel/pbrmetallicroughness';
 
 type PBRMaterial = PBRMetallicRoughnessMaterial | PBRSpecularGlossinessMaterial;
 type LitPropTypes = LambertMaterial | BlinnMaterial | PBRMaterial;
 type UnlitPropTypes = UnlitMaterial | LitPropTypes;
 
+export function getSubsurfaceProfileClass(): SerializableClass {
+  return {
+    ctor: SubsurfaceProfile,
+    name: 'SubsurfaceProfile',
+    getProps() {
+      return defineProps([
+        {
+          name: 'Preset',
+          type: 'string',
+          default: 'skin_default',
+          options: {
+            label: 'LookPreset',
+            enum: {
+              labels: [
+                'Skin Thin',
+                'Skin Default',
+                'Skin HeavyMakeup',
+                'Wax Backlit',
+                'Wax Soft',
+                'Jade Backlit',
+                'Jade Soft'
+              ],
+              values: [
+                'skin_thin',
+                'skin_default',
+                'skin_heavy_makeup',
+                'wax_backlit',
+                'wax_soft',
+                'jade_backlit',
+                'jade_soft'
+              ]
+            }
+          },
+          get(this: SubsurfaceProfile, value) {
+            value.str[0] = this.preset;
+          },
+          set(this: SubsurfaceProfile, value) {
+            this.preset = value.str[0] as SubsurfaceProfilePreset;
+          }
+        },
+        {
+          name: 'ScatterColor',
+          type: 'rgb',
+          default: [1, 0.45, 0.17],
+          options: {
+            label: 'MeanFreePathColor',
+            animatable: true,
+            minValue: 0,
+            maxValue: 1
+          },
+          get(this: SubsurfaceProfile, value) {
+            value.num[0] = this.meanFreePathColor.x;
+            value.num[1] = this.meanFreePathColor.y;
+            value.num[2] = this.meanFreePathColor.z;
+          },
+          set(this: SubsurfaceProfile, value) {
+            this.meanFreePathColor = new Vector3(value.num[0], value.num[1], value.num[2]);
+          }
+        },
+        {
+          name: 'ScatterDistance',
+          type: 'float',
+          default: 0.92,
+          options: {
+            label: 'MeanFreePathDistance',
+            animatable: true,
+            minValue: 0,
+            maxValue: 8
+          },
+          get(this: SubsurfaceProfile, value) {
+            value.num[0] = this.meanFreePathDistance;
+          },
+          set(this: SubsurfaceProfile, value) {
+            this.meanFreePathDistance = value.num[0];
+          }
+        },
+        {
+          name: 'ScatterWeight',
+          type: 'float',
+          default: 0.82,
+          options: {
+            label: 'ScatterWeight',
+            animatable: true,
+            minValue: 0,
+            maxValue: 8
+          },
+          get(this: SubsurfaceProfile, value) {
+            value.num[0] = this.strength;
+          },
+          set(this: SubsurfaceProfile, value) {
+            this.strength = value.num[0];
+          }
+        },
+        {
+          name: 'ScatterScale',
+          type: 'float',
+          default: 0.96,
+          options: {
+            label: 'ScatterScale',
+            animatable: true,
+            minValue: 0,
+            maxValue: 8
+          },
+          get(this: SubsurfaceProfile, value) {
+            value.num[0] = this.scale;
+          },
+          set(this: SubsurfaceProfile, value) {
+            this.scale = value.num[0];
+          }
+        },
+        {
+          name: 'WorldUnitScale',
+          type: 'float',
+          default: 1,
+          options: {
+            label: 'WorldUnitScale',
+            animatable: true,
+            minValue: 0.05,
+            maxValue: 4
+          },
+          get(this: SubsurfaceProfile, value) {
+            value.num[0] = this.worldUnitScale;
+          },
+          set(this: SubsurfaceProfile, value) {
+            this.worldUnitScale = value.num[0];
+          }
+        },
+        {
+          name: 'BoundaryColorBleed',
+          type: 'float',
+          default: 0.22,
+          options: {
+            label: 'BoundaryColorBleed',
+            animatable: true,
+            minValue: 0,
+            maxValue: 1
+          },
+          get(this: SubsurfaceProfile, value) {
+            value.num[0] = this.boundaryColorBleed;
+          },
+          set(this: SubsurfaceProfile, value) {
+            this.boundaryColorBleed = value.num[0];
+          }
+        },
+        {
+          name: 'TransmissionTintColor',
+          type: 'rgb',
+          default: [1, 0.46, 0.34],
+          options: {
+            label: 'TransmissionTintColor',
+            animatable: true,
+            minValue: 0,
+            maxValue: 1
+          },
+          get(this: SubsurfaceProfile, value) {
+            value.num[0] = this.transmissionTintColor.x;
+            value.num[1] = this.transmissionTintColor.y;
+            value.num[2] = this.transmissionTintColor.z;
+          },
+          set(this: SubsurfaceProfile, value) {
+            this.transmissionTintColor = new Vector3(value.num[0], value.num[1], value.num[2]);
+          }
+        },
+        {
+          name: 'ExtinctionScale',
+          type: 'float',
+          default: 1.06,
+          options: {
+            label: 'ExtinctionScale',
+            animatable: true,
+            minValue: 0,
+            maxValue: 4
+          },
+          get(this: SubsurfaceProfile, value) {
+            value.num[0] = this.extinctionScale;
+          },
+          set(this: SubsurfaceProfile, value) {
+            this.extinctionScale = value.num[0];
+          }
+        },
+        {
+          name: 'NormalScale',
+          type: 'float',
+          default: 1,
+          options: {
+            label: 'NormalScale',
+            animatable: true,
+            minValue: 0,
+            maxValue: 2
+          },
+          get(this: SubsurfaceProfile, value) {
+            value.num[0] = this.normalScale;
+          },
+          set(this: SubsurfaceProfile, value) {
+            this.normalScale = value.num[0];
+          }
+        },
+        {
+          name: 'ScatteringDistribution',
+          type: 'float',
+          default: 0.6,
+          options: {
+            label: 'ScatteringDistribution',
+            animatable: true,
+            minValue: 0,
+            maxValue: 1
+          },
+          get(this: SubsurfaceProfile, value) {
+            value.num[0] = this.scatteringDistribution;
+          },
+          set(this: SubsurfaceProfile, value) {
+            this.scatteringDistribution = value.num[0];
+          }
+        }
+      ]);
+    }
+  };
+}
+
 function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMaterial>[] {
+  const supportsSSSThicknessAuthoring = function (this: PBRMaterial) {
+    return (
+      !this.$isInstance &&
+      !!(this.transmission || (this as PBRMaterial & { subsurfaceProfile?: unknown }).subsurfaceProfile)
+    );
+  };
   return defineProps([
     {
       name: 'IOR',
@@ -104,6 +332,25 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
         return this.$isInstance ? this.coreMaterial.emissiveStrength : 1;
       }
     },
+    {
+      name: 'RectSpecularScale',
+      type: 'float',
+      options: {
+        label: 'RectSpecularScale',
+        animatable: true,
+        minValue: 0,
+        maxValue: 4
+      },
+      get(this: PBRMaterial, value) {
+        value.num[0] = this.rectSpecularScale;
+      },
+      set(this: PBRMaterial, value) {
+        this.rectSpecularScale = value.num[0];
+      },
+      getDefaultValue(this: PBRMaterial) {
+        return this.$isInstance ? this.coreMaterial.rectSpecularScale : 1;
+      }
+    },
     ...getTextureProps<PBRMaterial>(manager, 'emissiveTexture', '2D', true, 0),
     ...getTextureProps<PBRMaterial>(manager, 'specularTexture', '2D', false, 0),
     {
@@ -140,11 +387,11 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
         this.transmissionFactor = value.num[0];
       },
       isValid() {
-        return !this.$isInstance && !!this.transmission;
+        return supportsSSSThicknessAuthoring.call(this);
       }
     },
     ...getTextureProps<PBRMaterial>(manager, 'transmissionTexture', '2D', false, 1, function () {
-      return this.transmission;
+      return this.transmission || !!(this as PBRMaterial & { subsurfaceProfile?: unknown }).subsurfaceProfile;
     }),
     {
       name: 'ThicknessFactor',
@@ -164,11 +411,11 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
         this.thicknessFactor = value.num[0];
       },
       isValid() {
-        return !this.$isInstance && !!this.transmission;
+        return supportsSSSThicknessAuthoring.call(this);
       }
     },
     ...getTextureProps<PBRMaterial>(manager, 'thicknessTexture', '2D', false, 1, function () {
-      return this.transmission;
+      return this.transmission || !!(this as PBRMaterial & { subsurfaceProfile?: unknown }).subsurfaceProfile;
     }),
     {
       name: 'AttenuationColor',
@@ -188,7 +435,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
         this.attenuationColor = new Vector3(value.num[0], value.num[1], value.num[2]);
       },
       isValid() {
-        return !this.$isInstance && !!this.transmission;
+        return supportsSSSThicknessAuthoring.call(this);
       }
     },
     {
@@ -209,7 +456,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
         this.attenuationDistance = value.num[0];
       },
       isValid() {
-        return !this.$isInstance && !!this.transmission;
+        return supportsSSSThicknessAuthoring.call(this);
       }
     },
     {
@@ -623,6 +870,39 @@ export function getMeshMaterialClass(): SerializableClass[] {
             }
           },
           {
+            name: 'TransparentShadowCaster',
+            type: 'bool',
+            default: false,
+            get(this: MeshMaterial, value) {
+              value.bool[0] = this.transparentShadowCaster;
+            },
+            set(this: MeshMaterial, value) {
+              this.transparentShadowCaster = value.bool[0];
+            },
+            isValid(this: MeshMaterial) {
+              return !this.$isInstance && this.blendMode !== 'none';
+            }
+          },
+          {
+            name: 'ShadowAlphaCutoff',
+            type: 'float',
+            default: 0.5,
+            options: {
+              animatable: true,
+              minValue: 0,
+              maxValue: 1
+            },
+            get(this: MeshMaterial, value) {
+              value.num[0] = this.shadowAlphaCutoff;
+            },
+            set(this: MeshMaterial, value) {
+              this.shadowAlphaCutoff = value.num[0];
+            },
+            isValid(this: MeshMaterial) {
+              return !this.$isInstance && this.blendMode !== 'none' && this.transparentShadowCaster;
+            }
+          },
+          {
             name: 'CullMode',
             description: 'Cull mode for this material',
             type: 'string',
@@ -860,7 +1140,7 @@ export function getParticleMaterialClass(manager: ResourceManager): Serializable
 }
 
 /** @internal */
-export function getPBRBluePrintMaterialClass(): SerializableClass[] {
+export function getPBRBluePrintMaterialClass(manager: ResourceManager): SerializableClass[] {
   return [
     {
       ctor: PBRBluePrintMaterial,
@@ -905,117 +1185,30 @@ export function getPBRBluePrintMaterialClass(): SerializableClass[] {
             }
           },
           {
-            name: 'SubsurfaceScattering',
+            name: 'SubsurfaceProfile',
             description: 'If true, subsurface-scattering will be enabled',
-            type: 'bool',
-            phase: 0,
-            default: false,
+            type: 'object',
+            phase: 1,
+            default: null,
+            options: {
+              objectTypes: [SubsurfaceProfile]
+            },
+            isNullable() {
+              return true;
+            },
             get(this: PBRBluePrintMaterial, value) {
-              value.bool[0] = this.subsurfaceScattering;
+              value.object[0] = this.subsurfaceProfile;
             },
             set(this: PBRBluePrintMaterial, value) {
-              this.subsurfaceScattering = value.bool[0];
+              this.subsurfaceProfile = (value.object[0] as SubsurfaceProfile) ?? null;
             },
             isValid(this: PBRBluePrintMaterial) {
               return !this.$isInstance;
             }
           },
-          {
-            name: 'SubsurfaceColor',
-            description: 'Subsurface-scattering color',
-            type: 'rgb',
-            phase: 1,
-            default: [1, 0.3, 0.2],
-            options: {
-              animatable: true
-            },
-            get(this: PBRBluePrintMaterial, value) {
-              value.num[0] = this.subsurfaceColor.x;
-              value.num[1] = this.subsurfaceColor.y;
-              value.num[2] = this.subsurfaceColor.z;
-            },
-            set(this: PBRBluePrintMaterial, value) {
-              this.subsurfaceColor = new Vector3(value.num[0], value.num[1], value.num[2]);
-            },
-            getDefaultValue(this: PBRBluePrintMaterial) {
-              return this.$isInstance ? this.coreMaterial.subsurfaceColor : [1, 0.3, 0.2];
-            },
-            isValid(this: PBRBluePrintMaterial) {
-              return this.subsurfaceScattering;
-            }
-          },
-          {
-            name: 'SubsurfaceScale',
-            description: 'Scale value for subsurface-scattering',
-            type: 'float',
-            phase: 1,
-            default: 0.5,
-            options: {
-              animatable: true,
-              minValue: 0,
-              maxValue: 8
-            },
-            get(this: PBRBluePrintMaterial, value) {
-              value.num[0] = this.subsurfaceScale;
-            },
-            set(this: PBRBluePrintMaterial, value) {
-              this.subsurfaceScale = value.num[0];
-            },
-            getDefaultValue(this: PBRBluePrintMaterial) {
-              return this.$isInstance ? this.coreMaterial.subsurfaceScale : 0.5;
-            },
-            isValid(this: PBRBluePrintMaterial) {
-              return this.subsurfaceScattering;
-            }
-          },
-          {
-            name: 'SubsurfacePower',
-            description: 'Power value for subsurface-scattering',
-            type: 'float',
-            phase: 1,
-            default: 1.5,
-            options: {
-              animatable: true,
-              minValue: 0,
-              maxValue: 16
-            },
-            get(this: PBRBluePrintMaterial, value) {
-              value.num[0] = this.subsurfacePower;
-            },
-            set(this: PBRBluePrintMaterial, value) {
-              this.subsurfacePower = value.num[0];
-            },
-            getDefaultValue(this: PBRBluePrintMaterial) {
-              return this.$isInstance ? this.coreMaterial.subsurfacePower : 1.5;
-            },
-            isValid(this: PBRBluePrintMaterial) {
-              return this.subsurfaceScattering;
-            }
-          },
-          {
-            name: 'SubsurfaceIntensity',
-            description: 'Intensity value for subsurface-scattering',
-            type: 'float',
-            phase: 1,
-            default: 0.5,
-            options: {
-              animatable: true,
-              minValue: 0,
-              maxValue: 4
-            },
-            get(this: PBRBluePrintMaterial, value) {
-              value.num[0] = this.subsurfaceIntensity;
-            },
-            set(this: PBRBluePrintMaterial, value) {
-              this.subsurfaceIntensity = value.num[0];
-            },
-            getDefaultValue(this: PBRBluePrintMaterial) {
-              return this.$isInstance ? this.coreMaterial.subsurfaceIntensity : 0.5;
-            },
-            isValid(this: PBRBluePrintMaterial) {
-              return this.subsurfaceScattering;
-            }
-          },
+          ...getTextureProps<PBRBluePrintMaterial>(manager, 'subsurfaceTexture', '2D', false, 1, function () {
+            return !!this.subsurfaceProfile;
+          }),
           {
             name: 'Anisotropy',
             description: 'Anistropy value',
@@ -1162,69 +1355,6 @@ export function getBlinnMaterialClass(manager: ResourceManager): SerializableCla
             },
             getDefaultValue(this: BlinnMaterial) {
               return this.$isInstance ? this.coreMaterial.shininess : 32;
-            }
-          },
-          {
-            name: 'ScatterWrap',
-            description: 'Scatter wrap for light warping',
-            type: 'float',
-            options: {
-              animatable: true,
-              minValue: 0,
-              maxValue: 1
-            },
-            get(this: BlinnMaterial, value) {
-              value.num[0] = this.scatterWrap;
-            },
-            set(this: BlinnMaterial, value) {
-              this.scatterWrap = value.num[0];
-            },
-            getDefaultValue(this: BlinnMaterial) {
-              return this.$isInstance ? this.coreMaterial.scatterWrap : 0;
-            }
-          },
-          {
-            name: 'ScatterWidth',
-            description: 'Scatter width for light wrapping',
-            type: 'float',
-            options: {
-              animatable: true,
-              minValue: 0,
-              maxValue: 1
-            },
-            get(this: BlinnMaterial, value) {
-              value.num[0] = this.scatterWidth;
-            },
-            set(this: BlinnMaterial, value) {
-              this.scatterWidth = value.num[0];
-            },
-            getDefaultValue(this: BlinnMaterial) {
-              return this.$isInstance ? this.coreMaterial.scatterWidth : 0;
-            }
-          },
-          {
-            name: 'ScatterColor',
-            description: 'Scatter color for light warping',
-            type: 'rgb',
-            options: {
-              animatable: true
-            },
-            get(this: BlinnMaterial, value) {
-              value.num[0] = this.scatterColor.x;
-              value.num[1] = this.scatterColor.y;
-              value.num[2] = this.scatterColor.z;
-            },
-            set(this: BlinnMaterial, value) {
-              this.scatterColor = new Vector4(value.num[0], value.num[1], value.num[2], 1);
-            },
-            getDefaultValue(this: BlinnMaterial) {
-              return this.$isInstance
-                ? [
-                    this.coreMaterial.scatterColor.x,
-                    this.coreMaterial.scatterColor.y,
-                    this.coreMaterial.scatterColor.z
-                  ]
-                : [0, 0, 0];
             }
           },
           ...getLitMaterialProps(manager)
@@ -1406,115 +1536,25 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
             }
           },
           {
-            name: 'SubsurfaceScattering',
+            name: 'SubsurfaceProfile',
             description: 'If true, enables subsurface scattering for translucent materials',
-            type: 'bool',
-            phase: 0,
-            default: false,
+            type: 'object',
+            phase: 1,
+            default: null,
+            options: {
+              objectTypes: [SubsurfaceProfile]
+            },
+            isNullable() {
+              return true;
+            },
             get(this: PBRMetallicRoughnessMaterial, value) {
-              value.bool[0] = this.subsurfaceScattering;
+              value.object[0] = this.subsurfaceProfile;
             },
             set(this: PBRMetallicRoughnessMaterial, value) {
-              this.subsurfaceScattering = value.bool[0];
+              this.subsurfaceProfile = (value.object[0] as SubsurfaceProfile) ?? null;
             },
-            isValid() {
+            isValid(this: PBRMetallicRoughnessMaterial) {
               return !this.$isInstance;
-            }
-          },
-          {
-            name: 'SubsurfaceColor',
-            description: 'Color tint of the subsurface scattering effect',
-            type: 'rgb',
-            phase: 1,
-            default: [1, 0.3, 0.2],
-            options: {
-              animatable: true
-            },
-            get(this: PBRMetallicRoughnessMaterial, value) {
-              value.num[0] = this.subsurfaceColor.x;
-              value.num[1] = this.subsurfaceColor.y;
-              value.num[2] = this.subsurfaceColor.z;
-            },
-            set(this: PBRMetallicRoughnessMaterial, value) {
-              this.subsurfaceColor = new Vector3(value.num[0], value.num[1], value.num[2]);
-            },
-            getDefaultValue(this: PBRMetallicRoughnessMaterial) {
-              return this.$isInstance ? this.coreMaterial.subsurfaceColor : [1, 0.3, 0.2];
-            },
-            isValid(this: PBRMetallicRoughnessMaterial) {
-              return this.subsurfaceScattering;
-            }
-          },
-          {
-            name: 'SubsurfaceScale',
-            description: 'Distance scale of the subsurface scattering effect',
-            type: 'float',
-            phase: 1,
-            default: 0.5,
-            options: {
-              animatable: true,
-              minValue: 0,
-              maxValue: 8
-            },
-            get(this: PBRMetallicRoughnessMaterial, value) {
-              value.num[0] = this.subsurfaceScale;
-            },
-            set(this: PBRMetallicRoughnessMaterial, value) {
-              this.subsurfaceScale = value.num[0];
-            },
-            getDefaultValue(this: PBRMetallicRoughnessMaterial) {
-              return this.$isInstance ? this.coreMaterial.subsurfaceScale : 0.5;
-            },
-            isValid(this: PBRMetallicRoughnessMaterial) {
-              return this.subsurfaceScattering;
-            }
-          },
-          {
-            name: 'SubsurfacePower',
-            description: 'Falloff power controlling how quickly subsurface scattering fades',
-            type: 'float',
-            phase: 1,
-            default: 1.5,
-            options: {
-              animatable: true,
-              minValue: 0,
-              maxValue: 16
-            },
-            get(this: PBRMetallicRoughnessMaterial, value) {
-              value.num[0] = this.subsurfacePower;
-            },
-            set(this: PBRMetallicRoughnessMaterial, value) {
-              this.subsurfacePower = value.num[0];
-            },
-            getDefaultValue(this: PBRMetallicRoughnessMaterial) {
-              return this.$isInstance ? this.coreMaterial.subsurfacePower : 1.5;
-            },
-            isValid(this: PBRMetallicRoughnessMaterial) {
-              return this.subsurfaceScattering;
-            }
-          },
-          {
-            name: 'SubsurfaceIntensity',
-            description: 'Overall intensity of the subsurface scattering effect',
-            type: 'float',
-            phase: 1,
-            default: 0.5,
-            options: {
-              animatable: true,
-              minValue: 0,
-              maxValue: 4
-            },
-            get(this: PBRMetallicRoughnessMaterial, value) {
-              value.num[0] = this.subsurfaceIntensity;
-            },
-            set(this: PBRMetallicRoughnessMaterial, value) {
-              this.subsurfaceIntensity = value.num[0];
-            },
-            getDefaultValue(this: PBRMetallicRoughnessMaterial) {
-              return this.$isInstance ? this.coreMaterial.subsurfaceIntensity : 0.5;
-            },
-            isValid(this: PBRMetallicRoughnessMaterial) {
-              return this.subsurfaceScattering;
             }
           },
           ...getTextureProps<PBRMetallicRoughnessMaterial>(
@@ -1524,7 +1564,7 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
             false,
             1,
             function () {
-              return this.subsurfaceScattering;
+              return !!this.subsurfaceProfile;
             }
           ),
           ...getTextureProps<PBRMetallicRoughnessMaterial>(

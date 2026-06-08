@@ -135,6 +135,20 @@ export function getSceneClass(manager: ResourceManager): SerializableClass {
           }
         },
         {
+          name: 'EnvLightSpecularStrength',
+          description: 'Environment light specular strength',
+          type: 'float',
+          phase: 0,
+          options: { animatable: true, minValue: 0, maxValue: 10 },
+          default: 1,
+          get(this: Scene, value) {
+            value.num[0] = this.env.light.specularStrength;
+          },
+          set(this: Scene, value) {
+            this.env.light.specularStrength = value.num[0];
+          }
+        },
+        {
           name: 'SHWindowWeights',
           description: 'Window weights for SH lighting',
           type: 'vec3',

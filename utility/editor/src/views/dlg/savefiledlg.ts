@@ -18,11 +18,20 @@ export class DlgSaveFile extends DialogRenderer<string> {
     rootDir: string,
     filter: string,
     width: number,
-    height: number
+    height: number,
+    defaultName?: string
   ) {
-    return new DlgSaveFile(title, vfs, rootDir, filter, width, height).showModal();
+    return new DlgSaveFile(title, vfs, rootDir, filter, width, height, defaultName).showModal();
   }
-  constructor(id: string, vfs: VFS, rootDir: string, filter: string, width: number, height: number) {
+  constructor(
+    id: string,
+    vfs: VFS,
+    rootDir: string,
+    filter: string,
+    width: number,
+    height: number,
+    defaultName?: string
+  ) {
     super(id, width, height);
     this._filterLabels = [];
     this._filterPatterns = [];
@@ -53,7 +62,7 @@ export class DlgSaveFile extends DialogRenderer<string> {
         allowDblClickOpen: false
       }
     );
-    this._name = [this._filterPatterns[this._selected[0]]];
+    this._name = [defaultName?.trim() || this._filterPatterns[this._selected[0]]];
     this._renderer.on('selection_changed', this.updateSelection, this);
     this._renderer.on('file_dbl_clicked', (file: FileInfo) => {
       this._name[0] = file.meta.name;

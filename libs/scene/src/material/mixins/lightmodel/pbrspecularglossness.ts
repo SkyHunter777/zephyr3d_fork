@@ -121,6 +121,7 @@ export function mixinPBRSpecularGlossness<T extends typeof MeshMaterial>(BaseCls
       const pb = scope.$builder;
       const funcName = 'Z_PBRSpecularGlossinessLight';
       const that = this;
+      const baseLightPass = !that.drawContext.lightBlending;
       pb.func(
         funcName,
         [
@@ -134,21 +135,33 @@ export function mixinPBRSpecularGlossness<T extends typeof MeshMaterial>(BaseCls
         function () {
           this.$l.pbrData = that.getCommonData(this, this.albedo, this.normal, this.viewVec, this.TBN);
           this.$l.lightingColor = pb.vec3(0);
-          this.$l.emissiveColor = that.calculateEmissiveColor(this);
-          if (outRoughness) {
-            that.indirectLighting(
-              this,
-              this.normal,
-              this.viewVec,
-              this.pbrData,
-              this.lightingColor,
-              this.outRoughness
-            );
-          } else {
-            that.indirectLighting(this, this.normal, this.viewVec, this.pbrData, this.lightingColor);
+          this.$l.emissiveColor = baseLightPass ? that.calculateEmissiveColor(this) : pb.vec3(0);
+          if (baseLightPass) {
+            if (outRoughness) {
+              that.indirectLighting(
+                this,
+                this.normal,
+                this.viewVec,
+                this.pbrData,
+                this.lightingColor,
+                this.outRoughness
+              );
+            } else {
+              that.indirectLighting(this, this.normal, this.viewVec, this.pbrData, this.lightingColor);
+            }
           }
           that.forEachLight(this, function (type, posRange, dirCutoff, colorIntensity, extra, shadow) {
             this.$if(pb.equal(type, LIGHT_TYPE_RECT), function () {
+              this.$l.rectColorIntensity = colorIntensity;
+              if (shadow) {
+                this.$l.rectL = pb.normalize(pb.sub(posRange.xyz, this.worldPos));
+                this.$l.rectNoL = pb.clamp(pb.dot(this.normal, this.rectL), 0, 1);
+                this.$l.rectShadow = that.calculateShadow(this, this.worldPos, pb.max(this.rectNoL, 1e-5));
+                this.rectColorIntensity = pb.vec4(
+                  colorIntensity.rgb,
+                  pb.mul(colorIntensity.a, this.rectShadow)
+                );
+              }
               that.directRectLight(
                 this,
                 this.worldPos,
@@ -158,7 +171,7 @@ export function mixinPBRSpecularGlossness<T extends typeof MeshMaterial>(BaseCls
                 posRange,
                 dirCutoff,
                 extra,
-                colorIntensity,
+                this.rectColorIntensity,
                 this.lightingColor
               );
             }).$else(function () {

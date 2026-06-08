@@ -209,7 +209,7 @@ export class PCFOPT extends ShadowImpl {
     z: PBShaderExp,
     bias: PBShaderExp
   ) {
-    const funcNameSampleShadowMap = `lib_sampleShadowMap`;
+    const funcNameSampleShadowMap = `lib_sampleShadowMapOPT`;
     const pb = scope.$builder;
     const that = this;
     pb.func(funcNameSampleShadowMap, [pb.vec3('coords'), pb.float('z'), pb.float('bias')], function () {
@@ -246,7 +246,7 @@ export class PCFOPT extends ShadowImpl {
     z: PBShaderExp,
     bias: PBShaderExp
   ) {
-    const funcNameSampleShadowMapCSM = 'lib_sampleShadowMapCSM';
+    const funcNameSampleShadowMapCSM = 'lib_sampleShadowMapCSMOPT';
     const pb = scope.$builder;
     const that = this;
     pb.func(

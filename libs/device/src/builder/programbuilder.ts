@@ -1941,7 +1941,7 @@ export class ProgramBuilder {
         console.error(this._lastError);
         return null;
       } else if (err instanceof Error) {
-        this._lastError = err.toString();
+        this._lastError = err.stack ?? err.toString();
         console.error(this._lastError);
         return null;
       } else {
@@ -2026,7 +2026,7 @@ export class ProgramBuilder {
         console.error(this._lastError);
         return null;
       } else if (err instanceof Error) {
-        this._lastError = err.toString();
+        this._lastError = err.stack ?? err.toString();
         console.error(this._lastError);
         return null;
       } else {

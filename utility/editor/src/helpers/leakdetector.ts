@@ -1,4 +1,7 @@
-import { TraceMap, originalPositionFor } from '@jridgewell/trace-mapping';
+declare const __DEV__: boolean;
+
+import type { TraceMap } from '@jridgewell/trace-mapping';
+import { originalPositionFor } from '@jridgewell/trace-mapping';
 import type { GPUObject } from '@zephyr3d/device';
 import { getDevice } from '@zephyr3d/scene';
 
@@ -179,18 +182,16 @@ export function getGPUObjectStatistics() {
     }));
 }
 
-export async function initLeakDetector() {
-  const headResponse = await fetch('js/index.js.map', { method: 'HEAD' });
-  if (!headResponse.ok) {
+async function tryLoadTraceMap() {
+  if (!__DEV__) {
     traceMap = null;
-  } else {
-    const jsmap = await (await fetch('js/index.js.map')).text();
-    try {
-      traceMap = new TraceMap(jsmap);
-    } catch {
-      traceMap = null;
-    }
+    return;
   }
+  traceMap = null;
+}
+
+export async function initLeakDetector() {
+  await tryLoadTraceMap();
 
   const device = getDevice();
   device.on('gpuobject_added', function (obj) {

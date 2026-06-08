@@ -2,6 +2,7 @@ import type { TypedArray, Interpolator, Nullable, DeepPartial, VFS } from '@zeph
 import {
   ASSERT,
   DRef,
+  PathUtils,
   uint8ArrayToBase64,
   Vector4,
   Disposable,
@@ -53,6 +54,8 @@ import { UnlitMaterial } from '../material/unlit';
 import { PBRSpecularGlossinessMaterial } from '../material/pbrsg';
 import { PBRMetallicRoughnessMaterial } from '../material/pbrmr';
 
+type ReimportResourcePools = Map<string, Set<string>>;
+
 /**
  * Named object interface for model loading
  * @public
@@ -85,6 +88,7 @@ export interface AssetSamplerInfo {
  * @public
  */
 export interface AssetImageInfo {
+  name?: string;
   uri?: string;
   data?: Uint8Array<ArrayBuffer>;
   mimeType?: string;
@@ -104,6 +108,7 @@ export interface AssetVertexBufferInfo {
  * @public
  */
 export interface AssetPrimitiveInfo {
+  name?: string;
   vertices: Record<VertexSemantic, { format: VertexAttribFormat; data: TypedArray }>;
   indices: Nullable<Uint16Array<ArrayBuffer> | Uint32Array<ArrayBuffer>>;
   indexCount: number;
@@ -118,6 +123,7 @@ export interface AssetPrimitiveInfo {
  * @public
  */
 export interface AssetTextureInfo {
+  name?: string;
   image: Nullable<AssetImageInfo>;
   sRGB?: boolean;
   sampler: Nullable<AssetSamplerInfo>;
@@ -161,6 +167,7 @@ export interface AssetMaterialCommon {
  * @public
  */
 export interface AssetMaterial {
+  name?: string;
   type: string;
   common: AssetMaterialCommon;
   path?: string;
@@ -775,6 +782,15 @@ export type SaveOptions = {
   importMeshes: boolean;
   importSkeletons: boolean;
   importAnimations: boolean;
+  rebuildMaterial?: boolean;
+};
+
+type PreprocessOptions = {
+  rebuildMaterial?: boolean;
+};
+
+type SharedModelWithPreprocessOptions = SharedModel & {
+  _preprocessOptions?: PreprocessOptions;
 };
 
 /**
@@ -903,6 +919,243 @@ export class SharedModel extends Disposable {
   addPrimitive(prim: AssetPrimitiveInfo) {
     this._primitiveList.push(prim);
   }
+  private sanitizeResourceName(name: string, fallback: string) {
+    let normalized = (name ?? '').trim();
+    if (!normalized) {
+      normalized = fallback;
+    }
+    normalized = normalized.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_');
+    normalized = normalized.replace(/\s+/g, ' ').trim();
+    normalized = normalized.replace(/[. ]+$/g, '');
+    return normalized || fallback;
+  }
+  private getReimportPoolKey(baseName: string, ext: string) {
+    return `${ext.toLowerCase()}|${baseName}`;
+  }
+  private getResourceBasename(path: string, ext: string) {
+    return path ? PathUtils.basename(path, ext || PathUtils.extname(path)) : '';
+  }
+  private getResourceNumericSuffix(baseName: string, candidateBaseName: string) {
+    if (candidateBaseName === baseName) {
+      return 0;
+    }
+    const match = new RegExp(`^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}_([0-9]+)$`).exec(
+      candidateBaseName
+    );
+    return match ? Number.parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER;
+  }
+  private registerReusableResourcePath(pools: ReimportResourcePools, path: string) {
+    const ext = PathUtils.extname(path).toLowerCase();
+    const baseName = this.getResourceBasename(path, ext);
+    const register = (keyBaseName: string) => {
+      const key = this.getReimportPoolKey(keyBaseName, ext);
+      let candidates = pools.get(key);
+      if (!candidates) {
+        candidates = new Set<string>();
+        pools.set(key, candidates);
+      }
+      candidates.add(path);
+    };
+    register(baseName);
+    const strippedBaseName = baseName.replace(/_[0-9]+$/u, '');
+    if (strippedBaseName && strippedBaseName !== baseName) {
+      register(strippedBaseName);
+    }
+  }
+  private collectReferencedAssetPaths(
+    value: unknown,
+    destPath: string,
+    extensions: Set<string>,
+    out: Set<string>
+  ) {
+    if (typeof value === 'string') {
+      const normalizedPath = PathUtils.normalize(value);
+      const ext = PathUtils.extname(normalizedPath).toLowerCase();
+      const normalizedDestPath = PathUtils.normalize(destPath);
+      if (
+        extensions.has(ext) &&
+        (normalizedPath === normalizedDestPath ||
+          normalizedPath.startsWith(
+            normalizedDestPath.endsWith('/') ? normalizedDestPath : `${normalizedDestPath}/`
+          ))
+      ) {
+        out.add(normalizedPath);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        this.collectReferencedAssetPaths(item, destPath, extensions, out);
+      }
+      return;
+    }
+    if (value && typeof value === 'object') {
+      for (const item of Object.values(value)) {
+        this.collectReferencedAssetPaths(item, destPath, extensions, out);
+      }
+    }
+  }
+  private async collectReferencedAssetPathsFromJsonFile(
+    destVFS: VFS,
+    jsonPath: string,
+    destPath: string,
+    extensions: Set<string>
+  ) {
+    if (!(await destVFS.exists(jsonPath))) {
+      return new Set<string>();
+    }
+    try {
+      const content = (await destVFS.readFile(jsonPath, { encoding: 'utf8' })) as string;
+      const json = JSON.parse(content) as unknown;
+      const out = new Set<string>();
+      this.collectReferencedAssetPaths(json, destPath, extensions, out);
+      return out;
+    } catch (err) {
+      console.warn(`Read existing import manifest failed: ${jsonPath}: ${err}`);
+      return new Set<string>();
+    }
+  }
+  private async createReimportResourcePools(destVFS: VFS, destPath: string, prefabPath: string) {
+    const pools: ReimportResourcePools = new Map();
+    if (!(await destVFS.exists(prefabPath))) {
+      return pools;
+    }
+    const materialAndMeshPaths = await this.collectReferencedAssetPathsFromJsonFile(
+      destVFS,
+      prefabPath,
+      destPath,
+      new Set(['.zmtl', '.zmsh'])
+    );
+    for (const path of materialAndMeshPaths) {
+      this.registerReusableResourcePath(pools, path);
+    }
+    const materialPaths = Array.from(materialAndMeshPaths).filter(
+      (path) => PathUtils.extname(path).toLowerCase() === '.zmtl'
+    );
+    const imageExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tga', '.hdr', '.ktx', '.ktx2']);
+    for (const materialPath of materialPaths) {
+      const texturePaths = await this.collectReferencedAssetPathsFromJsonFile(
+        destVFS,
+        materialPath,
+        destPath,
+        imageExtensions
+      );
+      for (const texturePath of texturePaths) {
+        this.registerReusableResourcePath(pools, texturePath);
+      }
+    }
+    return pools;
+  }
+  private consumeReusableResourcePath(
+    pools: ReimportResourcePools,
+    baseName: string,
+    ext: string,
+    usedPaths: Set<string>
+  ) {
+    const candidates = pools.get(this.getReimportPoolKey(baseName, ext));
+    if (!candidates || candidates.size === 0) {
+      return null;
+    }
+    const sorted = Array.from(candidates)
+      .filter((path) => !usedPaths.has(path))
+      .sort((a, b) => {
+        const aSuffix = this.getResourceNumericSuffix(baseName, this.getResourceBasename(a, ext));
+        const bSuffix = this.getResourceNumericSuffix(baseName, this.getResourceBasename(b, ext));
+        if (aSuffix !== bSuffix) {
+          return aSuffix - bSuffix;
+        }
+        return a.localeCompare(b);
+      });
+    const selected = sorted[0] ?? null;
+    if (selected) {
+      usedPaths.add(selected);
+    }
+    return selected;
+  }
+  private async createUniqueResourcePath(
+    destVFS: VFS,
+    destPath: string,
+    baseName: string,
+    ext: string,
+    usedPaths: Set<string>,
+    fallback: string
+  ) {
+    const sanitizedBase = this.sanitizeResourceName(baseName, fallback);
+    for (let suffix = 0; ; suffix++) {
+      const candidateName = suffix > 0 ? `${sanitizedBase}_${suffix}` : sanitizedBase;
+      const candidatePath = destVFS.join(destPath, `${candidateName}${ext}`);
+      if (!usedPaths.has(candidatePath) && !(await destVFS.exists(candidatePath))) {
+        usedPaths.add(candidatePath);
+        return candidatePath;
+      }
+    }
+  }
+  private async tryReuseExactResourcePath(
+    destVFS: VFS,
+    destPath: string,
+    baseName: string,
+    ext: string,
+    usedPaths: Set<string>,
+    fallback: string
+  ) {
+    const sanitizedBase = this.sanitizeResourceName(baseName, fallback);
+    const candidatePath = destVFS.join(destPath, `${sanitizedBase}${ext}`);
+    if (!usedPaths.has(candidatePath) && (await destVFS.exists(candidatePath))) {
+      usedPaths.add(candidatePath);
+      return candidatePath;
+    }
+    return null;
+  }
+  private collapseCompositeTextureName(name: string) {
+    const normalized = (name ?? '').trim();
+    if (!normalized) {
+      return normalized;
+    }
+    const separatorIndex = normalized.indexOf('-');
+    if (separatorIndex <= 0 || separatorIndex >= normalized.length - 1) {
+      return normalized;
+    }
+    const left = normalized.slice(0, separatorIndex).trim();
+    const right = normalized.slice(separatorIndex + 1).trim();
+    if (!left || !right) {
+      return normalized;
+    }
+    const leftParts = left.split('_');
+    const rightParts = right.split('_');
+    let prefixLength = 0;
+    while (
+      prefixLength < leftParts.length - 1 &&
+      prefixLength < rightParts.length - 1 &&
+      leftParts[prefixLength] === rightParts[prefixLength]
+    ) {
+      prefixLength++;
+    }
+    if (prefixLength <= 0) {
+      return normalized;
+    }
+    const prefix = leftParts.slice(0, prefixLength).join('_');
+    const leftSuffix = leftParts.slice(prefixLength).join('_');
+    const rightSuffix = rightParts.slice(prefixLength).join('_');
+    if (!leftSuffix || !rightSuffix) {
+      return normalized;
+    }
+    return `${prefix}_${leftSuffix}-${rightSuffix}`;
+  }
+  private getImageBaseName(img: AssetImageInfo, index: number, fallback: string) {
+    if (img?.name?.trim()) {
+      return this.collapseCompositeTextureName(img.name);
+    }
+    if (img?.uri) {
+      return this.collapseCompositeTextureName(PathUtils.basename(img.uri, PathUtils.extname(img.uri)));
+    }
+    return `${fallback}_texture_${index}`;
+  }
+  private getMaterialBaseName(material: AssetMaterial, key: string, fallback: string) {
+    return material?.name?.trim() || `${fallback}_material_${key}`;
+  }
+  private getPrimitiveBaseName(info: AssetPrimitiveInfo, index: number, fallback: string) {
+    return info?.name?.trim() || `${fallback}_mesh_${index}`;
+  }
   /**
    * Adds a model-level morph target group.
    * @param group - Morph target group to add
@@ -1010,6 +1263,12 @@ export class SharedModel extends Disposable {
     dstVFS: VFS
   ): Promise<void> {
     const destName = name;
+    const usedPaths = new Set<string>();
+    const rebuildMaterial =
+      (this as SharedModelWithPreprocessOptions)._preprocessOptions?.rebuildMaterial ?? true;
+    const prefabName = name.endsWith('.zprefab') ? name : `${name}.zprefab`;
+    const prefabPath = dstVFS.join(destPath, prefabName);
+    const reusableResourcePools = await this.createReimportResourcePools(dstVFS, destPath, prefabPath);
     if (this._imageList.length > 0) {
       console.info(`Importing ${this._imageList.length} textures`);
       for (let i = 0; i < this._imageList.length; i++) {
@@ -1037,7 +1296,28 @@ export class SharedModel extends Disposable {
           continue;
         }
         ASSERT(!!ext, `Unknown image mime type: ${mimeType}`);
-        const path = dstVFS.join(destPath, `${destName}_texture_${i}${ext}`);
+        const baseName = this.sanitizeResourceName(
+          this.getImageBaseName(img, i, destName),
+          `${destName}_texture_${i}`
+        );
+        const path =
+          (await this.tryReuseExactResourcePath(
+            dstVFS,
+            destPath,
+            baseName,
+            ext,
+            usedPaths,
+            `${destName}_texture_${i}`
+          )) ??
+          this.consumeReusableResourcePath(reusableResourcePools, baseName, ext, usedPaths) ??
+          (await this.createUniqueResourcePath(
+            dstVFS,
+            destPath,
+            baseName,
+            ext,
+            usedPaths,
+            `${destName}_texture_${i}`
+          ));
         if (img.uri) {
           img.data = new Uint8Array((await srcVFS.readFile(img.uri, { encoding: 'binary' })) as ArrayBuffer);
         }
@@ -1055,12 +1335,39 @@ export class SharedModel extends Disposable {
     if (materialKeys.length > 0) {
       console.info(`Importing ${materialKeys.length} materials`);
       for (const k of materialKeys) {
-        const path = dstVFS.join(destPath, `${destName}_material_${k}.zmtl`);
-        const m = await this.createMaterial(manager, this._materialList[k], dstVFS);
+        const material = this._materialList[k];
+        const baseName = this.sanitizeResourceName(
+          this.getMaterialBaseName(material, k, destName),
+          `${destName}_material_${k}`
+        );
+        const path =
+          (await this.tryReuseExactResourcePath(
+            dstVFS,
+            destPath,
+            baseName,
+            '.zmtl',
+            usedPaths,
+            `${destName}_material_${k}`
+          )) ??
+          this.consumeReusableResourcePath(reusableResourcePools, baseName, '.zmtl', usedPaths) ??
+          (await this.createUniqueResourcePath(
+            dstVFS,
+            destPath,
+            baseName,
+            '.zmtl',
+            usedPaths,
+            `${destName}_material_${k}`
+          ));
+        if (!rebuildMaterial && (await dstVFS.exists(path))) {
+          material.path = path;
+          continue;
+        }
+        material.path = '';
+        const m = await this.createMaterial(manager, material, dstVFS);
+        material.path = path;
         const data = await manager.serializeObject(m);
         const content = JSON.stringify({ type: 'Default', data }, null, 2);
         await dstVFS.writeFile(path, content, { encoding: 'utf8', create: true });
-        this._materialList[k].path = path;
         m!.dispose();
       }
     }
@@ -1071,7 +1378,28 @@ export class SharedModel extends Disposable {
         if (!info) {
           continue;
         }
-        const path = dstVFS.join(destPath, `${destName}_mesh_${i}.zmsh`);
+        const baseName = this.sanitizeResourceName(
+          this.getPrimitiveBaseName(info, i, destName),
+          `${destName}_mesh_${i}`
+        );
+        const path =
+          (await this.tryReuseExactResourcePath(
+            dstVFS,
+            destPath,
+            baseName,
+            '.zmsh',
+            usedPaths,
+            `${destName}_mesh_${i}`
+          )) ??
+          this.consumeReusableResourcePath(reusableResourcePools, baseName, '.zmsh', usedPaths) ??
+          (await this.createUniqueResourcePath(
+            dstVFS,
+            destPath,
+            baseName,
+            '.zmsh',
+            usedPaths,
+            `${destName}_mesh_${i}`
+          ));
         await SharedModel.writePrimitive(dstVFS, info, path);
         info.path = path;
       }

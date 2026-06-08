@@ -31,11 +31,6 @@ import { getDevice } from '../app/api';
  */
 export type PickTarget = { node: SceneNode; label?: string };
 
-/**
- * Minimal render context carrying target size and device information.
- *
- * @public
- */
 export class RenderContext {
   public device: AbstractDevice;
   public renderWidth: number;
@@ -115,6 +110,10 @@ export interface DrawContext {
   currentShadowLight?: Nullable<PunctualLight>;
   /** Sun/directional light reference for passes that need it. */
   sunLight?: Nullable<DirectionalLight>;
+  /** Primary directional light fallback when no explicit sun light is marked. */
+  primaryDirectionalLight?: Nullable<DirectionalLight>;
+  /** Primary punctual light fallback used by effects that need a representative thin-transmission light. */
+  primaryTransmissionLight?: Nullable<PunctualLight>;
   /** Clustered light index/structure for lighting in forward+, clustered shading, etc. */
   clusteredLight?: ClusteredLight;
   /** Material varying bit flags that influence shader selection. */
@@ -125,12 +124,26 @@ export interface DrawContext {
   forceColorState?: Nullable<ColorState>;
   /** Screen-space reflections are active this frame/pass. */
   readonly SSR: boolean;
+  /** Screen-space subsurface scattering is active this frame/pass. */
+  SSS: boolean;
   /** Whether SSR thickness should be computed dynamically in this pass. */
   SSRCalcThickness: boolean;
   /** SSR roughness input texture. */
-  SSRRoughnessTexture: Texture2D;
+  SSRRoughnessTexture: Nullable<Texture2D>;
   /** SSR normal input texture (usually view-space or world-space normals). */
-  SSRNormalTexture: Texture2D;
+  SSRNormalTexture: Nullable<Texture2D>;
+  /** SSS profile texture (rgb = scatter strength, a = transmission mask). */
+  SSSProfileTexture: Nullable<Texture2D>;
+  /** SSS param texture (r = normalized profile slot, g = blur width). */
+  SSSParamTexture: Nullable<Texture2D>;
+  /** SSS diffuse-lighting texture used so scattering can preserve specular detail. */
+  SSSDiffuseTexture: Nullable<Texture2D>;
+  /** SSS transmission-lighting texture used for thin-shell/backscatter contributions. */
+  SSSTransmissionTexture: Nullable<Texture2D>;
+  /** SSR SDF proxy uniform buffer (pair of vec4: min.xyz / max.xyz for each box). */
+  ssrSDFBoxBuffer: Nullable<GPUDataBuffer>;
+  /** Number of valid SDF proxy boxes in `ssrSDFBoxBuffer`. */
+  ssrSDFBoxCount: number;
   /** Final framebuffer target where the last stage renders. */
   finalFramebuffer: Nullable<FrameBuffer>;
   /** Intermediate framebuffer used by the compositor or multi-pass pipelines. */
@@ -163,6 +176,8 @@ export type MorphInfo = { data: TypedArray; buffer?: DRef<GPUDataBuffer>; names:
  * @public
  */
 export interface Drawable {
+  /** Gets the display name of the drawable object (for debugging/UI). */
+  getName(): string;
   /** Unique, stable identifier for the drawable, used in caches and picking. */
   getDrawableId(): number;
   /** Returns the owning scene node (transform and hierarchy). */
@@ -202,7 +217,7 @@ export interface Drawable {
   /**
    * Pushes a reference to the current render queue for cleanup or back-references.
    *
-   * Useful for batching or deferred state application.
+   * Useful for batching or delayed state application.
    */
   pushRenderQueueRef(ref: RenderQueueRef): void;
   /**
