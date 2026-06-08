@@ -61,7 +61,6 @@ type PropertyRowData =
       group: PropertyGroup;
       level: number;
       toplevel: boolean;
-      navigable: boolean;
     }
   | {
       type: 'inlineObjectArrayGroup';
@@ -71,11 +70,13 @@ type PropertyRowData =
   | {
       type: 'property';
       property: Property<any>;
+      owner: PropertyGroup;
       level: number;
     }
   | {
       type: 'rawProperty';
       property: RawProperty;
+      owner: PropertyGroup;
       level: number;
     };
 
@@ -344,9 +345,7 @@ export class PropertyEditor extends Observable<{
   private _builtRowVersion: number;
   private _totalRowsHeight: number;
   private _groupOpenStates: Map<string, boolean>;
-  private _currentGroup: PropertyGroup;
-  private _navigationBackStack: string[];
-  private _navigationForwardStack: string[];
+  private _inspectedGroup: PropertyGroup;
   private _scrollToTopRequested: boolean;
   private _restoreScrollY: Nullable<number>;
   private _restoreScrollFrames: number;
@@ -373,9 +372,7 @@ export class PropertyEditor extends Observable<{
     this._builtRowVersion = -1;
     this._totalRowsHeight = 0;
     this._groupOpenStates = new Map();
-    this._currentGroup = this._rootGroup;
-    this._navigationBackStack = [];
-    this._navigationForwardStack = [];
+    this._inspectedGroup = this._rootGroup;
     this._scrollToTopRequested = false;
     this._restoreScrollY = null;
     this._restoreScrollFrames = 0;
@@ -389,7 +386,7 @@ export class PropertyEditor extends Observable<{
     const oldObject = this.object;
     this._rootGroup.setObject(value);
     if (oldObject !== value) {
-      this.resetNavigation();
+      this.resetInspectedGroup();
     } else {
       this.invalidateRows();
     }
@@ -402,24 +399,23 @@ export class PropertyEditor extends Observable<{
     return this._rootGroup;
   }
   get currentObject() {
-    const prop = this._currentGroup.prop;
+    this._inspectedGroup = this.resolveExistingObjectGroup(this._inspectedGroup.statePath);
+    const prop = this._inspectedGroup.prop;
     if (!prop) {
       return this.object;
     }
     ASSERT(prop.type === 'object' || prop.type === 'object_array');
-    ASSERT(this._currentGroup.object);
+    ASSERT(this._inspectedGroup.object);
     const value = { num: [], bool: [], str: [], object: [] };
-    prop.get.call(this._currentGroup.object, value);
-    return value.object[this._currentGroup.index ?? 0];
+    prop.get.call(this._inspectedGroup.object, value);
+    return value.object[this._inspectedGroup.index ?? 0];
   }
-  private resetNavigation() {
-    this._currentGroup = this._rootGroup;
-    this._navigationBackStack = [];
-    this._navigationForwardStack = [];
+  private resetInspectedGroup() {
+    this._inspectedGroup = this._rootGroup;
     this._scrollToTopRequested = true;
     this.invalidateRows();
   }
-  private isObjectNavigationGroup(group: PropertyGroup) {
+  private isObjectPropertyGroup(group: PropertyGroup) {
     return !!group.prop && (group.prop.type === 'object' || group.prop.type === 'object_array');
   }
   private getGroupLabel(group: PropertyGroup) {
@@ -451,11 +447,11 @@ export class PropertyEditor extends Observable<{
     };
     return visit(this._rootGroup);
   }
-  private resolveExistingNavigationGroup(path: string) {
+  private resolveExistingObjectGroup(path: string) {
     let currentPath = path;
     while (currentPath) {
       const group = this.findGroupByStatePath(currentPath);
-      if (group && (group === this._rootGroup || this.isObjectNavigationGroup(group))) {
+      if (group && (group === this._rootGroup || this.isObjectPropertyGroup(group))) {
         return group;
       }
       const index = currentPath.lastIndexOf('/');
@@ -466,50 +462,22 @@ export class PropertyEditor extends Observable<{
     }
     return this._rootGroup;
   }
-  private restoreCurrentGroup(statePath: string) {
-    this._currentGroup = this.resolveExistingNavigationGroup(statePath);
-    this._navigationBackStack = this._navigationBackStack
-      .map((path) => this.resolveExistingNavigationGroup(path).statePath)
-      .filter((path) => path !== this._currentGroup.statePath);
-    this._navigationForwardStack = this._navigationForwardStack
-      .map((path) => this.resolveExistingNavigationGroup(path).statePath)
-      .filter((path) => path !== this._currentGroup.statePath);
+  private restoreInspectedGroup(statePath: string) {
+    this._inspectedGroup = this.resolveExistingObjectGroup(statePath);
     this.invalidateRows();
   }
-  private navigateToGroup(group: PropertyGroup, recordHistory = true) {
-    if (group === this._currentGroup) {
-      return;
-    }
-    if (recordHistory) {
-      this._navigationBackStack.push(this._currentGroup.statePath);
-      this._navigationForwardStack = [];
-    }
-    this._currentGroup = group;
-    this._scrollToTopRequested = true;
-    this.invalidateRows();
+  private inspectGroup(group: PropertyGroup) {
+    this._inspectedGroup = this.getNearestObjectGroup(group);
   }
-  private navigateBack() {
-    const path = this._navigationBackStack.pop();
-    if (!path) {
-      return;
+  private getNearestObjectGroup(group: PropertyGroup) {
+    let current: Nullable<PropertyGroup> = group;
+    while (current && current !== this._rootGroup) {
+      if (this.isObjectPropertyGroup(current)) {
+        return current;
+      }
+      current = current.parent;
     }
-    this._navigationForwardStack.push(this._currentGroup.statePath);
-    this.navigateToGroup(this.resolveExistingNavigationGroup(path), false);
-  }
-  private navigateForward() {
-    const path = this._navigationForwardStack.pop();
-    if (!path) {
-      return;
-    }
-    this._navigationBackStack.push(this._currentGroup.statePath);
-    this.navigateToGroup(this.resolveExistingNavigationGroup(path), false);
-  }
-  private navigateUp() {
-    let parent = this._currentGroup.parent;
-    while (parent && parent !== this._rootGroup && !this.isObjectNavigationGroup(parent)) {
-      parent = parent.parent;
-    }
-    this.navigateToGroup(parent ?? this._rootGroup);
+    return this._rootGroup;
   }
   set extraPropertiesProvider(
     provider: Nullable<(object: any) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>>
@@ -534,7 +502,7 @@ export class PropertyEditor extends Observable<{
   }
   clear() {
     this._rootGroup = new PropertyGroup('Root', this);
-    this.resetNavigation();
+    this.resetInspectedGroup();
   }
   set showLeadingColumn(value: boolean) {
     this._showLeadingColumn = !!value;
@@ -549,7 +517,7 @@ export class PropertyEditor extends Observable<{
   async rebuild() {
     const object = this.object;
     const rawProps = this._rootGroup.rawProperties;
-    const currentGroupStatePath = this._currentGroup.statePath;
+    const inspectedGroupStatePath = this._inspectedGroup.statePath;
     const version = ++this._extraPropertiesVersion;
     const rootGroup = new PropertyGroup('Root', this);
     rootGroup.setObject(object);
@@ -558,8 +526,8 @@ export class PropertyEditor extends Observable<{
       return;
     }
     this._rootGroup = rootGroup;
-    this._currentGroup = this._rootGroup;
-    this.restoreCurrentGroup(currentGroupStatePath);
+    this._inspectedGroup = this._rootGroup;
+    this.restoreInspectedGroup(inspectedGroupStatePath);
   }
   private async appendExtraProperties(object: any, version: number, targetGroup = this._rootGroup) {
     if (!object || this._extraPropertiesProviders.size === 0) {
@@ -590,7 +558,6 @@ export class PropertyEditor extends Observable<{
       this._dirty = false;
       void this.rebuild();
     }
-    this.renderNavigationBar();
     if (this._scrollToTopRequested) {
       ImGui.SetScrollY(0);
       this._scrollToTopRequested = false;
@@ -645,72 +612,6 @@ export class PropertyEditor extends Observable<{
       ImGui.EndTable();
     }
   }
-  private renderNavigationBar() {
-    const buttonSize = ImGui.GetFrameHeight();
-    ImGui.PushID('property_navigation');
-    this.renderNavigationButton(
-      FontGlyph.glyphs['left-dir'] ?? '<',
-      'Back',
-      this._navigationBackStack.length > 0,
-      () => this.navigateBack()
-    );
-    ImGui.SameLine(0, 0);
-    this.renderNavigationButton(
-      FontGlyph.glyphs['right-dir'] ?? '>',
-      'Forward',
-      this._navigationForwardStack.length > 0,
-      () => this.navigateForward()
-    );
-    ImGui.SameLine(0, 0);
-    this.renderNavigationButton(
-      FontGlyph.glyphs['up-dir'] ?? '^',
-      'Up',
-      this._currentGroup !== this._rootGroup,
-      () => this.navigateUp()
-    );
-    ImGui.SameLine(0, 0);
-    this.renderNavigationButton(
-      FontGlyph.glyphs['home'] ?? 'H',
-      'Root',
-      this._currentGroup !== this._rootGroup,
-      () => this.navigateToGroup(this._rootGroup)
-    );
-    ImGui.SameLine();
-    ImGui.BeginChild('##path', new ImGui.ImVec2(-1, buttonSize));
-    ImGui.AlignTextToFramePadding();
-    ImGui.Text(this.getNavigationPath());
-    if (ImGui.IsItemHovered()) {
-      ImGui.SetTooltip(this.getNavigationPath());
-    }
-    ImGui.EndChild();
-    ImGui.PopID();
-    ImGui.Separator();
-  }
-  private renderNavigationButton(label: string, tooltip: string, enabled: boolean, action: () => void) {
-    if (!enabled) {
-      ImGui.PushStyleVar(ImGui.StyleVar.Alpha, ImGui.GetStyle().Alpha * 0.45);
-    }
-    if (ImGui.Button(`${label}##${tooltip}`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0)) && enabled) {
-      action();
-    }
-    if (ImGui.IsItemHovered()) {
-      ImGui.SetTooltip(tooltip);
-    }
-    if (!enabled) {
-      ImGui.PopStyleVar();
-    }
-  }
-  private getNavigationPath() {
-    const parts: string[] = [];
-    let group: Nullable<PropertyGroup> = this._currentGroup;
-    while (group && group !== this._rootGroup) {
-      if (this.isObjectNavigationGroup(group)) {
-        parts.push(this.getGroupLabel(group));
-      }
-      group = group.parent;
-    }
-    return parts.length > 0 ? `Root / ${parts.reverse().join(' / ')}` : 'Root';
-  }
   private beginVirtualizedContent() {
     const drawList = ImGui.GetWindowDrawList();
     const clipMin = drawList.GetClipRectMin();
@@ -734,8 +635,8 @@ export class PropertyEditor extends Observable<{
     }
     this._rows = [];
     this._totalRowsHeight = 0;
-    this._currentGroup = this.resolveExistingNavigationGroup(this._currentGroup.statePath);
-    this.appendGroupRows(this._currentGroup, 0, true);
+    this._inspectedGroup = this.resolveExistingObjectGroup(this._inspectedGroup.statePath);
+    this.appendGroupRows(this._rootGroup, 0, true);
     this._builtRowVersion = this._rowVersion;
   }
   private appendRow(row: PropertyRowData, height = this._rowHeight) {
@@ -756,11 +657,10 @@ export class PropertyEditor extends Observable<{
       this.appendRow({ type: 'inlineObjectArrayGroup', group, level });
       return;
     }
-    const navigable = !toplevel && this.isObjectNavigationGroup(group);
     if (!toplevel || group !== this._rootGroup) {
-      this.appendRow({ type: 'group', group, level, toplevel, navigable });
+      this.appendRow({ type: 'group', group, level, toplevel });
     }
-    if (navigable || (!toplevel && !group.opened)) {
+    if (!toplevel && !group.opened) {
       return;
     }
     for (const property of group.properties) {
@@ -771,12 +671,15 @@ export class PropertyEditor extends Observable<{
         if (prop.value?.isValid && !prop.value.isValid.call(prop.object)) {
           continue;
         }
-        this.appendRow({ type: 'property', property: prop, level: level + 2 }, this.getPropertyHeight(prop));
+        this.appendRow(
+          { type: 'property', property: prop, owner: group, level: level + 2 },
+          this.getPropertyHeight(prop)
+        );
       }
     }
     for (const rawProperty of group.rawProperties) {
       this.appendRow(
-        { type: 'rawProperty', property: rawProperty, level: level + 2 },
+        { type: 'rawProperty', property: rawProperty, owner: group, level: level + 2 },
         this.getRawPropertyHeight(rawProperty)
       );
     }
@@ -859,7 +762,7 @@ export class PropertyEditor extends Observable<{
     switch (row.type) {
       case 'group':
         ImGui.PushID(row.group.statePath);
-        this.renderGroup(row.group, row.level, row.toplevel, row.navigable);
+        this.renderGroup(row.group, row.level, row.toplevel);
         ImGui.PopID();
         break;
       case 'inlineObjectArrayGroup':
@@ -868,14 +771,14 @@ export class PropertyEditor extends Observable<{
         ImGui.PopID();
         break;
       case 'property':
-        this.renderProperty(row.property, row.level);
+        this.renderProperty(row.property, row.level, row.owner);
         break;
       case 'rawProperty':
-        this.renderRawProperty(row.property, row.level);
+        this.renderRawProperty(row.property, row.level, row.owner);
         break;
     }
   }
-  private renderGroup(group: PropertyGroup, level = 0, toplevel = false, navigable = false) {
+  private renderGroup(group: PropertyGroup, level = 0, toplevel = false) {
     ImGui.TableNextRow(0, this._rowHeight);
     if (this._showLeadingColumn) {
       ImGui.TableNextColumn();
@@ -886,22 +789,23 @@ export class PropertyEditor extends Observable<{
       ImGui.SetCursorPosX(baseX + level * 10);
     }
     ImGui.AlignTextToFramePadding();
-    if (!toplevel && !navigable) {
+    if (!toplevel) {
       ImGui.SetNextItemOpen(group.opened, ImGui.Cond.Always);
     }
     let opened = true;
-    if (navigable) {
-      opened = this.renderObjectNavigationEntry(group);
-    } else if (toplevel) {
+    if (toplevel) {
       if (group !== this._rootGroup) {
         ImGui.TextDisabled(this.getGroupLabel(group));
       }
     } else {
-      opened = ImGui.TreeNodeEx(group.name, 0);
+      opened = ImGui.TreeNodeEx(this.getGroupLabel(group), 0);
+      if (ImGui.IsItemClicked(ImGui.MouseButton.Left) || ImGui.IsItemActivated()) {
+        this.inspectGroup(group);
+      }
     }
     if (group.opened !== opened) {
       group.opened = opened;
-      if (!navigable && group !== this._currentGroup) {
+      if (group !== this._rootGroup) {
         this._groupOpenStates.set(group.statePath, opened);
         this.invalidateRows();
       }
@@ -945,12 +849,14 @@ export class PropertyEditor extends Observable<{
             true
           );
           if (clicked) {
+            this.inspectGroup(group);
             ImGui.OpenPopup(`##group_type_popup_${group.path}`);
           }
           if (ImGui.BeginPopup(`##group_type_popup_${group.path}`)) {
             for (let i = 0; i < group.objectTypes.length; i++) {
               const typeName = group.objectTypes[i]?.name ?? 'NULL';
               if (ImGui.Selectable(typeName, group.selected[0] === i)) {
+                this.inspectGroup(group);
                 group.selected[0] = i;
               }
             }
@@ -960,6 +866,7 @@ export class PropertyEditor extends Observable<{
             ImGui.SameLine(0, 0);
             this.pushInlineActionButtonStyle();
             if (ImGui.Button(`${FontGlyph.glyphs['ok']}##set`, new ImGui.ImVec2(buttonSize, 0))) {
+              this.inspectGroup(group);
               const ctor = group.objectTypes[group.selected[0]]?.ctor;
               const newObj = ctor
                 ? group.prop.create
@@ -980,6 +887,7 @@ export class PropertyEditor extends Observable<{
               ImGui.Button(`${FontGlyph.glyphs['plus']}##add`, new ImGui.ImVec2(buttonSize, 0)) &&
               group.selected[0] >= 0
             ) {
+              this.inspectGroup(group);
               const ctor = group.objectTypes[group.selected[0]]?.ctor;
               const newObj = ctor
                 ? group.prop.create
@@ -996,6 +904,7 @@ export class PropertyEditor extends Observable<{
             ImGui.SameLine(0, 0);
             this.pushInlineActionButtonStyle();
             if (ImGui.Button(`${FontGlyph.glyphs['cancel']}##delete`, new ImGui.ImVec2(buttonSize, 0))) {
+              this.inspectGroup(group);
               group.prop.delete!.call(group.object, group.index);
               this.dispatchEvent('object_property_changed', group.object, group.prop);
               this.refresh();
@@ -1027,6 +936,7 @@ export class PropertyEditor extends Observable<{
             ImGui.SameLine(0, 0);
             this.pushInlineActionButtonStyle();
             if (ImGui.Button(`${FontGlyph.glyphs['pencil']}##edit`, new ImGui.ImVec2(-1, 0))) {
+              this.inspectGroup(group);
               if (group.prop.options?.edit === 'aabb') {
                 this.dispatchEvent('request_edit_aabb', group.value.object[0] as AABB);
               } else if (group.prop.options?.edit === 'curve1f') {
@@ -1058,6 +968,7 @@ export class PropertyEditor extends Observable<{
           if (settable) {
             this.pushInlineActionButtonStyle();
             if (ImGui.Button(`${FontGlyph.glyphs['ok']}##set`, new ImGui.ImVec2(buttonSize, 0))) {
+              this.inspectGroup(group);
               const ctor = group.objectTypes[0]?.ctor;
               const newObj = ctor
                 ? group.prop.create
@@ -1077,6 +988,7 @@ export class PropertyEditor extends Observable<{
             }
             this.pushInlineActionButtonStyle();
             if (ImGui.Button(`${FontGlyph.glyphs['plus']}##add`, new ImGui.ImVec2(buttonSize, 0))) {
+              this.inspectGroup(group);
               const ctor = group.objectTypes[0]?.ctor;
               const newObj = ctor
                 ? group.prop.create
@@ -1095,6 +1007,7 @@ export class PropertyEditor extends Observable<{
             }
             this.pushInlineActionButtonStyle();
             if (ImGui.Button(`${FontGlyph.glyphs['cancel']}##delete`, new ImGui.ImVec2(buttonSize, 0))) {
+              this.inspectGroup(group);
               group.prop.delete!.call(group.object, group.index);
               this.dispatchEvent('object_property_changed', group.object, group.prop);
               this.refresh();
@@ -1128,6 +1041,7 @@ export class PropertyEditor extends Observable<{
             }
             this.pushInlineActionButtonStyle();
             if (ImGui.Button(`${FontGlyph.glyphs['pencil']}##edit`, new ImGui.ImVec2(buttonSize, 0))) {
+              this.inspectGroup(group);
               if (group.prop.options?.edit === 'aabb') {
                 this.dispatchEvent('request_edit_aabb', group.value.object[0] as AABB);
               } else if (group.prop.options?.edit === 'curve1f') {
@@ -1159,28 +1073,12 @@ export class PropertyEditor extends Observable<{
         ImGui.EndChild();
       }
     }
-    if (opened && !toplevel && !navigable && group !== this._currentGroup) {
+    if (opened && !toplevel) {
       ImGui.TreePop();
     }
     if (level > 0) {
       ImGui.SetCursorPosX(baseX);
     }
-  }
-  private renderObjectNavigationEntry(group: PropertyGroup) {
-    const label = this.getGroupLabel(group);
-    const hasObject = !!group.value.object?.[0];
-    const suffix = '';
-    const text = `${label}${suffix}`;
-    const prefix = hasObject ? (FontGlyph.glyphs['right-dir'] ?? '>') : '-';
-    const selectableFlags = !hasObject ? ImGui.SelectableFlags.Disabled : ImGui.SelectableFlags.None;
-    const clicked = ImGui.Selectable(`${prefix} ${text}##navigate`, false, selectableFlags);
-    if (clicked && hasObject) {
-      this.navigateToGroup(group);
-    }
-    if (ImGui.IsItemHovered()) {
-      ImGui.SetTooltip(hasObject ? 'Open object properties' : 'No object assigned');
-    }
-    return true;
   }
   private isInlineObjectArrayGroup(group: PropertyGroup) {
     return (
@@ -1228,6 +1126,9 @@ export class PropertyEditor extends Observable<{
     }
     ImGui.AlignTextToFramePadding();
     ImGui.Text(value.options?.label ?? group.prop.options?.label ?? inlineProperty.name);
+    if (ImGui.IsItemClicked(ImGui.MouseButton.Left)) {
+      this.inspectGroup(group);
+    }
     if (level > 0) {
       ImGui.SetCursorPosX(baseX);
     }
@@ -1264,10 +1165,12 @@ export class PropertyEditor extends Observable<{
     } else {
       const clicked = this.renderClippedStringField('##value_display', val[0], fieldWidth, canInlineEdit);
       if (clicked && canInlineEdit) {
+        this.inspectGroup(group);
         changed = customTextInput('##value', val, '', readonly ? CustomInputTextFlags.ReadOnly : 0);
       }
     }
     if (ImGui.IsItemClicked(ImGui.MouseButton.Left)) {
+      this.inspectGroup(group);
       this.revealAsset(val[0]);
     }
     this.setDragDropProperty(object, value, tmpProperty);
@@ -1275,6 +1178,7 @@ export class PropertyEditor extends Observable<{
       ImGui.SameLine(0, 0);
       this.pushInlineActionButtonStyle();
       if (ImGui.Button(`${FontGlyph.glyphs['link']}##pick`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))) {
+        this.inspectGroup(group);
       }
       if (ImGui.IsItemHovered()) {
         ImGui.SetTooltip(
@@ -1309,6 +1213,7 @@ export class PropertyEditor extends Observable<{
       ImGui.SameLine(0, 0);
       this.pushInlineActionButtonStyle();
       if (ImGui.Button(`${FontGlyph.glyphs['cancel']}##clear`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))) {
+        this.inspectGroup(group);
         tmpProperty.str[0] = '';
         Promise.resolve(value.set!.call(object, tmpProperty)).then(() => {
           this.invalidateRows();
@@ -1321,6 +1226,7 @@ export class PropertyEditor extends Observable<{
       ImGui.SameLine(0, 0);
       this.pushInlineActionButtonStyle();
       if (ImGui.Button(`${FontGlyph.glyphs['plus']}##add`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))) {
+        this.inspectGroup(group);
         const ctor = group.objectTypes?.[0]?.ctor;
         const newObj = ctor
           ? group.prop.create
@@ -1339,6 +1245,7 @@ export class PropertyEditor extends Observable<{
       if (
         ImGui.Button(`${FontGlyph.glyphs['cancel']}##delete`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))
       ) {
+        this.inspectGroup(group);
         group.prop.delete!.call(group.object, group.index);
         this.dispatchEvent('object_property_changed', group.object, group.prop);
         this.refresh();
@@ -1349,13 +1256,14 @@ export class PropertyEditor extends Observable<{
       ImGui.EndChild();
     }
     if (changed && value.set) {
+      this.inspectGroup(group);
       value.set.call(object, tmpProperty);
       this.invalidateRows();
       this.dispatchEvent('object_property_changed', object, value);
     }
     return true;
   }
-  private renderRawProperty(value: RawProperty, level: number) {
+  private renderRawProperty(value: RawProperty, level: number, owner: PropertyGroup) {
     ImGui.PushID(value.name);
     ImGui.TableNextRow(0, this.getRawPropertyHeight(value));
     if (this._showLeadingColumn) {
@@ -1367,6 +1275,9 @@ export class PropertyEditor extends Observable<{
       ImGui.SetCursorPosX(baseX + level * 10);
     }
     ImGui.Text(value.name);
+    if (ImGui.IsItemClicked(ImGui.MouseButton.Left)) {
+      this.inspectGroup(owner);
+    }
     if (level > 0) {
       ImGui.SetCursorPosX(baseX);
     }
@@ -1533,6 +1444,7 @@ export class PropertyEditor extends Observable<{
     }
     ImGui.PopID();
     if (changed && value.set) {
+      this.inspectGroup(owner);
       value.set(tmpProperty);
       this.invalidateRows();
       this.dispatchEvent('object_property_changed', null, value);
@@ -1569,7 +1481,7 @@ export class PropertyEditor extends Observable<{
     prop.get.call(object, tmpProperty);
     this.revealAsset(tmpProperty.str[0]);
   }
-  private renderProperty(property: Property<any>, level: number) {
+  private renderProperty(property: Property<any>, level: number, owner: PropertyGroup) {
     const { name, object, value } = property;
     if (value && value.isValid && !value.isValid.call(object)) {
       this.renderVirtualSpacer(this.getPropertyHeight(property));
@@ -1583,6 +1495,7 @@ export class PropertyEditor extends Observable<{
       const animatable = value && !!value.options?.animatable;
       if (animatable && this.object instanceof SceneNode) {
         if (ImGui.Button('A')) {
+          this.inspectGroup(owner);
           Dialog.selectAnimationAndTrack(
             'Create animation track',
             this.object.animationSet.getAnimationNames(),
@@ -1617,6 +1530,7 @@ export class PropertyEditor extends Observable<{
     } else {
       ImGui.Text(value.options?.label ?? name);
       if (ImGui.IsItemClicked(ImGui.MouseButton.Left)) {
+        this.inspectGroup(owner);
         this.revealAssetFromProperty(object, value);
       }
       if (value.description && ImGui.IsItemHovered()) {
@@ -1733,10 +1647,12 @@ export class PropertyEditor extends Observable<{
                 canInlineEdit
               );
               if (clicked && canInlineEdit) {
+                this.inspectGroup(owner);
                 this.activateStringEditor(editSessionKey);
               }
             }
             if (ImGui.IsItemClicked(ImGui.MouseButton.Left)) {
+              this.inspectGroup(owner);
               this.revealAsset(val[0]);
             }
             this.setDragDropProperty(object, value, tmpProperty);
@@ -1746,6 +1662,7 @@ export class PropertyEditor extends Observable<{
               if (
                 ImGui.Button(`${FontGlyph.glyphs['link']}##pick`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))
               ) {
+                this.inspectGroup(owner);
               }
               if (ImGui.IsItemHovered()) {
                 ImGui.SetTooltip(
@@ -1785,6 +1702,7 @@ export class PropertyEditor extends Observable<{
                   new ImGui.ImVec2(ImGui.GetFrameHeight(), 0)
                 )
               ) {
+                this.inspectGroup(owner);
                 tmpProperty.str[0] = '';
                 Promise.resolve(value.set.call(object, tmpProperty)).then(() => {
                   this.invalidateRows();
@@ -1860,6 +1778,7 @@ export class PropertyEditor extends Observable<{
           if (editRotation) {
             ImGui.SameLine(0, 0);
             if (ImGui.Button(`${FontGlyph.glyphs['pencil']}##edit`, new ImGui.ImVec2(-1, 0))) {
+              this.inspectGroup(owner);
               ImGui.OpenPopup('EditQuaternion');
               RotationEditor.enable(!(object instanceof Camera) || !object.isOrtho());
               RotationEditor.reset(
@@ -1936,6 +1855,7 @@ export class PropertyEditor extends Observable<{
               ImGui.SameLine();
             }
             if (ImGui.Button(`${tmpProperty.str[i]}##command${i}`)) {
+              this.inspectGroup(owner);
               if (value.command && value.command.call(object, i)) {
                 this.refresh();
               }
@@ -1951,6 +1871,7 @@ export class PropertyEditor extends Observable<{
             : ImGui.GetContentRegionAvail().x;
           this.renderClippedStringField('##value_object', val[0], fieldWidth, false);
           if (ImGui.IsItemClicked(ImGui.MouseButton.Left)) {
+            this.inspectGroup(owner);
             this.revealAsset(val[0]);
           }
           this.setDragDropProperty(object, value, tmpProperty);
@@ -1963,6 +1884,7 @@ export class PropertyEditor extends Observable<{
                 new ImGui.ImVec2(ImGui.GetFrameHeight(), 0)
               )
             ) {
+              this.inspectGroup(owner);
               Promise.resolve(value.set!.call(object, null)).then(() => {
                 this.refresh();
                 this.dispatchEvent('object_property_changed', object, value);
@@ -2010,14 +1932,19 @@ export class PropertyEditor extends Observable<{
       }
       */
       if (changed && value.set) {
+        this.inspectGroup(owner);
         value.set.call(object, tmpProperty);
         this.invalidateRows();
         this.dispatchEvent('object_property_changed', object, value);
+      }
+      if (value.set && ImGui.IsItemActivated()) {
+        this.inspectGroup(owner);
       }
       if (value.set && ImGui.IsItemActivated() && !this._editSessions.has(editSessionKey)) {
         this._editSessions.set(editSessionKey, oldValue);
       }
       if (value.set && ImGui.IsItemDeactivatedAfterEdit()) {
+        this.inspectGroup(owner);
         const oldSnapshot = this._editSessions.get(editSessionKey) ?? oldValue;
         const newSnapshot = {
           num: [0, 0, 0, 0],
