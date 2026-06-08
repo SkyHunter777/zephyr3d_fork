@@ -93,18 +93,6 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
   const METALLIC_UNIFORM = S.defineInstanceUniform('metallic', 'float', 'Metallic');
   const ROUGHNESS_UNIFORM = S.defineInstanceUniform('roughness', 'float', 'Roughness');
   const SPECULAR_FACTOR_UNFORM = S.defineInstanceUniform('specularFactor', 'rgba', 'SpecularFactor');
-  const REFLECTION_MODE_UNIFORM = S.defineInstanceUniform('reflectionMode', 'float', 'ReflectionMode');
-  const ANISOTROPY_UNIFORM = S.defineInstanceUniform('anisotropy', 'float', 'Anisotropy');
-  const ANISOTROPY_DIRECTION_UNIFORM = S.defineInstanceUniform(
-    'anisotropyDirection',
-    'float',
-    'AnisotropyDirection'
-  );
-  const ANISOTROPY_DIRECTION_SCALE_BIAS_UNIFORM = S.defineInstanceUniform(
-    'anisotropyDirectionScaleBias',
-    'vec2',
-    'AnisotropyDirectionScaleBias'
-  );
 
   return class extends S {
     static readonly pbrMetallicRoughnessMixed = true;
@@ -178,7 +166,6 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
     ) {
       const pb = scope.$builder;
       const that = this as any;
-      const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
       const funcName = `Z_PBRMR_DirectLighting${outDiffuseColor ? '_D' : ''}${outTransmissionColor ? '_T' : ''}`;
       pb.func(
         funcName,
@@ -196,14 +183,10 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
           ...(outTransmissionColor ? [pb.vec3('outTransmissionColor').inout()] : [])
         ],
         function () {
-          this.$l.reflectionMode = instancing ? this.$inputs.zReflectionMode : this.zReflectionMode;
-          this.$l.anisotropy = instancing ? this.$inputs.zAnisotropy : this.zAnisotropy;
-          this.$l.anisotropyDirection = instancing
-            ? this.$inputs.zAnisotropyDirection
-            : this.zAnisotropyDirection;
-          this.$l.anisotropyDirectionScaleBias = instancing
-            ? this.$inputs.zAnisotropyDirectionScaleBias
-            : this.zAnisotropyDirectionScaleBias;
+          this.$l.reflectionMode = this.zReflectionMode;
+          this.$l.anisotropy = this.zAnisotropy;
+          this.$l.anisotropyDirection = this.zAnisotropyDirection;
+          this.$l.anisotropyDirectionScaleBias = this.zAnisotropyDirectionScaleBias;
           this.$l.NoL = pb.clamp(pb.dot(this.normal, this.L), 0, 1);
           this.$l.NoV = pb.clamp(pb.dot(this.normal, this.viewVec), 0, 1);
           this.$if(pb.greaterThan(this.NoL, 0), function () {
@@ -498,10 +481,7 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
       }
     }
     calculateAnisotropyDirectionScaleBias(scope: PBInsideFunctionScope) {
-      const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-      return (
-        instancing ? scope.$inputs.zAnisotropyDirectionScaleBias : scope.zAnisotropyDirectionScaleBias
-      ) as PBShaderExp;
+      return scope.zAnisotropyDirectionScaleBias as PBShaderExp;
     }
     PBRLight(
       scope: PBInsideFunctionScope,
@@ -740,13 +720,6 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
         scope.$outputs.zMetallic = this.getInstancedUniform(scope, METALLIC_UNIFORM);
         scope.$outputs.zRoughness = this.getInstancedUniform(scope, ROUGHNESS_UNIFORM);
         scope.$outputs.zSpecularFactor = this.getInstancedUniform(scope, SPECULAR_FACTOR_UNFORM);
-        scope.$outputs.zReflectionMode = this.getInstancedUniform(scope, REFLECTION_MODE_UNIFORM);
-        scope.$outputs.zAnisotropy = this.getInstancedUniform(scope, ANISOTROPY_UNIFORM);
-        scope.$outputs.zAnisotropyDirection = this.getInstancedUniform(scope, ANISOTROPY_DIRECTION_UNIFORM);
-        scope.$outputs.zAnisotropyDirectionScaleBias = this.getInstancedUniform(
-          scope,
-          ANISOTROPY_DIRECTION_SCALE_BIAS_UNIFORM
-        );
       }
     }
     fragmentShader(scope: PBFunctionScope) {
@@ -757,11 +730,11 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
           scope.zMetallic = pb.float().uniform(2);
           scope.zRoughness = pb.float().uniform(2);
           scope.zSpecularFactor = pb.vec4().uniform(2);
-          scope.zReflectionMode = pb.float().uniform(2);
-          scope.zAnisotropy = pb.float().uniform(2);
-          scope.zAnisotropyDirection = pb.float().uniform(2);
-          scope.zAnisotropyDirectionScaleBias = pb.vec2().uniform(2);
         }
+        scope.zReflectionMode = pb.float().uniform(2);
+        scope.zAnisotropy = pb.float().uniform(2);
+        scope.zAnisotropyDirection = pb.float().uniform(2);
+        scope.zAnisotropyDirectionScaleBias = pb.vec2().uniform(2);
       }
     }
     applyUniformValues(bindGroup: BindGroup, ctx: DrawContext, pass: number) {
@@ -771,11 +744,11 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
           bindGroup.setValue('zMetallic', this._metallic);
           bindGroup.setValue('zRoughness', this._roughness);
           bindGroup.setValue('zSpecularFactor', this._specularFactor);
-          bindGroup.setValue('zReflectionMode', PBR_REFLECTION_MODE[this._reflectionMode]);
-          bindGroup.setValue('zAnisotropy', this._anisotropy);
-          bindGroup.setValue('zAnisotropyDirection', this._anisotropyDirection);
-          bindGroup.setValue('zAnisotropyDirectionScaleBias', this._anisotropyDirectionScaleBias);
         }
+        bindGroup.setValue('zReflectionMode', PBR_REFLECTION_MODE[this._reflectionMode]);
+        bindGroup.setValue('zAnisotropy', this._anisotropy);
+        bindGroup.setValue('zAnisotropyDirection', this._anisotropyDirection);
+        bindGroup.setValue('zAnisotropyDirectionScaleBias', this._anisotropyDirectionScaleBias);
       }
     }
     calculateMetallic(scope: PBInsideFunctionScope, _albedo: PBShaderExp, _normal: PBShaderExp) {
@@ -839,16 +812,13 @@ export function mixinPBRMetallicRoughness<T extends typeof MeshMaterial>(BaseCls
       super.calculateCommonData(scope, albedo, normal, viewVec, TBN, data);
     }
     calculateReflectionMode(scope: PBInsideFunctionScope) {
-      const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-      return (instancing ? scope.$inputs.zReflectionMode : scope.zReflectionMode) as PBShaderExp;
+      return scope.zReflectionMode as PBShaderExp;
     }
     calculateAnisotropy(scope: PBInsideFunctionScope) {
-      const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-      return (instancing ? scope.$inputs.zAnisotropy : scope.zAnisotropy) as PBShaderExp;
+      return scope.zAnisotropy as PBShaderExp;
     }
     calculateAnisotropyDirection(scope: PBInsideFunctionScope) {
-      const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-      return (instancing ? scope.$inputs.zAnisotropyDirection : scope.zAnisotropyDirection) as PBShaderExp;
+      return scope.zAnisotropyDirection as PBShaderExp;
     }
   } as unknown as T & { new (...args: any[]): IMixinPBRMetallicRoughness };
 }

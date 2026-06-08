@@ -27,30 +27,6 @@ export class PBRMetallicRoughnessMaterial
   private static readonly FEATURE_VERTEX_NORMAL = this.defineFeature();
   /** @internal */
   private static readonly FEATURE_VERTEX_TANGENT = this.defineFeature();
-  /** @internal */
-  private static readonly SUBSURFACE_PROFILE_ID_UNIFORM = this.defineInstanceUniform(
-    'subsurfaceProfileId',
-    'float',
-    'SubsurfaceProfileId'
-  );
-  /** @internal */
-  private static readonly SUBSURFACE_PROFILE_SCALE_UNIFORM = this.defineInstanceUniform(
-    'subsurfaceProfileScale',
-    'float',
-    'SubsurfaceProfileScale'
-  );
-  /** @internal */
-  private static readonly SUBSURFACE_PROFILE_STRENGTH_UNIFORM = this.defineInstanceUniform(
-    'subsurfaceProfileStrength',
-    'float',
-    'SubsurfaceProfileStrength'
-  );
-  /** @internal */
-  private static readonly SUBSURFACE_PROFILE_PRESET_UNIFORM = this.defineInstanceUniform(
-    'subsurfaceProfilePreset',
-    'float',
-    'SubsurfaceProfilePreset'
-  );
   private readonly _subsurfaceProfileChanged: () => void;
   private _subsurfaceProfile: SubsurfaceProfile | null;
   /**
@@ -105,26 +81,16 @@ export class PBRMetallicRoughnessMaterial
     }
   }
   private getSubsurfaceProfileId(scope: PBInsideFunctionScope): PBShaderExp {
-    const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-    return (instancing ? scope.$inputs.zSubsurfaceProfileId : scope.zSubsurfaceProfileId) as PBShaderExp;
+    return scope.zSubsurfaceProfileId as PBShaderExp;
   }
   private getSubsurfaceProfileScale(scope: PBInsideFunctionScope): PBShaderExp {
-    const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-    return (
-      instancing ? scope.$inputs.zSubsurfaceProfileScale : scope.zSubsurfaceProfileScale
-    ) as PBShaderExp;
+    return scope.zSubsurfaceProfileScale as PBShaderExp;
   }
   private getSubsurfaceProfileStrength(scope: PBInsideFunctionScope): PBShaderExp {
-    const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-    return (
-      instancing ? scope.$inputs.zSubsurfaceProfileStrength : scope.zSubsurfaceProfileStrength
-    ) as PBShaderExp;
+    return scope.zSubsurfaceProfileStrength as PBShaderExp;
   }
   private getSubsurfaceProfilePreset(scope: PBInsideFunctionScope): PBShaderExp {
-    const instancing = !!(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING);
-    return (
-      instancing ? scope.$inputs.zSubsurfaceProfilePreset : scope.zSubsurfaceProfilePreset
-    ) as PBShaderExp;
+    return scope.zSubsurfaceProfilePreset as PBShaderExp;
   }
   vertexShader(scope: PBFunctionScope) {
     super.vertexShader(scope);
@@ -157,39 +123,12 @@ export class PBRMetallicRoughnessMaterial
         );
       }
     }
-    if (
-      !!this._subsurfaceProfile &&
-      this.needFragmentColor() &&
-      this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING
-    ) {
-      scope.$outputs.zSubsurfaceProfileId = this.getInstancedUniform(
-        scope,
-        PBRMetallicRoughnessMaterial.SUBSURFACE_PROFILE_ID_UNIFORM
-      );
-      scope.$outputs.zSubsurfaceProfileScale = this.getInstancedUniform(
-        scope,
-        PBRMetallicRoughnessMaterial.SUBSURFACE_PROFILE_SCALE_UNIFORM
-      );
-      scope.$outputs.zSubsurfaceProfileStrength = this.getInstancedUniform(
-        scope,
-        PBRMetallicRoughnessMaterial.SUBSURFACE_PROFILE_STRENGTH_UNIFORM
-      );
-      scope.$outputs.zSubsurfaceProfilePreset = this.getInstancedUniform(
-        scope,
-        PBRMetallicRoughnessMaterial.SUBSURFACE_PROFILE_PRESET_UNIFORM
-      );
-    }
   }
   fragmentShader(scope: PBFunctionScope) {
     super.fragmentShader(scope);
     const pb = scope.$builder;
     const renderPassType = this.drawContext.renderPass!.type;
-    if (
-      !!this._subsurfaceProfile &&
-      this.needFragmentColor() &&
-      renderPassType === RENDER_PASS_TYPE_LIGHT &&
-      !(this.drawContext.materialFlags & MaterialVaryingFlags.INSTANCING)
-    ) {
+    if (!!this._subsurfaceProfile && this.needFragmentColor() && renderPassType === RENDER_PASS_TYPE_LIGHT) {
       scope.zSubsurfaceProfileId = pb.float().uniform(2);
       scope.zSubsurfaceProfileScale = pb.float().uniform(2);
       scope.zSubsurfaceProfileStrength = pb.float().uniform(2);
@@ -380,8 +319,7 @@ export class PBRMetallicRoughnessMaterial
     if (
       !!this._subsurfaceProfile &&
       this.needFragmentColor(ctx) &&
-      ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT &&
-      !(ctx.materialFlags & MaterialVaryingFlags.INSTANCING)
+      ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT
     ) {
       const profile = this._subsurfaceProfile;
       bindGroup.setValue('zSubsurfaceProfileId', profile?.slot ?? 0);
