@@ -25,6 +25,10 @@ import { RotationEditor } from './rotationeditor';
 import { Dialog } from '../views/dlg/dlg';
 import { ProjectService } from '../core/services/project';
 import { eventBus } from '../core/eventbus';
+import type { SceneHierarchyNodePickerPayload } from './scenehierarchy';
+import type { VFSRendererAssetPickerPayload } from './vfsrenderer';
+import { matchesMimeType } from '../helpers/mimematch';
+import { CustomInputTextFlags, customTextInput } from './textinput';
 
 interface Property<T extends {}> {
   objectPath: string;
@@ -33,6 +37,53 @@ interface Property<T extends {}> {
   object: any;
   value: Nullable<PropertyAccessor<T>>;
 }
+
+interface RawProperty {
+  name: string;
+  type: PropertyType;
+  get: (value: PropertyValue) => void;
+  set?: (value: PropertyValue) => void;
+  options?: {
+    enum?: {
+      labels: string[];
+      values: any[];
+    };
+    multiline?: boolean;
+    speed?: number;
+    minValue?: number;
+    maxValue?: number;
+  };
+}
+
+type PropertyRowData =
+  | {
+      type: 'group';
+      group: PropertyGroup;
+      level: number;
+      toplevel: boolean;
+      navigable: boolean;
+    }
+  | {
+      type: 'inlineObjectArrayGroup';
+      group: PropertyGroup;
+      level: number;
+    }
+  | {
+      type: 'property';
+      property: Property<any>;
+      level: number;
+    }
+  | {
+      type: 'rawProperty';
+      property: RawProperty;
+      level: number;
+    };
+
+type PropertyRow = PropertyRowData & {
+  id: number;
+  y: number;
+  height: number;
+};
 
 class PropertyGroup {
   grid: PropertyEditor;
@@ -43,26 +94,14 @@ class PropertyGroup {
   value: RequireOptionals<PropertyValue>;
   parent: Nullable<PropertyGroup>;
   path: string;
+  statePath: string;
   property: Nullable<Property<any>>;
   currentType: number;
+  opened: boolean;
   objectTypes: Nullable<Nullable<SerializableClass>[]>;
   prop: Nullable<PropertyAccessor<any>>;
   properties: (PropertyGroup | { name: string; property: Property<any> })[];
-  rawProperties: {
-    name: string;
-    type: PropertyType;
-    get: (value: PropertyValue) => void;
-    set?: (value: PropertyValue) => void;
-    options?: {
-      enum?: {
-        labels: string[];
-        values: any[];
-      };
-      speed?: number;
-      minValue?: number;
-      maxValue?: number;
-    };
-  }[];
+  rawProperties: RawProperty[];
   object: any;
   subgroups: PropertyGroup[];
   constructor(name: string, grid: PropertyEditor) {
@@ -72,11 +111,13 @@ class PropertyGroup {
     this.selected = [-1];
     this.count = 1;
     this.path = '';
+    this.statePath = name;
     this.parent = null;
     this.value = { num: [], str: [], bool: [], object: [null] };
     this.property = null;
     this.prop = null;
     this.currentType = -1;
+    this.opened = true;
     this.objectTypes = null;
     this.properties = [];
     this.rawProperties = [];
@@ -170,6 +211,7 @@ class PropertyGroup {
     const group = new PropertyGroup(name, this.grid);
     group.parent = this;
     group.path = this.path;
+    group.statePath = `${this.statePath}/${name}`;
     this.subgroups.push(group);
     return group;
   }
@@ -181,6 +223,9 @@ class PropertyGroup {
     ) as PropertyGroup;
     if (!parent) {
       parent = new PropertyGroup(firstPart, this.grid);
+      parent.parent = this;
+      parent.path = this.path;
+      parent.statePath = `${this.statePath}/${firstPart}`;
       this.properties.push(parent);
     }
     let group = parent;
@@ -209,6 +254,8 @@ class PropertyGroup {
   ) {
     if (this.value.object[0] !== obj || this.prop !== prop) {
       const resourceManager = getEngine().resourceManager;
+      const parentPath = this.parent?.path ?? '';
+      const parentStatePath = this.parent?.statePath ?? this.name;
       this.value.object[0] = obj ?? null;
       this.property = null;
       this.object = parentObj;
@@ -216,8 +263,11 @@ class PropertyGroup {
       this.index = index ?? 0;
       this.count = count ?? 1;
       this.prop = prop ?? null;
+      this.path = parentPath;
+      this.statePath = parentStatePath;
       if (this.prop) {
         this.path = `${this.path}/${this.prop.name}${typeof index === 'number' ? `[${index}]` : ''}`;
+        this.statePath = `${this.statePath}/${this.prop.name}${typeof index === 'number' ? `[${index}]` : ''}`;
       }
       this.objectTypes =
         prop?.options?.objectTypes?.length! > 0
@@ -283,7 +333,23 @@ export class PropertyEditor extends Observable<{
   private _dragging: boolean;
   private _dirty: boolean;
   private _editSessions: Map<string, RequireOptionals<PropertyValue>>;
+  private _activeStringEditors: Set<string>;
+  private _pendingStringEditorFocus: Nullable<string>;
   private _showLeadingColumn: boolean;
+  private _virtualClipMinY: number;
+  private _virtualClipMaxY: number;
+  private _rowHeight: number;
+  private _rows: PropertyRow[];
+  private _rowVersion: number;
+  private _builtRowVersion: number;
+  private _totalRowsHeight: number;
+  private _groupOpenStates: Map<string, boolean>;
+  private _currentGroup: PropertyGroup;
+  private _navigationBackStack: string[];
+  private _navigationForwardStack: string[];
+  private _scrollToTopRequested: boolean;
+  private _restoreScrollY: Nullable<number>;
+  private _restoreScrollFrames: number;
   private readonly _extraPropertiesProviders: Map<
     string,
     (object: any) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>
@@ -296,7 +362,23 @@ export class PropertyEditor extends Observable<{
     this._dragging = false;
     this._dirty = false;
     this._editSessions = new Map();
+    this._activeStringEditors = new Set();
+    this._pendingStringEditorFocus = null;
     this._showLeadingColumn = true;
+    this._virtualClipMinY = 0;
+    this._virtualClipMaxY = 0;
+    this._rowHeight = 0;
+    this._rows = [];
+    this._rowVersion = 0;
+    this._builtRowVersion = -1;
+    this._totalRowsHeight = 0;
+    this._groupOpenStates = new Map();
+    this._currentGroup = this._rootGroup;
+    this._navigationBackStack = [];
+    this._navigationForwardStack = [];
+    this._scrollToTopRequested = false;
+    this._restoreScrollY = null;
+    this._restoreScrollFrames = 0;
     this._extraPropertiesProviders = new Map();
     this._extraPropertiesVersion = 0;
   }
@@ -304,7 +386,13 @@ export class PropertyEditor extends Observable<{
     return this._rootGroup.getObject();
   }
   set object(value: any) {
+    const oldObject = this.object;
     this._rootGroup.setObject(value);
+    if (oldObject !== value) {
+      this.resetNavigation();
+    } else {
+      this.invalidateRows();
+    }
     if (this._extraPropertiesProviders.size > 0) {
       const version = ++this._extraPropertiesVersion;
       void this.appendExtraProperties(value, version);
@@ -314,7 +402,114 @@ export class PropertyEditor extends Observable<{
     return this._rootGroup;
   }
   get currentObject() {
-    return this.object;
+    const prop = this._currentGroup.prop;
+    if (!prop) {
+      return this.object;
+    }
+    ASSERT(prop.type === 'object' || prop.type === 'object_array');
+    ASSERT(this._currentGroup.object);
+    const value = { num: [], bool: [], str: [], object: [] };
+    prop.get.call(this._currentGroup.object, value);
+    return value.object[this._currentGroup.index ?? 0];
+  }
+  private resetNavigation() {
+    this._currentGroup = this._rootGroup;
+    this._navigationBackStack = [];
+    this._navigationForwardStack = [];
+    this._scrollToTopRequested = true;
+    this.invalidateRows();
+  }
+  private isObjectNavigationGroup(group: PropertyGroup) {
+    return !!group.prop && (group.prop.type === 'object' || group.prop.type === 'object_array');
+  }
+  private getGroupLabel(group: PropertyGroup) {
+    if (group === this._rootGroup) {
+      return 'Root';
+    }
+    return group.prop?.options?.label ?? group.name;
+  }
+  private findGroupByStatePath(path: string) {
+    const visit = (group: PropertyGroup): Nullable<PropertyGroup> => {
+      if (group.statePath === path) {
+        return group;
+      }
+      for (const property of group.properties) {
+        if (property instanceof PropertyGroup) {
+          const found = visit(property);
+          if (found) {
+            return found;
+          }
+        }
+      }
+      for (const subgroup of group.subgroups) {
+        const found = visit(subgroup);
+        if (found) {
+          return found;
+        }
+      }
+      return null;
+    };
+    return visit(this._rootGroup);
+  }
+  private resolveExistingNavigationGroup(path: string) {
+    let currentPath = path;
+    while (currentPath) {
+      const group = this.findGroupByStatePath(currentPath);
+      if (group && (group === this._rootGroup || this.isObjectNavigationGroup(group))) {
+        return group;
+      }
+      const index = currentPath.lastIndexOf('/');
+      if (index < 0) {
+        break;
+      }
+      currentPath = currentPath.slice(0, index);
+    }
+    return this._rootGroup;
+  }
+  private restoreCurrentGroup(statePath: string) {
+    this._currentGroup = this.resolveExistingNavigationGroup(statePath);
+    this._navigationBackStack = this._navigationBackStack
+      .map((path) => this.resolveExistingNavigationGroup(path).statePath)
+      .filter((path) => path !== this._currentGroup.statePath);
+    this._navigationForwardStack = this._navigationForwardStack
+      .map((path) => this.resolveExistingNavigationGroup(path).statePath)
+      .filter((path) => path !== this._currentGroup.statePath);
+    this.invalidateRows();
+  }
+  private navigateToGroup(group: PropertyGroup, recordHistory = true) {
+    if (group === this._currentGroup) {
+      return;
+    }
+    if (recordHistory) {
+      this._navigationBackStack.push(this._currentGroup.statePath);
+      this._navigationForwardStack = [];
+    }
+    this._currentGroup = group;
+    this._scrollToTopRequested = true;
+    this.invalidateRows();
+  }
+  private navigateBack() {
+    const path = this._navigationBackStack.pop();
+    if (!path) {
+      return;
+    }
+    this._navigationForwardStack.push(this._currentGroup.statePath);
+    this.navigateToGroup(this.resolveExistingNavigationGroup(path), false);
+  }
+  private navigateForward() {
+    const path = this._navigationForwardStack.pop();
+    if (!path) {
+      return;
+    }
+    this._navigationBackStack.push(this._currentGroup.statePath);
+    this.navigateToGroup(this.resolveExistingNavigationGroup(path), false);
+  }
+  private navigateUp() {
+    let parent = this._currentGroup.parent;
+    while (parent && parent !== this._rootGroup && !this.isObjectNavigationGroup(parent)) {
+      parent = parent.parent;
+    }
+    this.navigateToGroup(parent ?? this._rootGroup);
   }
   set extraPropertiesProvider(
     provider: Nullable<(object: any) => PropertyAccessor<any>[] | Promise<PropertyAccessor<any>[]>>
@@ -339,6 +534,7 @@ export class PropertyEditor extends Observable<{
   }
   clear() {
     this._rootGroup = new PropertyGroup('Root', this);
+    this.resetNavigation();
   }
   set showLeadingColumn(value: boolean) {
     this._showLeadingColumn = !!value;
@@ -348,6 +544,22 @@ export class PropertyEditor extends Observable<{
   }
   refresh() {
     this._dirty = true;
+    this.invalidateRows();
+  }
+  async rebuild() {
+    const object = this.object;
+    const rawProps = this._rootGroup.rawProperties;
+    const currentGroupStatePath = this._currentGroup.statePath;
+    const version = ++this._extraPropertiesVersion;
+    const rootGroup = new PropertyGroup('Root', this);
+    rootGroup.setObject(object);
+    rootGroup.rawProperties = rawProps;
+    if (!(await this.appendExtraProperties(object, version, rootGroup))) {
+      return;
+    }
+    this._rootGroup = rootGroup;
+    this._currentGroup = this._rootGroup;
+    this.restoreCurrentGroup(currentGroupStatePath);
   }
   private async appendExtraProperties(object: any, version: number, targetGroup = this._rootGroup) {
     if (!object || this._extraPropertiesProviders.size === 0) {
@@ -364,19 +576,35 @@ export class PropertyEditor extends Observable<{
         targetGroup.addProperty(object, prop);
       }
     }
+    if (targetGroup === this._rootGroup) {
+      this.invalidateRows();
+    }
     return true;
   }
   render() {
     if (this._dirty) {
+      if (!this._scrollToTopRequested) {
+        this._restoreScrollY = ImGui.GetScrollY();
+        this._restoreScrollFrames = 2;
+      }
       this._dirty = false;
-      const object = this.object;
-      const rawProps = this._rootGroup.rawProperties;
-      this.clear();
-      this.object = object;
-      this._rootGroup.rawProperties = rawProps;
+      void this.rebuild();
     }
-    const animateLabelWidth = this._showLeadingColumn ? ImGui.GetFrameHeight() : 0;
+    this.renderNavigationBar();
+    if (this._scrollToTopRequested) {
+      ImGui.SetScrollY(0);
+      this._scrollToTopRequested = false;
+      this._restoreScrollY = null;
+      this._restoreScrollFrames = 0;
+    } else if (this._restoreScrollY !== null) {
+      ImGui.SetScrollY(Math.min(this._restoreScrollY, ImGui.GetScrollMaxY()));
+      this._restoreScrollFrames--;
+      if (this._restoreScrollFrames <= 0) {
+        this._restoreScrollY = null;
+      }
+    }
     const availableWidth = ImGui.GetContentRegionAvail().x;
+    const animateLabelWidth = this._showLeadingColumn ? ImGui.GetFrameHeight() : 0;
     const contentWidth = this._showLeadingColumn ? availableWidth - animateLabelWidth : availableWidth;
     const labelWidth = Math.max(0, contentWidth * this._labelPercent);
     const valueWidth = Math.max(0, contentWidth * (1 - this._labelPercent));
@@ -410,27 +638,245 @@ export class PropertyEditor extends Observable<{
       }
       ImGui.TableSetupColumn('Name', ImGui.TableColumnFlags.WidthFixed, labelWidth);
       ImGui.TableSetupColumn('Value', ImGui.TableColumnFlags.WidthFixed, valueWidth);
-      this.renderGroup(this._rootGroup, 0, true);
+      this.ensureRows();
+      this.beginVirtualizedContent();
+      this.renderRows();
 
       ImGui.EndTable();
     }
   }
-  private renderSubGroups(group: PropertyGroup, level: number) {
-    for (let i = 0; i < group.subgroups.length; i++) {
-      const subgroup = group.subgroups[i];
-      ImGui.PushID(i);
-      this.renderGroup(subgroup, level);
-      ImGui.PopID();
+  private renderNavigationBar() {
+    const buttonSize = ImGui.GetFrameHeight();
+    ImGui.PushID('property_navigation');
+    this.renderNavigationButton(
+      FontGlyph.glyphs['left-dir'] ?? '<',
+      'Back',
+      this._navigationBackStack.length > 0,
+      () => this.navigateBack()
+    );
+    ImGui.SameLine(0, 0);
+    this.renderNavigationButton(
+      FontGlyph.glyphs['right-dir'] ?? '>',
+      'Forward',
+      this._navigationForwardStack.length > 0,
+      () => this.navigateForward()
+    );
+    ImGui.SameLine(0, 0);
+    this.renderNavigationButton(
+      FontGlyph.glyphs['up-dir'] ?? '^',
+      'Up',
+      this._currentGroup !== this._rootGroup,
+      () => this.navigateUp()
+    );
+    ImGui.SameLine(0, 0);
+    this.renderNavigationButton(
+      FontGlyph.glyphs['home'] ?? 'H',
+      'Root',
+      this._currentGroup !== this._rootGroup,
+      () => this.navigateToGroup(this._rootGroup)
+    );
+    ImGui.SameLine();
+    ImGui.BeginChild('##path', new ImGui.ImVec2(-1, buttonSize));
+    ImGui.AlignTextToFramePadding();
+    ImGui.Text(this.getNavigationPath());
+    if (ImGui.IsItemHovered()) {
+      ImGui.SetTooltip(this.getNavigationPath());
+    }
+    ImGui.EndChild();
+    ImGui.PopID();
+    ImGui.Separator();
+  }
+  private renderNavigationButton(label: string, tooltip: string, enabled: boolean, action: () => void) {
+    if (!enabled) {
+      ImGui.PushStyleVar(ImGui.StyleVar.Alpha, ImGui.GetStyle().Alpha * 0.45);
+    }
+    if (ImGui.Button(`${label}##${tooltip}`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0)) && enabled) {
+      action();
+    }
+    if (ImGui.IsItemHovered()) {
+      ImGui.SetTooltip(tooltip);
+    }
+    if (!enabled) {
+      ImGui.PopStyleVar();
     }
   }
-  private renderGroup(group: PropertyGroup, level = 0, toplevel = false) {
+  private getNavigationPath() {
+    const parts: string[] = [];
+    let group: Nullable<PropertyGroup> = this._currentGroup;
+    while (group && group !== this._rootGroup) {
+      if (this.isObjectNavigationGroup(group)) {
+        parts.push(this.getGroupLabel(group));
+      }
+      group = group.parent;
+    }
+    return parts.length > 0 ? `Root / ${parts.reverse().join(' / ')}` : 'Root';
+  }
+  private beginVirtualizedContent() {
+    const drawList = ImGui.GetWindowDrawList();
+    const clipMin = drawList.GetClipRectMin();
+    const clipMax = drawList.GetClipRectMax();
+    const overscan = ImGui.GetFrameHeight() * 2;
+    const contentStartY = ImGui.GetCursorScreenPos().y;
+    this._virtualClipMinY = clipMin.y - contentStartY - overscan;
+    this._virtualClipMaxY = clipMax.y - contentStartY + overscan;
+  }
+  private invalidateRows() {
+    this._rowVersion++;
+  }
+  private ensureRows() {
+    const rowHeight = this.getTableRowHeight();
+    if (this._rowHeight !== rowHeight) {
+      this._rowHeight = rowHeight;
+      this.invalidateRows();
+    }
+    if (this._builtRowVersion === this._rowVersion) {
+      return;
+    }
+    this._rows = [];
+    this._totalRowsHeight = 0;
+    this._currentGroup = this.resolveExistingNavigationGroup(this._currentGroup.statePath);
+    this.appendGroupRows(this._currentGroup, 0, true);
+    this._builtRowVersion = this._rowVersion;
+  }
+  private appendRow(row: PropertyRowData, height = this._rowHeight) {
+    this._rows.push({
+      ...row,
+      id: this._rows.length,
+      y: this._totalRowsHeight,
+      height
+    } as PropertyRow);
+    this._totalRowsHeight += height;
+  }
+  private appendGroupRows(group: PropertyGroup, level = 0, toplevel = false) {
     if (group.prop?.isValid && group.object && !group.prop.isValid.call(group.object)) {
       return;
     }
-    if (this.renderInlineObjectArrayGroup(group, level)) {
+    this.applyGroupOpenState(group, toplevel);
+    if (this.isInlineObjectArrayGroup(group)) {
+      this.appendRow({ type: 'inlineObjectArrayGroup', group, level });
       return;
     }
-    ImGui.TableNextRow();
+    const navigable = !toplevel && this.isObjectNavigationGroup(group);
+    if (!toplevel || group !== this._rootGroup) {
+      this.appendRow({ type: 'group', group, level, toplevel, navigable });
+    }
+    if (navigable || (!toplevel && !group.opened)) {
+      return;
+    }
+    for (const property of group.properties) {
+      if (property instanceof PropertyGroup) {
+        this.appendGroupRows(property, level + 1);
+      } else {
+        const prop = property.property;
+        if (prop.value?.isValid && !prop.value.isValid.call(prop.object)) {
+          continue;
+        }
+        this.appendRow({ type: 'property', property: prop, level: level + 2 }, this.getPropertyHeight(prop));
+      }
+    }
+    for (const rawProperty of group.rawProperties) {
+      this.appendRow(
+        { type: 'rawProperty', property: rawProperty, level: level + 2 },
+        this.getRawPropertyHeight(rawProperty)
+      );
+    }
+    for (const subgroup of group.subgroups) {
+      this.appendGroupRows(subgroup, level + 1);
+    }
+  }
+  private applyGroupOpenState(group: PropertyGroup, toplevel = false) {
+    if (toplevel) {
+      group.opened = true;
+      return;
+    }
+    const opened = this._groupOpenStates.get(group.statePath);
+    if (opened !== undefined) {
+      group.opened = opened;
+    }
+  }
+  private getPropertyHeight(property: Property<any>) {
+    return this.getTableRowHeight(property.value?.options?.multiline ? 100 : undefined);
+  }
+  private getRawPropertyHeight(property: RawProperty) {
+    return this.getTableRowHeight(property.options?.multiline ? 100 : undefined);
+  }
+  private getTableRowHeight(controlHeight?: number) {
+    const style = ImGui.GetStyle();
+    return Math.max(controlHeight ?? 0, ImGui.GetFrameHeight()) + style.CellPadding.y * 2;
+  }
+  private renderRows() {
+    if (this._rows.length === 0) {
+      return;
+    }
+    const startIndex = this.findFirstRowOverlapping(this._virtualClipMinY);
+    const endIndex = this.findFirstRowAfter(this._virtualClipMaxY);
+    const visibleStart = Math.min(startIndex, this._rows.length);
+    const visibleEnd = Math.max(visibleStart, Math.min(endIndex, this._rows.length));
+    const topHeight = visibleStart < this._rows.length ? this._rows[visibleStart].y : this._totalRowsHeight;
+    this.renderVirtualSpacer(topHeight);
+    for (let i = visibleStart; i < visibleEnd; i++) {
+      this.renderRow(this._rows[i]);
+    }
+    const bottomStart = visibleEnd < this._rows.length ? this._rows[visibleEnd].y : this._totalRowsHeight;
+    this.renderVirtualSpacer(this._totalRowsHeight - bottomStart);
+  }
+  private findFirstRowOverlapping(y: number) {
+    let lo = 0;
+    let hi = this._rows.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const row = this._rows[mid];
+      if (row.y + row.height <= y) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+  private findFirstRowAfter(y: number) {
+    let lo = 0;
+    let hi = this._rows.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this._rows[mid].y < y) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+  private renderVirtualSpacer(height: number) {
+    if (height <= 0) {
+      return;
+    }
+    ImGui.TableNextRow(0, height);
+    ImGui.TableNextColumn();
+    ImGui.Dummy(new ImGui.ImVec2(0, 0));
+  }
+  private renderRow(row: PropertyRow) {
+    switch (row.type) {
+      case 'group':
+        ImGui.PushID(row.group.statePath);
+        this.renderGroup(row.group, row.level, row.toplevel, row.navigable);
+        ImGui.PopID();
+        break;
+      case 'inlineObjectArrayGroup':
+        ImGui.PushID(row.group.statePath);
+        this.renderInlineObjectArrayGroup(row.group, row.level);
+        ImGui.PopID();
+        break;
+      case 'property':
+        this.renderProperty(row.property, row.level);
+        break;
+      case 'rawProperty':
+        this.renderRawProperty(row.property, row.level);
+        break;
+    }
+  }
+  private renderGroup(group: PropertyGroup, level = 0, toplevel = false, navigable = false) {
+    ImGui.TableNextRow(0, this._rowHeight);
     if (this._showLeadingColumn) {
       ImGui.TableNextColumn();
     }
@@ -440,8 +886,26 @@ export class PropertyEditor extends Observable<{
       ImGui.SetCursorPosX(baseX + level * 10);
     }
     ImGui.AlignTextToFramePadding();
-    const flags = ImGui.TreeNodeFlags.DefaultOpen;
-    const opened = toplevel ? true : ImGui.TreeNodeEx(group.name, flags);
+    if (!toplevel && !navigable) {
+      ImGui.SetNextItemOpen(group.opened, ImGui.Cond.Always);
+    }
+    let opened = true;
+    if (navigable) {
+      opened = this.renderObjectNavigationEntry(group);
+    } else if (toplevel) {
+      if (group !== this._rootGroup) {
+        ImGui.TextDisabled(this.getGroupLabel(group));
+      }
+    } else {
+      opened = ImGui.TreeNodeEx(group.name, 0);
+    }
+    if (group.opened !== opened) {
+      group.opened = opened;
+      if (!navigable && group !== this._currentGroup) {
+        this._groupOpenStates.set(group.statePath, opened);
+        this.invalidateRows();
+      }
+    }
     if (
       group.object &&
       group.prop &&
@@ -450,63 +914,68 @@ export class PropertyEditor extends Observable<{
     ) {
       const editable =
         (group.value.object?.[0] instanceof AABB && group.prop.options?.edit === 'aabb') ||
-        (group.value.object?.[0] instanceof Interpolator && group.prop.options?.edit === 'curve1f') ||
-        (group.value.object?.[0] instanceof PropertyTrack && group.prop.options?.edit === 'proptrack');
+        (group.value.object?.[0] instanceof PropertyTrack && group.prop.options?.edit === 'proptrack') ||
+        (group.value.object?.[0] instanceof Interpolator &&
+          group.value.object[0].target === 'number' &&
+          group.prop.options?.edit === 'curve1f');
       const settable =
         !group.prop.readonly &&
         !!group.prop.set &&
         (group.prop.type === 'object' || group.index < group.count);
       const addable = group.prop.type === 'object_array' && !!group.prop.add;
       const deletable = group.prop.type === 'object_array' && group.prop.delete && group.index < group.count;
+      const showTypeSelector = group.objectTypes.length > 1;
 
       const buttonSize = ImGui.GetFrameHeight();
-      const spacing =
+      const buttonCount =
         (editable ? buttonSize : 0) +
         (settable ? buttonSize : 0) +
         (addable ? buttonSize : 0) +
         (deletable ? buttonSize : 0);
       ImGui.TableNextColumn();
-      if (settable || addable || deletable || editable) {
+      if (showTypeSelector || settable || addable || deletable || editable) {
         ImGui.BeginChild('', new ImGui.ImVec2(-1, ImGui.GetFrameHeight()));
-        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().x - spacing);
-        if (group.objectTypes.length > 0) {
-          const comboChanged = ImGui.Combo(
-            '',
-            group.selected,
-            group.objectTypes.map((val) => val?.name ?? 'NULL'),
-            group.objectTypes.length
+        if (showTypeSelector) {
+          const fieldWidth = Math.max(0, ImGui.GetContentRegionAvail().x - buttonCount);
+          const currentTypeName = group.objectTypes[group.selected[0]]?.name ?? 'NULL';
+          const clicked = this.renderClippedStringField(
+            `##group_type_${group.path}`,
+            currentTypeName,
+            fieldWidth,
+            true
           );
-          const selectedType = group.objectTypes[group.selected[0]] ?? null;
-          const currentObject = group.value.object?.[0] ?? null;
-          const currentCtor = currentObject?.constructor ?? null;
-          const sameTypeSelected = !!selectedType?.ctor && selectedType.ctor === currentCtor;
-          const canApplySelection = !!selectedType || !!currentObject;
-          const applySelection = () => {
-            if (!canApplySelection || sameTypeSelected) {
-              return;
+          if (clicked) {
+            ImGui.OpenPopup(`##group_type_popup_${group.path}`);
+          }
+          if (ImGui.BeginPopup(`##group_type_popup_${group.path}`)) {
+            for (let i = 0; i < group.objectTypes.length; i++) {
+              const typeName = group.objectTypes[i]?.name ?? 'NULL';
+              if (ImGui.Selectable(typeName, group.selected[0] === i)) {
+                group.selected[0] = i;
+              }
             }
-            const ctor = selectedType?.ctor;
-            const newObj = ctor
-              ? group.prop.create
-                ? group.prop.create.call(group.object, ctor, group.index)
-                : new ctor()
-              : null;
-            const value = { object: [newObj], str: [], bool: [], num: [] };
-            group.prop.set!.call(group.object, value, group.index);
-            this.dispatchEvent('object_property_changed', group.object, group.prop);
-            this.refresh();
-          };
-          if (comboChanged) {
-            applySelection();
+            ImGui.EndPopup();
           }
           if (settable) {
             ImGui.SameLine(0, 0);
+            this.pushInlineActionButtonStyle();
             if (ImGui.Button(`${FontGlyph.glyphs['ok']}##set`, new ImGui.ImVec2(buttonSize, 0))) {
-              applySelection();
+              const ctor = group.objectTypes[group.selected[0]]?.ctor;
+              const newObj = ctor
+                ? group.prop.create
+                  ? group.prop.create.call(group.object, ctor, group.index)
+                  : new ctor()
+                : null;
+              const value = { object: [newObj], str: [], bool: [], num: [] };
+              group.prop.set!.call(group.object, value, group.index);
+              this.dispatchEvent('object_property_changed', group.object, group.prop);
+              this.refresh();
             }
+            this.popInlineActionButtonStyle();
           }
           if (addable) {
             ImGui.SameLine(0, 0);
+            this.pushInlineActionButtonStyle();
             if (
               ImGui.Button(`${FontGlyph.glyphs['plus']}##add`, new ImGui.ImVec2(buttonSize, 0)) &&
               group.selected[0] >= 0
@@ -521,9 +990,11 @@ export class PropertyEditor extends Observable<{
               this.dispatchEvent('object_property_changed', group.object, group.prop);
               this.refresh();
             }
+            this.popInlineActionButtonStyle();
           }
           if (deletable) {
             ImGui.SameLine(0, 0);
+            this.pushInlineActionButtonStyle();
             if (ImGui.Button(`${FontGlyph.glyphs['cancel']}##delete`, new ImGui.ImVec2(buttonSize, 0))) {
               group.prop.delete!.call(group.object, group.index);
               this.dispatchEvent('object_property_changed', group.object, group.prop);
@@ -550,9 +1021,11 @@ export class PropertyEditor extends Observable<{
                 }
               }
             }
+            this.popInlineActionButtonStyle();
           }
           if (editable) {
             ImGui.SameLine(0, 0);
+            this.pushInlineActionButtonStyle();
             if (ImGui.Button(`${FontGlyph.glyphs['pencil']}##edit`, new ImGui.ImVec2(-1, 0))) {
               if (group.prop.options?.edit === 'aabb') {
                 this.dispatchEvent('request_edit_aabb', group.value.object[0] as AABB);
@@ -561,12 +1034,8 @@ export class PropertyEditor extends Observable<{
                   'request_edit_curve1f',
                   group.value.object[0] as Interpolator,
                   group.name,
-                  (curve) => {
-                    const nextValue = { object: [curve], str: [], bool: [], num: [] };
-                    group.prop!.set!.call(group.object, nextValue, group.index);
-                    this.dispatchEvent('object_property_changed', group.object, group.prop!);
-                    this.refresh();
-                  }
+                  (curve) =>
+                    group.prop.set.call(group.object, { num: [], bool: [], str: [], object: [curve] })
                 );
               } else if (group.prop.options?.edit === 'proptrack') {
                 const animation: unknown = group.object;
@@ -583,26 +1052,148 @@ export class PropertyEditor extends Observable<{
                 );
               }
             }
+            this.popInlineActionButtonStyle();
+          }
+        } else {
+          if (settable) {
+            this.pushInlineActionButtonStyle();
+            if (ImGui.Button(`${FontGlyph.glyphs['ok']}##set`, new ImGui.ImVec2(buttonSize, 0))) {
+              const ctor = group.objectTypes[0]?.ctor;
+              const newObj = ctor
+                ? group.prop.create
+                  ? group.prop.create.call(group.object, ctor, group.index)
+                  : new ctor()
+                : null;
+              const value = { object: [newObj], str: [], bool: [], num: [] };
+              group.prop.set!.call(group.object, value, group.index);
+              this.dispatchEvent('object_property_changed', group.object, group.prop);
+              this.refresh();
+            }
+            this.popInlineActionButtonStyle();
+          }
+          if (addable) {
+            if (settable) {
+              ImGui.SameLine(0, 0);
+            }
+            this.pushInlineActionButtonStyle();
+            if (ImGui.Button(`${FontGlyph.glyphs['plus']}##add`, new ImGui.ImVec2(buttonSize, 0))) {
+              const ctor = group.objectTypes[0]?.ctor;
+              const newObj = ctor
+                ? group.prop.create
+                  ? group.prop.create.call(group.object, ctor, group.index)
+                  : new ctor()
+                : null;
+              (group.prop.add<'object'>).call(group.object, { object: [newObj] }, group.index);
+              this.dispatchEvent('object_property_changed', group.object, group.prop);
+              this.refresh();
+            }
+            this.popInlineActionButtonStyle();
+          }
+          if (deletable) {
+            if (settable || addable) {
+              ImGui.SameLine(0, 0);
+            }
+            this.pushInlineActionButtonStyle();
+            if (ImGui.Button(`${FontGlyph.glyphs['cancel']}##delete`, new ImGui.ImVec2(buttonSize, 0))) {
+              group.prop.delete!.call(group.object, group.index);
+              this.dispatchEvent('object_property_changed', group.object, group.prop);
+              this.refresh();
+              if (editable) {
+                if (group.prop.options?.edit === 'aabb') {
+                  this.dispatchEvent('end_edit_aabb', group.value.object[0] as AABB);
+                } else if (group.prop.options?.edit === 'curve1f') {
+                  this.dispatchEvent('end_edit_curve1f', group.value.object[0] as Interpolator, null);
+                } else if (group.prop.options?.edit === 'proptrack') {
+                  const animation: unknown = group.object;
+                  ASSERT(
+                    animation instanceof AnimationClip,
+                    'PropertyTrack can only be edited in AnimationClip'
+                  );
+                  ASSERT(group.value.object[0] instanceof PropertyTrack);
+                  const node = animation.animationSet.model;
+                  this.dispatchEvent(
+                    'end_edit_track',
+                    group.value.object[0],
+                    getEngine().resourceManager.findAnimationTarget(node, group.value.object[0])!,
+                    false
+                  );
+                }
+              }
+            }
+            this.popInlineActionButtonStyle();
+          }
+          if (editable) {
+            if (settable || addable || deletable) {
+              ImGui.SameLine(0, 0);
+            }
+            this.pushInlineActionButtonStyle();
+            if (ImGui.Button(`${FontGlyph.glyphs['pencil']}##edit`, new ImGui.ImVec2(buttonSize, 0))) {
+              if (group.prop.options?.edit === 'aabb') {
+                this.dispatchEvent('request_edit_aabb', group.value.object[0] as AABB);
+              } else if (group.prop.options?.edit === 'curve1f') {
+                this.dispatchEvent(
+                  'request_edit_curve1f',
+                  group.value.object[0] as Interpolator,
+                  group.name,
+                  (curve) =>
+                    group.prop.set.call(group.object, { num: [], bool: [], str: [], object: [curve] })
+                );
+              } else if (group.prop.options?.edit === 'proptrack') {
+                const animation: unknown = group.object;
+                ASSERT(
+                  animation instanceof AnimationClip,
+                  'PropertyTrack can only be edited in AnimationClip'
+                );
+                ASSERT(group.value.object[0] instanceof PropertyTrack);
+                const node = animation.animationSet.model;
+                this.dispatchEvent(
+                  'request_edit_track',
+                  group.value.object[0],
+                  getEngine().resourceManager.findAnimationTarget(node, group.value.object[0])!
+                );
+              }
+            }
+            this.popInlineActionButtonStyle();
           }
         }
         ImGui.EndChild();
       }
     }
-    if (opened) {
-      if (!toplevel) {
-        ImGui.TreePop();
-      }
-      for (const property of group.properties) {
-        this.renderProperty(property instanceof PropertyGroup ? property : property.property, level + 2);
-      }
-      for (const rawProperties of group.rawProperties) {
-        this.renderRawProperty(rawProperties, level + 2);
-      }
-      this.renderSubGroups(group, level + 1);
+    if (opened && !toplevel && !navigable && group !== this._currentGroup) {
+      ImGui.TreePop();
     }
     if (level > 0) {
       ImGui.SetCursorPosX(baseX);
     }
+  }
+  private renderObjectNavigationEntry(group: PropertyGroup) {
+    const label = this.getGroupLabel(group);
+    const hasObject = !!group.value.object?.[0];
+    const suffix = '';
+    const text = `${label}${suffix}`;
+    const prefix = hasObject ? (FontGlyph.glyphs['right-dir'] ?? '>') : '-';
+    const selectableFlags = !hasObject ? ImGui.SelectableFlags.Disabled : ImGui.SelectableFlags.None;
+    const clicked = ImGui.Selectable(`${prefix} ${text}##navigate`, false, selectableFlags);
+    if (clicked && hasObject) {
+      this.navigateToGroup(group);
+    }
+    if (ImGui.IsItemHovered()) {
+      ImGui.SetTooltip(hasObject ? 'Open object properties' : 'No object assigned');
+    }
+    return true;
+  }
+  private isInlineObjectArrayGroup(group: PropertyGroup) {
+    return (
+      !!group.object &&
+      !!group.prop &&
+      group.prop.type === 'object_array' &&
+      !!group.prop.options?.inlineObjectArray &&
+      group.properties.length === 1 &&
+      group.subgroups.length === 0 &&
+      group.rawProperties.length === 0 &&
+      !(group.properties[0] instanceof PropertyGroup) &&
+      group.properties[0].property.value?.type === 'string'
+    );
   }
   private renderInlineObjectArrayGroup(group: PropertyGroup, level: number) {
     if (
@@ -610,23 +1201,26 @@ export class PropertyEditor extends Observable<{
       !group.prop ||
       group.prop.type !== 'object_array' ||
       !group.prop.options?.inlineObjectArray ||
-      !group.value.object?.[0] ||
       group.properties.length !== 1 ||
       group.subgroups.length > 0 ||
       group.rawProperties.length > 0 ||
       group.properties[0] instanceof PropertyGroup
     ) {
+      this.renderVirtualSpacer(this._rowHeight);
       return false;
     }
     const inlineProperty = group.properties[0].property;
     const value = inlineProperty.value;
     const object = inlineProperty.object;
     if (!value || value.type !== 'string') {
+      this.renderVirtualSpacer(this._rowHeight);
       return false;
     }
 
-    ImGui.TableNextRow();
-    ImGui.TableNextColumn();
+    ImGui.TableNextRow(0, this._rowHeight);
+    if (this._showLeadingColumn) {
+      ImGui.TableNextColumn();
+    }
     ImGui.TableNextColumn();
     const baseX = ImGui.GetCursorPosX();
     if (level > 0) {
@@ -650,33 +1244,82 @@ export class PropertyEditor extends Observable<{
     const val = tmpProperty.str as [string];
     const isSceneNodeRef = !!value.options?.sceneNode;
     const isAssetRef = !!value.options?.mimeTypes?.length;
+    const canInlineEdit = !!value.set && !readonly && !isSceneNodeRef && !isAssetRef;
     const hasValue = !!String(val[0] ?? '').trim();
     const addable = !!group.prop.add && group.index === group.count - 1;
     const deletable = !!group.prop.delete && group.index < group.count && (group.count > 1 || hasValue);
-    const extraButtons = (addable ? 1 : 0) + (deletable ? 1 : 0);
+    const pickerButtonCount = (isSceneNodeRef || isAssetRef) && value.set ? 1 : 0;
+    const clearButtonCount = (isSceneNodeRef || isAssetRef) && !!value.set && !!val[0] ? 1 : 0;
+    const extraButtons = pickerButtonCount + clearButtonCount + (addable ? 1 : 0) + (deletable ? 1 : 0);
     if (extraButtons > 0) {
       ImGui.BeginChild('', new ImGui.ImVec2(-1, ImGui.GetFrameHeight()));
-      ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().x - extraButtons * ImGui.GetFrameHeight());
-    } else {
-      ImGui.SetNextItemWidth(-1);
     }
+    const fieldWidth =
+      extraButtons > 0
+        ? ImGui.GetContentRegionAvail().x - extraButtons * ImGui.GetFrameHeight()
+        : ImGui.GetContentRegionAvail().x;
     let changed = false;
     if (isSceneNodeRef || isAssetRef) {
-      const clicked = this.renderClippedStringField('##value_display', val[0]);
-      if (clicked) {
-        this.revealAsset(val[0]);
-      }
+      this.renderClippedStringField('##value_display', val[0], fieldWidth, false);
     } else {
-      changed = ImGui.InputText(
-        '##value',
-        val,
-        undefined,
-        readonly ? ImGui.InputTextFlags.ReadOnly : undefined
-      );
+      const clicked = this.renderClippedStringField('##value_display', val[0], fieldWidth, canInlineEdit);
+      if (clicked && canInlineEdit) {
+        changed = customTextInput('##value', val, '', readonly ? CustomInputTextFlags.ReadOnly : 0);
+      }
+    }
+    if (ImGui.IsItemClicked(ImGui.MouseButton.Left)) {
+      this.revealAsset(val[0]);
     }
     this.setDragDropProperty(object, value, tmpProperty);
+    if (pickerButtonCount > 0) {
+      ImGui.SameLine(0, 0);
+      this.pushInlineActionButtonStyle();
+      if (ImGui.Button(`${FontGlyph.glyphs['link']}##pick`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))) {
+      }
+      if (ImGui.IsItemHovered()) {
+        ImGui.SetTooltip(
+          isSceneNodeRef
+            ? 'Drag this button onto a node in the scene hierarchy to set the reference'
+            : 'Drag this button onto an asset to set the reference'
+        );
+      }
+      if (ImGui.BeginDragDropSource()) {
+        if (isSceneNodeRef) {
+          const payload: SceneHierarchyNodePickerPayload = {
+            type: 'node-picker',
+            object,
+            prop: value
+          };
+          ImGui.SetDragDropPayload('NODE', payload);
+          ImGui.Text('Drop on a scene node');
+        } else {
+          const payload: VFSRendererAssetPickerPayload = {
+            type: 'asset-picker',
+            object,
+            prop: value
+          };
+          ImGui.SetDragDropPayload('ASSET', payload);
+          ImGui.Text('Drop on an asset');
+        }
+        ImGui.EndDragDropSource();
+      }
+      this.popInlineActionButtonStyle();
+    }
+    if (clearButtonCount > 0) {
+      ImGui.SameLine(0, 0);
+      this.pushInlineActionButtonStyle();
+      if (ImGui.Button(`${FontGlyph.glyphs['cancel']}##clear`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))) {
+        tmpProperty.str[0] = '';
+        Promise.resolve(value.set!.call(object, tmpProperty)).then(() => {
+          this.invalidateRows();
+          this.dispatchEvent('object_property_changed', object, value);
+        });
+      }
+      this.popInlineActionButtonStyle();
+    }
     if (addable) {
       ImGui.SameLine(0, 0);
+      this.pushInlineActionButtonStyle();
       if (ImGui.Button(`${FontGlyph.glyphs['plus']}##add`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))) {
         const ctor = group.objectTypes?.[0]?.ctor;
         const newObj = ctor
@@ -688,9 +1331,11 @@ export class PropertyEditor extends Observable<{
         this.dispatchEvent('object_property_changed', group.object, group.prop);
         this.refresh();
       }
+      this.popInlineActionButtonStyle();
     }
     if (deletable) {
       ImGui.SameLine(0, 0);
+      this.pushInlineActionButtonStyle();
       if (
         ImGui.Button(`${FontGlyph.glyphs['cancel']}##delete`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))
       ) {
@@ -698,37 +1343,21 @@ export class PropertyEditor extends Observable<{
         this.dispatchEvent('object_property_changed', group.object, group.prop);
         this.refresh();
       }
+      this.popInlineActionButtonStyle();
     }
     if (extraButtons > 0) {
       ImGui.EndChild();
     }
     if (changed && value.set) {
       value.set.call(object, tmpProperty);
-      this.refresh();
+      this.invalidateRows();
       this.dispatchEvent('object_property_changed', object, value);
     }
     return true;
   }
-  private renderRawProperty(
-    value: {
-      name: string;
-      type: PropertyType;
-      get: (value: PropertyValue) => void;
-      set?: (value: PropertyValue) => void;
-      options?: {
-        enum?: {
-          labels: string[];
-          values: any[];
-        };
-        speed?: number;
-        minValue?: number;
-        maxValue?: number;
-      };
-    },
-    level: number
-  ) {
+  private renderRawProperty(value: RawProperty, level: number) {
     ImGui.PushID(value.name);
-    ImGui.TableNextRow();
+    ImGui.TableNextRow(0, this.getRawPropertyHeight(value));
     if (this._showLeadingColumn) {
       ImGui.TableNextColumn();
     }
@@ -807,12 +1436,18 @@ export class PropertyEditor extends Observable<{
           }
         } else {
           const val = tmpProperty.str as [string];
-          changed = ImGui.InputText(
-            '##value',
-            val,
-            undefined,
-            readonly ? ImGui.InputTextFlags.ReadOnly : undefined
-          );
+          changed = value.options?.multiline
+            ? customTextInput(
+                '##value',
+                val,
+                '',
+                readonly
+                  ? CustomInputTextFlags.ReadOnly | CustomInputTextFlags.Multiline
+                  : CustomInputTextFlags.Multiline,
+                -1,
+                100
+              )
+            : customTextInput('##value', val, '', readonly ? CustomInputTextFlags.ReadOnly : 0);
         }
         break;
       }
@@ -899,7 +1534,7 @@ export class PropertyEditor extends Observable<{
     ImGui.PopID();
     if (changed && value.set) {
       value.set(tmpProperty);
-      this.refresh();
+      this.invalidateRows();
       this.dispatchEvent('object_property_changed', null, value);
     }
   }
@@ -934,44 +1569,14 @@ export class PropertyEditor extends Observable<{
     prop.get.call(object, tmpProperty);
     this.revealAsset(tmpProperty.str[0]);
   }
-  private renderClippedStringField(id: string, text: string, width?: number) {
-    const style = ImGui.GetStyle();
-    const fieldWidth = width && width > 0 ? width : ImGui.GetContentRegionAvail().x;
-    const fieldSize = new ImGui.ImVec2(fieldWidth, ImGui.GetFrameHeight());
-    const clicked = ImGui.InvisibleButton(id, fieldSize, 0);
-    const hovered = ImGui.IsItemHovered();
-    const drawList = ImGui.GetWindowDrawList();
-    const rectMin = ImGui.GetItemRectMin();
-    const rectMax = ImGui.GetItemRectMax();
-    const bgColor = ImGui.GetColorU32(hovered ? ImGui.Col.FrameBgHovered : ImGui.Col.FrameBg);
-    const borderColor = ImGui.GetColorU32(ImGui.Col.Border);
-    const textColor = ImGui.GetColorU32(ImGui.Col.Text);
-    drawList.AddRectFilled(rectMin, rectMax, bgColor, style.FrameRounding);
-    drawList.AddRect(rectMin, rectMax, borderColor, style.FrameRounding, ImGui.DrawCornerFlags.None, 1);
-    const textPos = new ImGui.ImVec2(rectMin.x + style.FramePadding.x, rectMin.y + style.FramePadding.y);
-    const clipMin = new ImGui.ImVec2(rectMin.x + style.FramePadding.x, rectMin.y);
-    const clipMax = new ImGui.ImVec2(rectMax.x - style.FramePadding.x, rectMax.y);
-    drawList.PushClipRect(clipMin, clipMax, true);
-    drawList.AddText(textPos, textColor, text ?? '');
-    drawList.PopClipRect();
-    const textWidth = ImGui.CalcTextSize(text ?? '').x;
-    const availableWidth = Math.max(0, clipMax.x - clipMin.x);
-    if (hovered && text && textWidth > availableWidth) {
-      ImGui.SetTooltip(text);
-    }
-    return clicked;
-  }
-  private renderProperty(property: PropertyGroup | Property<any>, level: number) {
-    if (property instanceof PropertyGroup) {
-      this.renderGroup(property, level - 1);
-      return;
-    }
+  private renderProperty(property: Property<any>, level: number) {
     const { name, object, value } = property;
     if (value && value.isValid && !value.isValid.call(object)) {
+      this.renderVirtualSpacer(this.getPropertyHeight(property));
       return;
     }
     ImGui.PushID(property.path);
-    ImGui.TableNextRow();
+    ImGui.TableNextRow(0, this.getPropertyHeight(property));
     if (this._showLeadingColumn) {
       ImGui.TableNextColumn();
       ImGui.SetNextItemWidth(-1);
@@ -1014,6 +1619,9 @@ export class PropertyEditor extends Observable<{
       if (ImGui.IsItemClicked(ImGui.MouseButton.Left)) {
         this.revealAssetFromProperty(object, value);
       }
+      if (value.description && ImGui.IsItemHovered()) {
+        ImGui.SetTooltip(value.description);
+      }
       if (level > 0) {
         ImGui.SetCursorPosX(baseX);
       }
@@ -1022,7 +1630,7 @@ export class PropertyEditor extends Observable<{
       const editSessionKey = this.getEditSessionKey(object, property.path);
       ImGui.TableNextColumn();
       ImGui.SetNextItemWidth(-1);
-      const readonly = !value.set;
+      const readonly = !!value.readonly || !value.set;
       let changed = false;
       const tmpProperty = {
         num: [0, 0, 0, 0],
@@ -1089,38 +1697,101 @@ export class PropertyEditor extends Observable<{
             const val = tmpProperty.str as [string];
             const isSceneNodeRef = !!value.options?.sceneNode;
             const isAssetRef = !!value.options?.mimeTypes?.length;
+            const canInlineEdit = !!value.set && !readonly && !isSceneNodeRef && !isAssetRef;
+            const stringEditorActive = canInlineEdit && this._activeStringEditors.has(editSessionKey);
             const canClearValue = (isAssetRef || isSceneNodeRef) && !!value.set && !!val[0];
-            if (canClearValue) {
-              ImGui.BeginChild('', new ImGui.ImVec2(-1, ImGui.GetFrameHeight()));
-              ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().x - ImGui.GetFrameHeight());
-            }
-            if (isSceneNodeRef || isAssetRef) {
-              const fieldWidth = canClearValue
-                ? ImGui.GetContentRegionAvail().x - ImGui.GetFrameHeight()
+            const pickerButtonCount = (isSceneNodeRef || isAssetRef) && value.set ? 1 : 0;
+            const clearButtonCount = canClearValue ? 1 : 0;
+            const totalButtonCount = pickerButtonCount + clearButtonCount;
+            const fieldWidth =
+              totalButtonCount > 0
+                ? ImGui.GetContentRegionAvail().x - totalButtonCount * ImGui.GetFrameHeight()
                 : ImGui.GetContentRegionAvail().x;
-              const clicked = this.renderClippedStringField('##value_display', val[0], fieldWidth);
-              if (clicked) {
-                this.revealAsset(val[0]);
+            if (stringEditorActive) {
+              ImGui.SetNextItemWidth(fieldWidth);
+              if (this._pendingStringEditorFocus === editSessionKey) {
+                ImGui.SetKeyboardFocusHere();
+                this._pendingStringEditorFocus = null;
               }
+              changed = value.options?.multiline
+                ? customTextInput(
+                    '##value',
+                    val,
+                    '',
+                    readonly
+                      ? CustomInputTextFlags.ReadOnly | CustomInputTextFlags.Multiline
+                      : CustomInputTextFlags.Multiline,
+                    -1,
+                    100
+                  )
+                : customTextInput('##value', val, '', readonly ? CustomInputTextFlags.ReadOnly : 0);
             } else {
-              changed = ImGui.InputText(
-                '##value',
-                val,
-                undefined,
-                readonly ? ImGui.InputTextFlags.ReadOnly : undefined
+              const clicked = this.renderClippedStringField(
+                '##value_display',
+                val[0],
+                fieldWidth,
+                canInlineEdit
               );
+              if (clicked && canInlineEdit) {
+                this.activateStringEditor(editSessionKey);
+              }
+            }
+            if (ImGui.IsItemClicked(ImGui.MouseButton.Left)) {
+              this.revealAsset(val[0]);
             }
             this.setDragDropProperty(object, value, tmpProperty);
-            if (canClearValue) {
+            if (pickerButtonCount > 0) {
               ImGui.SameLine(0, 0);
-              if (ImGui.Button('X##clear', new ImGui.ImVec2(-1, 0))) {
+              this.pushInlineActionButtonStyle();
+              if (
+                ImGui.Button(`${FontGlyph.glyphs['link']}##pick`, new ImGui.ImVec2(ImGui.GetFrameHeight(), 0))
+              ) {
+              }
+              if (ImGui.IsItemHovered()) {
+                ImGui.SetTooltip(
+                  isSceneNodeRef
+                    ? 'Drag this button onto a node in the scene hierarchy to set the reference'
+                    : 'Drag this button onto an asset to set the reference'
+                );
+              }
+              if (ImGui.BeginDragDropSource()) {
+                if (isSceneNodeRef) {
+                  const payload: SceneHierarchyNodePickerPayload = {
+                    type: 'node-picker',
+                    object,
+                    prop: value
+                  };
+                  ImGui.SetDragDropPayload('NODE', payload);
+                  ImGui.Text('Drop on a scene node');
+                } else {
+                  const payload: VFSRendererAssetPickerPayload = {
+                    type: 'asset-picker',
+                    object,
+                    prop: value
+                  };
+                  ImGui.SetDragDropPayload('ASSET', payload);
+                  ImGui.Text('Drop on an asset');
+                }
+                ImGui.EndDragDropSource();
+              }
+              this.popInlineActionButtonStyle();
+            }
+            if (clearButtonCount > 0) {
+              ImGui.SameLine(0, 0);
+              this.pushInlineActionButtonStyle();
+              if (
+                ImGui.Button(
+                  `${FontGlyph.glyphs['cancel']}##clear`,
+                  new ImGui.ImVec2(ImGui.GetFrameHeight(), 0)
+                )
+              ) {
                 tmpProperty.str[0] = '';
                 Promise.resolve(value.set.call(object, tmpProperty)).then(() => {
-                  this.refresh();
+                  this.invalidateRows();
                   this.dispatchEvent('object_property_changed', object, value);
                 });
               }
-              ImGui.EndChild();
+              this.popInlineActionButtonStyle();
             }
           }
           break;
@@ -1274,17 +1945,24 @@ export class PropertyEditor extends Observable<{
         }
         case 'object': {
           const val = tmpProperty.str as [string];
-          const fieldWidth = value.isNullable?.call(object, 0)
+          const hasClearButton = !!value.isNullable?.call(object, 0);
+          const fieldWidth = hasClearButton
             ? ImGui.GetContentRegionAvail().x - ImGui.GetFrameHeight()
             : ImGui.GetContentRegionAvail().x;
-          const clicked = this.renderClippedStringField('##value_object', val[0], fieldWidth);
-          if (clicked) {
+          this.renderClippedStringField('##value_object', val[0], fieldWidth, false);
+          if (ImGui.IsItemClicked(ImGui.MouseButton.Left)) {
             this.revealAsset(val[0]);
           }
           this.setDragDropProperty(object, value, tmpProperty);
-          if (value.isNullable?.call(object, 0)) {
+          if (hasClearButton) {
             ImGui.SameLine(0, 0);
-            if (ImGui.Button('X##clear', new ImGui.ImVec2(-1, 0))) {
+            this.pushInlineActionButtonStyle();
+            if (
+              ImGui.Button(
+                `${FontGlyph.glyphs['cancel']}##clear`,
+                new ImGui.ImVec2(ImGui.GetFrameHeight(), 0)
+              )
+            ) {
               Promise.resolve(value.set!.call(object, null)).then(() => {
                 this.refresh();
                 this.dispatchEvent('object_property_changed', object, value);
@@ -1302,7 +1980,9 @@ export class PropertyEditor extends Observable<{
                 }
               }
             }
+            this.popInlineActionButtonStyle();
           }
+          break;
         }
       }
       /*
@@ -1331,7 +2011,7 @@ export class PropertyEditor extends Observable<{
       */
       if (changed && value.set) {
         value.set.call(object, tmpProperty);
-        this.refresh();
+        this.invalidateRows();
         this.dispatchEvent('object_property_changed', object, value);
       }
       if (value.set && ImGui.IsItemActivated() && !this._editSessions.has(editSessionKey)) {
@@ -1354,6 +2034,11 @@ export class PropertyEditor extends Observable<{
           this.clonePropertyValue(newSnapshot)
         );
         this._editSessions.delete(editSessionKey);
+        this.deactivateStringEditor(editSessionKey);
+      } else if (value.type === 'string' && !ImGui.IsItemActive() && !ImGui.IsItemHovered()) {
+        if (this._activeStringEditors.has(editSessionKey) && !ImGui.GetIO().MouseDown[0]) {
+          this.deactivateStringEditor(editSessionKey);
+        }
       }
     }
     ImGui.PopID();
@@ -1378,6 +2063,57 @@ export class PropertyEditor extends Observable<{
       object: [...(value.object ?? [])]
     };
   }
+  private activateStringEditor(key: string) {
+    this._activeStringEditors.add(key);
+    this._pendingStringEditorFocus = key;
+  }
+  private deactivateStringEditor(key: string) {
+    this._activeStringEditors.delete(key);
+    if (this._pendingStringEditorFocus === key) {
+      this._pendingStringEditorFocus = null;
+    }
+  }
+  private renderClippedStringField(id: string, text: string, width?: number, editable?: boolean) {
+    const style = ImGui.GetStyle();
+    const fieldWidth = width && width > 0 ? width : ImGui.GetContentRegionAvail().x;
+    const fieldSize = new ImGui.ImVec2(fieldWidth, ImGui.GetFrameHeight());
+    const clicked = ImGui.InvisibleButton(id, fieldSize, 0);
+    const hovered = ImGui.IsItemHovered();
+    const drawList = ImGui.GetWindowDrawList();
+    const rectMin = ImGui.GetItemRectMin();
+    const rectMax = ImGui.GetItemRectMax();
+    const bgColor = ImGui.GetColorU32(hovered && editable ? ImGui.Col.FrameBgHovered : ImGui.Col.FrameBg);
+    const borderColor = ImGui.GetColorU32(ImGui.Col.Border);
+    const textColor = ImGui.GetColorU32(ImGui.Col.Text);
+    drawList.AddRectFilled(rectMin, rectMax, bgColor, style.FrameRounding);
+    drawList.AddRect(rectMin, rectMax, borderColor, style.FrameRounding, ImGui.DrawCornerFlags.None, 1);
+    const textPos = new ImGui.ImVec2(rectMin.x + style.FramePadding.x, rectMin.y + style.FramePadding.y);
+    const clipMin = new ImGui.ImVec2(rectMin.x + style.FramePadding.x, rectMin.y);
+    const clipMax = new ImGui.ImVec2(rectMax.x - style.FramePadding.x, rectMax.y);
+    drawList.PushClipRect(clipMin, clipMax, true);
+    drawList.AddText(textPos, textColor, text ?? '');
+    drawList.PopClipRect();
+    const textWidth = ImGui.CalcTextSize(text ?? '').x;
+    const availableWidth = Math.max(0, clipMax.x - clipMin.x);
+    if (hovered && text && textWidth > availableWidth) {
+      ImGui.SetTooltip(text);
+    }
+    return clicked;
+  }
+  private pushInlineActionButtonStyle() {
+    const style = ImGui.GetStyle();
+    const normal = style.Colors[ImGui.Col.FrameBg];
+    const hovered = style.Colors[ImGui.Col.FrameBgHovered];
+    const active = style.Colors[ImGui.Col.FrameBgActive];
+    ImGui.PushStyleColor(ImGui.Col.Button, new ImGui.ImVec4(normal.x, normal.y, normal.z, 1));
+    ImGui.PushStyleColor(ImGui.Col.ButtonHovered, new ImGui.ImVec4(hovered.x, hovered.y, hovered.z, 1));
+    ImGui.PushStyleColor(ImGui.Col.ButtonActive, new ImGui.ImVec4(active.x, active.y, active.z, 1));
+    ImGui.PushStyleVar(ImGui.StyleVar.FrameBorderSize, 1);
+  }
+  private popInlineActionButtonStyle() {
+    ImGui.PopStyleVar();
+    ImGui.PopStyleColor(3);
+  }
   private setDragDropProperty(obj: any, prop: PropertyAccessor, value: PropertyValue) {
     if (prop.set) {
       if (prop.options?.sceneNode && ImGui.BeginDragDropTarget()) {
@@ -1390,12 +2126,14 @@ export class PropertyEditor extends Observable<{
           ) {
             const payload = ImGui.AcceptDragDropPayload('NODE');
             if (payload) {
-              const droppedNode = payload.Data as SceneNode;
-              value.str[0] = droppedNode?.persistentId ?? '';
-              Promise.resolve(prop.set.call(obj, value as RequireOptionals<PropertyValue>)).then(() => {
-                this.refresh();
-                this.dispatchEvent('object_property_changed', obj, prop);
-              });
+              const dropped = payload.Data as unknown;
+              if (dropped instanceof SceneNode) {
+                value.str[0] = dropped?.persistentId ?? '';
+                Promise.resolve(prop.set.call(obj, value as RequireOptionals<PropertyValue>)).then(() => {
+                  this.invalidateRows();
+                  this.dispatchEvent('object_property_changed', obj, prop);
+                });
+              }
             }
           }
         }
@@ -1407,12 +2145,12 @@ export class PropertyEditor extends Observable<{
           const data = peekPayload.Data as { isDir: boolean; path: string }[];
           if (data.length === 1 && !data[0].isDir) {
             const mimeType = ProjectService.VFS.guessMIMEType(data[0].path);
-            if (prop.options.mimeTypes.includes(mimeType)) {
+            if (matchesMimeType(prop.options.mimeTypes, mimeType)) {
               const payload = ImGui.AcceptDragDropPayload('ASSET');
               if (payload) {
                 value.str[0] = data[0].path;
                 Promise.resolve(prop.set.call(obj, value as RequireOptionals<PropertyValue>)).then(() => {
-                  this.refresh();
+                  this.invalidateRows();
                   this.dispatchEvent('object_property_changed', obj, prop);
                 });
               }
