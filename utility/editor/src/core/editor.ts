@@ -647,7 +647,29 @@ export class Editor {
   async importProject() {
     const files = await FilePicker.chooseDirectory();
     if (files?.length > 0) {
-      const uuid = await ProjectService.importProject(files);
+      let directory: string | undefined;
+      let projectName: string | undefined;
+      if (isDesktopApp()) {
+        const projectFile = files.find((file) => file.name === 'project.json');
+        const defaultName = projectFile
+          ? PathUtils.basename(PathUtils.dirname(projectFile.webkitRelativePath || projectFile.name))
+          : '';
+        const result = await Dialog.createProject(
+          'Import Project',
+          defaultName,
+          '',
+          'Select or enter a parent directory',
+          'Select Import Parent Directory',
+          'Import',
+          560
+        );
+        if (!result) {
+          return;
+        }
+        directory = result.directory;
+        projectName = result.name;
+      }
+      const uuid = await ProjectService.importProject(files, directory, projectName);
       if (uuid) {
         const project = await ProjectService.openProject(uuid);
         const settings = await ProjectService.getCurrentProjectSettings();
@@ -694,7 +716,14 @@ export class Editor {
     }
   ) {
     if (!name && isDesktopApp()) {
-      const result = await Dialog.createProject('Create Project', '', '', 560);
+      const result = await Dialog.createProject(
+        'Create Project',
+        '',
+        '',
+        'Select or enter a parent directory',
+        'Select Project Parent Directory',
+        560
+      );
       if (!result) {
         return null;
       }
@@ -756,7 +785,17 @@ export class Editor {
         const projects = await ProjectService.listProjects();
         const names = projects.map((project) => this.formatProjectLabel(project));
         const ids = projects.map((project) => project.uuid);
-        id = await Dialog.openFromList('Open Project', names, ids, 400, 400);
+        id = await Dialog.openFromList(
+          'Open Project',
+          names,
+          ids,
+          isDesktopApp() ? 'Open Project Directory...' : '',
+          400,
+          400
+        );
+      }
+      if (id === '__action__:Open Project Directory...') {
+        return await this.openProjectDirectory();
       }
       if (id) {
         this._isRemoteProject = false;
@@ -790,6 +829,23 @@ export class Editor {
         id,
         err: null
       };
+    } catch (err) {
+      return {
+        id: null,
+        err: `${err}`
+      };
+    }
+  }
+  async openProjectDirectory(directory?: string): Promise<{ id: Nullable<string>; err: Nullable<string> }> {
+    try {
+      const id = await ProjectService.registerProjectDirectory(directory);
+      if (!id) {
+        return {
+          id: null,
+          err: null
+        };
+      }
+      return await this.openProject(id);
     } catch (err) {
       return {
         id: null,
