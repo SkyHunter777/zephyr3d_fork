@@ -3,6 +3,13 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 const { spawn } = require('child_process');
+const {
+  clearRuntimeStateIfOwned,
+  ensureRuntimeStateDir,
+  getRuntimeLogFilePath,
+  readRuntimeState,
+  writeRuntimeState
+} = require('./dev-runtime-state.cjs');
 
 const projectRoot = path.resolve(__dirname, '..');
 const explicitDevUrl = process.env.ZEPHYR_EDITOR_ELECTRON_URL || '';
@@ -45,9 +52,16 @@ let restartTimer = null;
 let restartPromise = null;
 let pendingRestartReason = '';
 const fileWatchers = [];
+const runtimeLogPath = getRuntimeLogFilePath(projectRoot);
+const runtimeStateDir = ensureRuntimeStateDir(projectRoot);
 
 function log(message) {
   process.stdout.write(`[electron:dev] ${message}\n`);
+  try {
+    fs.appendFileSync(runtimeLogPath, `[${new Date().toISOString()}] [electron:dev] ${message}\n`, 'utf8');
+  } catch {
+    // Ignore diagnostic log write failures.
+  }
 }
 
 function stripAnsi(text) {
@@ -155,7 +169,26 @@ async function cleanup(exitCode = 0) {
   }
   closeWatchers();
   await Promise.all([terminateChild(electronProcess), terminateChild(serverProcess)]);
+  clearRuntimeStateIfOwned(projectRoot, process.pid);
   process.exit(exitCode);
+}
+
+function persistRuntimeState() {
+  const current = readRuntimeState(projectRoot);
+  if (current?.runnerPid && current.runnerPid !== process.pid) {
+    return;
+  }
+  writeRuntimeState(projectRoot, {
+    version: 1,
+    status: shuttingDown ? 'stopping' : 'running',
+    editorRoot: projectRoot,
+    runnerPid: process.pid,
+    serverPid: serverProcess?.pid ?? null,
+    electronPid: electronProcess?.pid ?? null,
+    devUrl,
+    logPath: runtimeLogPath,
+    updatedAt: new Date().toISOString()
+  });
 }
 
 function waitForDevServer(rawUrl, timeoutMs) {
@@ -233,6 +266,7 @@ async function startDevServer() {
 
     pipeOutput(serverProcess.stdout, process.stdout, handleOutputLine);
     pipeOutput(serverProcess.stderr, process.stderr, handleOutputLine);
+    persistRuntimeState();
 
     serverProcess.on('error', finishReject);
     serverProcess.on('exit', (code) => {
@@ -255,6 +289,7 @@ async function startDevServer() {
   } else {
     log(`Vite dev server ready at ${devUrl}`);
   }
+  persistRuntimeState();
 }
 
 function startElectron() {
@@ -271,6 +306,7 @@ function startElectron() {
   });
 
   electronProcess = child;
+  persistRuntimeState();
 
   child.on('error', (error) => {
     console.error(error);
@@ -281,6 +317,7 @@ function startElectron() {
     if (electronProcess === child) {
       electronProcess = null;
     }
+    persistRuntimeState();
     if (!shuttingDown) {
       if (restartingElectron) {
         return;
@@ -309,6 +346,7 @@ async function performElectronRestart(reason) {
   if (!shuttingDown) {
     startElectron();
   }
+  persistRuntimeState();
 }
 
 function queueElectronRestart(reason) {
@@ -398,15 +436,18 @@ function startWatchers() {
 }
 
 async function main() {
+  persistRuntimeState();
   if (!explicitDevUrl) {
     await startDevServer();
   } else {
     log(`Using external dev server ${devUrl}`);
+    persistRuntimeState();
   }
 
   await waitForDevServer(devUrl, 120000);
   startElectron();
   startWatchers();
+  log(`Runtime state is tracked under ${runtimeStateDir}`);
 }
 
 process.on('SIGINT', () => {

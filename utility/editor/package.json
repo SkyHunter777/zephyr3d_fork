@@ -41,6 +41,8 @@
     "deploy": "npm run build && shx rm -rf ../../apps/homepage/editor && shx cp -R dist ../../apps/homepage/editor",
     "electron:start": "electron .",
     "electron:dev": "node ./scripts/electron-dev.cjs",
+    "electron:dev:launch": "node ./scripts/launch-electron-dev.cjs",
+    "electron:dev:install-shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/install-desktop-shortcut.ps1",
     "electron:prepare": "node ./scripts/prepare-electron-app.cjs",
     "electron:pack": "rush build -t editor && npm run electron:prepare && electron-builder --projectDir .electron-app --config ../electron-builder.json --dir",
     "electron:dist": "rush build -t editor && npm run electron:prepare && electron-builder --projectDir .electron-app --config ../electron-builder.json",
