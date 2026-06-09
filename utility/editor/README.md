@@ -160,6 +160,26 @@ The plugin API supports:
 - project storage and system plugin state/settings
 - editor event subscriptions
 
+### Desktop Plugin Development
+
+The Electron desktop editor supports linking a plugin root directory directly for source-based development.
+
+Recommended development setup:
+
+- Keep a `plugin.dev.json` at the plugin root for desktop development
+- Point its `entry` to a source file such as `src/index.ts`
+- Declare third-party runtime packages in `plugin.dev.json.dependencies`
+- Use `Project -> Plugin Manager... -> Link...` and choose the plugin root directory
+- After editing source files, click `Refresh` in Plugin Manager to reload the linked plugin
+
+In this mode:
+
+- the editor loads plugin source directly instead of requiring a prebuilt `dist`
+- missing third-party dependencies are cached under the plugin's local `libs/deps/`
+- plugin refresh validates the manifest and entry dependency graph instead of scanning the entire plugin folder
+
+For release builds, continue using the packaged `plugin.json` and built `dist` output.
+
 ## Related Links
 
 - Repository: https://github.com/gavinyork/zephyr3d

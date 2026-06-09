@@ -20,6 +20,7 @@
 
 - `Install...`：从 `.zip` 插件包安装
 - `Install Folder...`：从未打包的插件目录安装
+- `Link...`：在桌面端将插件根目录直接链接到编辑器，供开发调试使用
 - `New Template...`：在编辑器里生成一个起步模板插件
 
 插件安装后，可以继续：
@@ -29,6 +30,12 @@
 - 使用 `Install Package...` 安装第三方 npm 依赖
 - 使用 `Settings...` 配置插件暴露出的设置项
 - 将插件从编辑器中移除
+
+说明：
+
+- `Install...` 和 `Install Folder...` 面向正式安装/发布使用
+- `Link...` 仅用于桌面端开发模式，不适用于浏览器版编辑器
+- `Link...` 链接的是插件根目录，不是 `src/`，也不是 `dist/`
 
 ---
 
@@ -64,6 +71,91 @@ my-editor-plugin/
 - `entry`：必填，表示插件入口模块的相对路径
 - `name`、`version`、`description`：可选，但建议填写
 - `dependencies`：可选，声明插件使用的第三方包
+
+---
+
+## 桌面端开发模式
+
+桌面端开发模式支持让编辑器直接读取插件源码，而不是先构建 `dist` 再安装。
+
+推荐目录结构如下：
+
+```text
+my-editor-plugin/
+  plugin.dev.json
+  plugin.json
+  src/
+    index.ts
+  libs/
+    deps.lock.json
+    deps/
+  dist/
+    index.js
+    plugin.json
+```
+
+其中：
+
+- `plugin.dev.json`：开发态清单，供桌面端 `Link...` 使用
+- `plugin.json`：发布态清单，供正式安装包或 `dist` 产物使用
+- `src/`：插件源码入口
+- `libs/deps/`：编辑器为开发态插件缓存的第三方依赖
+- `dist/`：构建后的发布产物
+
+开发态示例 `plugin.dev.json`：
+
+```json
+{
+  "id": "com.example.demo-plugin",
+  "name": "Demo Plugin",
+  "version": "0.1.0",
+  "description": "Example editor plugin for Zephyr3d.",
+  "entry": "src/index.ts",
+  "dependencies": {
+    "nanoid": "^5.0.0"
+  }
+}
+```
+
+开发流程：
+
+1. 启动桌面版编辑器开发环境
+2. 打开 `Project -> Plugin Manager...`
+3. 点击 `Link...`
+4. 选择插件根目录
+5. 修改源码后，手动点击 `Refresh`
+
+开发态特点：
+
+- 编辑器直接加载 `src` 下源码，不需要先执行 `npm install`
+- 如果 `plugin.dev.json` 的 `dependencies` 声明了第三方包，编辑器会在首次需要时自动下载并缓存到 `libs/deps/`
+- 后续刷新会优先复用本地 `libs/deps` 和 `libs/deps.lock.json`
+- 开发态 `Refresh` 只会重新校验 `plugin.dev.json` 和入口依赖图，不会递归扫描整个插件目录
+
+注意事项：
+
+- 开发态第三方包必须声明在 `plugin.dev.json.dependencies` 中
+- `Link...` 后插件源码变更不会自动热重载，需要手动点击 `Refresh`
+- 如果首次下载依赖时离线，且本地又没有 `libs/deps` 缓存，则插件加载会失败
+
+---
+
+## 发布模式
+
+发布时仍然建议使用传统的安装包/构建产物流程。
+
+发布流程：
+
+1. 安装插件构建依赖
+2. 执行构建，生成 `dist/`
+3. 确认 `dist/plugin.json` 与 `dist/index.js` 等产物完整
+4. 使用 `Install...` 安装 `.zip` 包，或使用 `Install Folder...` 安装发布目录
+
+发布态特点：
+
+- 使用构建后的 JavaScript 产物，加载速度通常快于开发态源码模式
+- 更适合分发给其他人或用于稳定版本交付
+- `plugin.json` 应描述发布态入口，例如 `dist/index.js` 或发布目录内入口文件
 
 ---
 
@@ -239,4 +331,10 @@ import { nanoid } from 'nanoid';
 ```
 
 已安装包的版本会同步记录到 `plugin.json` 的 `dependencies` 字段中。
+
+对于桌面端开发态插件：
+
+- 优先在 `plugin.dev.json` 中声明 `dependencies`
+- 点击 `Refresh` 时，编辑器会自动同步缺失依赖到 `libs/deps/`
+- 一般不需要先手动执行 `npm install`
 

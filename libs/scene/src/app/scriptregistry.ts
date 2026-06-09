@@ -41,6 +41,40 @@ function isBareModule(spec: string) {
   return !spec.startsWith('./') && !spec.startsWith('../') && !spec.startsWith('/') && !spec.startsWith('#/');
 }
 
+function splitSpecifierQuery(spec: string) {
+  const hashIndex = spec.indexOf('#');
+  const queryIndex = spec.indexOf('?');
+  const cutIndex =
+    queryIndex >= 0 && hashIndex >= 0
+      ? Math.min(queryIndex, hashIndex)
+      : queryIndex >= 0
+        ? queryIndex
+        : hashIndex;
+  if (cutIndex < 0) {
+    return {
+      path: spec,
+      suffix: ''
+    };
+  }
+  return {
+    path: spec.slice(0, cutIndex),
+    suffix: spec.slice(cutIndex)
+  };
+}
+
+function hasRawQuery(spec: string) {
+  const { suffix } = splitSpecifierQuery(spec);
+  if (!suffix || suffix[0] !== '?') {
+    return false;
+  }
+  const queryEnd = suffix.indexOf('#');
+  const query = (queryEnd >= 0 ? suffix.slice(1, queryEnd) : suffix.slice(1)).trim();
+  if (!query) {
+    return false;
+  }
+  return query.split('&').some((part) => part.trim() === 'raw');
+}
+
 type ScriptModuleType = 'js' | 'ts';
 
 type ScriptModuleInfo = {
@@ -354,7 +388,9 @@ export class ScriptRegistry {
     modules.set(module.id, module);
 
     const source = (await this._vfs.readFile(module.path, { encoding: 'utf8' })) as string;
-    const esmCode = await this.transpileToESModule(source, module.id, module.type);
+    const esmCode = hasRawQuery(module.id)
+      ? `export default ${JSON.stringify(source)};\n`
+      : await this.transpileToESModule(source, module.id, module.type);
     const rewritten = await this.rewriteImportsToLogicalIds(esmCode, module.id);
     module.deps = rewritten.deps;
     module.systemCode = await this.transpileToSystemModule(rewritten.code, module.id);
@@ -370,9 +406,10 @@ export class ScriptRegistry {
     if (!srcPath) {
       return null;
     }
+    const { suffix } = splitSpecifierQuery(String(id));
     const path = this._vfs.normalizePath(srcPath.path);
     return {
-      id: path,
+      id: `${path}${suffix}`,
       path,
       type: srcPath.type,
       deps: [],
@@ -590,27 +627,27 @@ async function __z3dLoad(spec, parentId = '') {
    * @throws If a relative import is provided without `fromId`.
    */
   async resolveLogicalId(spec: string, fromId?: string) {
-    if (spec.startsWith('#/')) {
-      return this._vfs.normalizePath(this._vfs.join(this._scriptsRoot, spec.slice(2)));
-    } else if (spec.startsWith('./') || spec.startsWith('../')) {
+    const { path: baseSpec, suffix } = splitSpecifierQuery(spec);
+    if (baseSpec.startsWith('#/')) {
+      return `${this._vfs.normalizePath(this._vfs.join(this._scriptsRoot, baseSpec.slice(2)))}${suffix}`;
+    } else if (baseSpec.startsWith('./') || baseSpec.startsWith('../')) {
       if (!fromId) {
         throw new Error(`Relative import "${spec}" requires fromId`);
       }
-      return this._vfs.normalizePath(
-        this._vfs.join(this._vfs.dirname(this._vfs.normalizePath(fromId)), spec)
-      );
-    } else if (spec.startsWith('/')) {
-      return spec.replace(/^\/+/, '/');
+      const fromPath = splitSpecifierQuery(this._vfs.normalizePath(fromId)).path;
+      return `${this._vfs.normalizePath(this._vfs.join(this._vfs.dirname(fromPath), baseSpec))}${suffix}`;
+    } else if (baseSpec.startsWith('/')) {
+      return `${baseSpec.replace(/^\/+/, '/')}${suffix}`;
     } else if (getApp().editorMode !== 'none') {
-      const libRoot = '/';
+      const libRoot = this._vfs.normalizePath(this._scriptsRoot || '/');
       // naked module, checking if it is a installed module in editor mode
       let depsLockPath = this._vfs.normalizePath(this._vfs.join(libRoot, 'libs/deps.lock.json'));
       let depsExists = await this._vfs.exists(depsLockPath);
       if (depsExists) {
         const content = (await this._vfs.readFile(depsLockPath, { encoding: 'utf8' })) as string;
         const depsInfo = JSON.parse(content) as { dependencies: Record<string, { entry: string }> };
-        if (depsInfo?.dependencies[spec]) {
-          return this._vfs.normalizePath(this._vfs.join(libRoot, depsInfo.dependencies[spec].entry));
+        if (depsInfo?.dependencies[baseSpec]) {
+          return `${this._vfs.normalizePath(this._vfs.join(libRoot, depsInfo.dependencies[baseSpec].entry))}${suffix}`;
         }
       }
     }
@@ -629,13 +666,14 @@ async function __z3dLoad(spec, parentId = '') {
    * @returns `{ type, path }` or `null` if not found.
    */
   async resolveSourcePath(logicalId: string) {
+    const { path: normalizedLogicalId } = splitSpecifierQuery(logicalId);
     let type: Nullable<'js' | 'ts'> = null;
     let pathWithExt = '';
-    if (logicalId.endsWith('.ts')) {
-      pathWithExt = logicalId;
+    if (normalizedLogicalId.endsWith('.ts')) {
+      pathWithExt = normalizedLogicalId;
       type = 'ts';
-    } else if (logicalId.endsWith('.js') || logicalId.endsWith('.mjs')) {
-      pathWithExt = logicalId;
+    } else if (normalizedLogicalId.endsWith('.js') || normalizedLogicalId.endsWith('.mjs')) {
+      pathWithExt = normalizedLogicalId;
       type = 'js';
     }
     if (type) {
@@ -651,7 +689,7 @@ async function __z3dLoad(spec, parentId = '') {
     const types = ['ts', 'js', 'mjs'] as const;
     if (!type) {
       for (const t of types) {
-        pathWithExt = `${logicalId}.${t}`;
+        pathWithExt = `${normalizedLogicalId}.${t}`;
         const exists = await this._vfs.exists(pathWithExt);
         if (exists) {
           const stats = await this._vfs.stat(pathWithExt);
