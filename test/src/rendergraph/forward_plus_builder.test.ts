@@ -12,7 +12,12 @@ import {
 function createMockDrawContext(overrides: Record<string, unknown> = {}) {
   return {
     device: {
-      type: 'webgpu'
+      type: 'webgpu',
+      getDeviceCaps: () => ({
+        textureCaps: {
+          supportHalfFloatColorBuffer: true
+        }
+      })
     },
     SSRCalcThickness: false,
     depthFormat: 'd24s8',
@@ -45,6 +50,7 @@ function createOptions(overrides: Partial<ForwardPlusOptions> = {}): ForwardPlus
     ssrCalcThickness: false,
     gpuPicking: false,
     needSceneColor: false,
+    sss: false,
     ...overrides
   };
 }
@@ -107,6 +113,22 @@ describe('Forward+ render graph builder', () => {
     expect(passNames).toContain('HiZ');
     expect(passNames).toContain('LightPass');
     expect(passNames.indexOf('HiZ')).toBeLessThan(passNames.indexOf('LightPass'));
+  });
+
+  test('inserts SSSProfile before LightPass and declares SSS MRT resources when enabled', () => {
+    const { graph, backbuffer } = buildForwardPlusGraphForTest(createOptions({ sss: true }));
+    const passNames = graph.compile([backbuffer]).orderedPasses.map((pass) => pass.name);
+    const lightPass = graph.passes.find((pass) => pass.name === 'LightPass');
+
+    expect(passNames).toContain('SSSProfile');
+    expect(passNames).toContain('LightPass');
+    expect(passNames.indexOf('SSSProfile')).toBeLessThan(passNames.indexOf('LightPass'));
+    expect(lightPass?.reads.map((resource) => resource.name)).toEqual(
+      expect.arrayContaining(['sssProfile', 'sssParam', 'sssNormal'])
+    );
+    expect(lightPass?.writes.map((resource) => resource.name)).toEqual(
+      expect.arrayContaining(['sssDiffuse', 'sssTransmission'])
+    );
   });
 
   test('uses a single DepthPrepass subpass when motion vectors are disabled', () => {

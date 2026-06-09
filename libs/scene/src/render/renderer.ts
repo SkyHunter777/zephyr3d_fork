@@ -36,6 +36,7 @@ import type { Primitive } from '.';
 import { BoxShape } from '../shapes';
 import { getDevice } from '../app/api';
 import type { RenderItemList, RenderItemListInfo, RenderQueueItem } from './render_queue';
+import { executeForwardPlusGraph } from './rendergraph/forward_plus_builder';
 
 const tmpSkyScale = new Vector3();
 const tmpSkyPosition = new Vector3();
@@ -114,7 +115,7 @@ export class SceneRenderer {
     scene.frameUpdate();
     scene.frameUpdatePerCamera(camera);
     if (camera && !device.isContextLost()) {
-      const defaultViewport = !camera.viewport && !camera.scissor;
+      const defaultViewport = (!camera.TAA || device.type === 'webgl') && !camera.viewport && !camera.scissor;
       const renderX = camera.viewport ? device.screenXToDevice(camera.viewport[0]) : 0;
       const renderY = camera.viewport ? device.screenYToDevice(camera.viewport[1]) : 0;
       const renderWidth = camera.viewport
@@ -138,7 +139,7 @@ export class SceneRenderer {
       device.clearFrameBuffer(camera.clearColor, camera.clearDepth, camera.clearStencil);
       const SSR = camera.SSR && scene.env.light.envLight && scene.env.light.envLight.hasRadiance();
       const SSS = camera.SSS;
-      const needSurfaceMRT = SSR || SSS;
+      const needSurfaceMRT = SSR;
       const needSSSRoughness = SSR;
       const glossySurfaceFormat: TextureFormat = halfFloatColorBuffer ? 'rgba16f' : 'rgba8unorm';
       const ctx: DrawContext = {
@@ -176,18 +177,10 @@ export class SceneRenderer {
         SSRNormalTexture: needSurfaceMRT
           ? device.pool.fetchTemporalTexture2D(true, glossySurfaceFormat, renderWidth, renderHeight)
           : null,
-        SSSProfileTexture: SSS
-          ? device.pool.fetchTemporalTexture2D(true, 'rgba16f', renderWidth, renderHeight)
-          : null,
-        SSSParamTexture: SSS
-          ? device.pool.fetchTemporalTexture2D(true, 'rgba8unorm', renderWidth, renderHeight)
-          : null,
-        SSSDiffuseTexture: SSS
-          ? device.pool.fetchTemporalTexture2D(true, colorFormat, renderWidth, renderHeight)
-          : null,
-        SSSTransmissionTexture: SSS
-          ? device.pool.fetchTemporalTexture2D(true, colorFormat, renderWidth, renderHeight)
-          : null,
+        SSSProfileTexture: null,
+        SSSParamTexture: null,
+        SSSDiffuseTexture: null,
+        SSSTransmissionTexture: null,
         ssrSDFBoxBuffer: null,
         ssrSDFBoxCount: 0,
         finalFramebuffer: device.getFramebuffer(),
@@ -352,7 +345,7 @@ export class SceneRenderer {
   }
   /** @internal */
   protected static _renderSceneByPath(ctx: DrawContext) {
-    this._renderSceneForward(ctx);
+    executeForwardPlusGraph(ctx);
   }
   /** @internal */
   protected static _renderSceneForward(ctx: DrawContext) {

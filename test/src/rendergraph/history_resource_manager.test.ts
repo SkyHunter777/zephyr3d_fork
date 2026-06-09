@@ -161,11 +161,30 @@ describe('HistoryResourceManager', () => {
     manager.commitFrame();
 
     manager.beginReadScope([{ name: 'color', texture: resolved }]);
+    expect(manager.tryGetPrevious('color')).toBe(resolved);
     expect(manager.getPrevious('color')).toBe(resolved);
     manager.endReadScope();
+    expect(manager.tryGetPrevious('color')).toBeNull();
     expect(() => manager.getPrevious('color')).toThrow(
       /not available in the current render graph read scope/
     );
+  });
+
+  test('frameActive is true only between beginFrame and commit or discard', () => {
+    const { allocator } = createMockAllocator();
+    const manager = new HistoryResourceManager(allocator);
+
+    expect(manager.frameActive).toBe(false);
+    manager.beginFrame();
+    expect(manager.frameActive).toBe(true);
+    manager.queueCommit('color', desc, size, createTexture(1, desc, size));
+    manager.commitFrame();
+    expect(manager.frameActive).toBe(false);
+
+    manager.beginFrame();
+    expect(manager.frameActive).toBe(true);
+    manager.discardFrame();
+    expect(manager.frameActive).toBe(false);
   });
 
   test('owned history textures are released when their slot is overwritten', () => {

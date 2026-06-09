@@ -9,7 +9,12 @@ import type {
   TextureFormat
 } from '@zephyr3d/device';
 import type { DrawContext } from '../drawable';
-import type { RenderQueue } from '../render_queue';
+import {
+  RenderQueue,
+  type RenderItemList,
+  type RenderItemListInfo,
+  type RenderQueueItem
+} from '../render_queue';
 import type { PunctualLight, Scene } from '../../scene';
 import type { Camera } from '../../camera';
 import { LightPass } from '../lightpass';
@@ -48,6 +53,167 @@ function freeClusteredLight(cl: ClusteredLight): void {
   _clusters.push(cl);
 }
 
+function getCoreMaterial(material: unknown): unknown {
+  return (material as { coreMaterial?: unknown } | null | undefined)?.coreMaterial ?? material ?? null;
+}
+
+function hasSSSMaterialCore(material: unknown): boolean {
+  return !!(getCoreMaterial(material) as { subsurfaceProfile?: unknown } | null)?.subsurfaceProfile;
+}
+
+function renderQueueHasActiveSSS(renderQueue: RenderQueue): boolean {
+  const itemList = renderQueue.itemList;
+  if (!itemList) {
+    return false;
+  }
+  const lists = [
+    ...itemList.opaque.lit,
+    ...itemList.opaque.unlit,
+    ...itemList.transmission.lit,
+    ...itemList.transmission.unlit,
+    ...itemList.transparent.lit,
+    ...itemList.transparent.unlit,
+    ...itemList.transmission_trans.lit,
+    ...itemList.transmission_trans.unlit
+  ];
+  for (const list of lists) {
+    for (const material of list.materialList) {
+      if (hasSSSMaterialCore(material)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function filterActualSSSItemList(items: RenderQueueItem[]): RenderQueueItem[] {
+  return items.filter((item) => hasSSSMaterialCore(item.drawable.getMaterial?.()));
+}
+
+function filterActualSSSMaterialList(materialList: Set<any>): Set<any> {
+  const filtered = new Set<any>();
+  materialList.forEach((mat) => {
+    if (hasSSSMaterialCore(mat)) {
+      filtered.add(mat);
+    }
+  });
+  return filtered;
+}
+
+function cloneActualSSSListInfo(source: RenderItemListInfo, _targetQueue: RenderQueue): RenderItemListInfo {
+  return {
+    itemList: filterActualSSSItemList(source.itemList),
+    skinItemList: filterActualSSSItemList(source.skinItemList),
+    morphItemList: filterActualSSSItemList(source.morphItemList),
+    skinAndMorphItemList: filterActualSSSItemList(source.skinAndMorphItemList),
+    instanceItemList: filterActualSSSItemList(source.instanceItemList),
+    materialList: filterActualSSSMaterialList(source.materialList),
+    instanceList: {},
+    renderQueue: source.renderQueue
+  };
+}
+
+function cloneActualSSSBundle(
+  source: RenderItemList['opaque'],
+  targetQueue: RenderQueue
+): RenderItemList['opaque'] {
+  return {
+    lit: source.lit.map((info) => cloneActualSSSListInfo(info, targetQueue)),
+    unlit: source.unlit.map((info) => cloneActualSSSListInfo(info, targetQueue))
+  };
+}
+
+function hasAnyActualSSSItems(renderItems: RenderItemListInfo[]): boolean {
+  return renderItems.some(
+    (info) =>
+      info.itemList.length > 0 ||
+      info.skinItemList.length > 0 ||
+      info.morphItemList.length > 0 ||
+      info.skinAndMorphItemList.length > 0 ||
+      info.instanceItemList.length > 0
+  );
+}
+
+function createActualSSSRenderQueue(renderQueue: RenderQueue): RenderQueue | null {
+  const itemList = renderQueue.itemList;
+  if (!itemList) {
+    return null;
+  }
+  const queue = new RenderQueue(_scenePass);
+  const sssOpaque = cloneActualSSSBundle(itemList.opaque, queue);
+  if (!hasAnyActualSSSItems([...sssOpaque.lit, ...sssOpaque.unlit])) {
+    queue.dispose();
+    return null;
+  }
+  const emptyBundle = { lit: [], unlit: [] };
+  const target = queue as unknown as {
+    _itemList: RenderItemList;
+    _shadowedLightList: PunctualLight[];
+    _unshadowedLightList: PunctualLight[];
+    _sunLight: typeof renderQueue.sunLight;
+    _primaryDirectionalLight: typeof renderQueue.primaryDirectionalLight;
+    _primaryTransmissionLight: typeof renderQueue.primaryTransmissionLight;
+    _needSceneColor: boolean;
+    _needSceneDepth: boolean;
+    _needSceneColorWithDepth: boolean;
+    _drawTransparent: boolean;
+  };
+  target._itemList = {
+    opaque: sssOpaque,
+    transmission: emptyBundle,
+    transparent: emptyBundle,
+    transmission_trans: emptyBundle
+  };
+  target._shadowedLightList = renderQueue.shadowedLights;
+  target._unshadowedLightList = renderQueue.unshadowedLights;
+  target._sunLight = renderQueue.sunLight;
+  target._primaryDirectionalLight = renderQueue.primaryDirectionalLight;
+  target._primaryTransmissionLight = renderQueue.primaryTransmissionLight;
+  target._needSceneColor = false;
+  target._needSceneDepth = false;
+  target._needSceneColorWithDepth = false;
+  target._drawTransparent = false;
+  return queue;
+}
+
+function getSurfaceTextureFormat(ctx: DrawContext): TextureFormat {
+  const caps = ctx.device.getDeviceCaps?.();
+  return caps?.textureCaps.supportHalfFloatColorBuffer ? 'rgba16f' : 'rgba8unorm';
+}
+
+function hasSurfaceMRT(ctx: DrawContext): boolean {
+  return !!(
+    ctx.materialFlags &
+    (MaterialVaryingFlags.SSR_STORE_ROUGHNESS |
+      MaterialVaryingFlags.SSS_STORE_PROFILE |
+      MaterialVaryingFlags.SSS_STORE_DIFFUSE |
+      MaterialVaryingFlags.SSS_STORE_NORMAL |
+      MaterialVaryingFlags.SSS_STORE_TRANSMISSION)
+  );
+}
+
+function getLightPassColorAttachments(
+  ctx: DrawContext,
+  colorAttachment: TextureFormat | Texture2D
+): TextureFormat | Texture2D | Array<TextureFormat | Texture2D> {
+  const attachments: Array<TextureFormat | Texture2D> = [colorAttachment];
+  if (ctx.materialFlags & MaterialVaryingFlags.SSR_STORE_ROUGHNESS) {
+    attachments.push(ctx.SSRRoughnessTexture!, ctx.SSRNormalTexture!);
+  } else if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_NORMAL) {
+    attachments.push(ctx.SSRNormalTexture!);
+  }
+  if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE) {
+    attachments.push(ctx.SSSProfileTexture!, ctx.SSSParamTexture!);
+  }
+  if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_DIFFUSE) {
+    attachments.push(ctx.SSSDiffuseTexture!);
+  }
+  if (ctx.materialFlags & MaterialVaryingFlags.SSS_STORE_TRANSMISSION) {
+    attachments.push(ctx.SSSTransmissionTexture!);
+  }
+  return attachments.length === 1 ? attachments[0] : attachments;
+}
+
 // ─── Pipeline Options ───────────────────────────────────────────────
 
 /**
@@ -72,6 +238,8 @@ export interface ForwardPlusOptions {
   gpuPicking: boolean;
   /** Whether transmission/refraction materials are present. */
   needSceneColor: boolean;
+  /** Enable screen-space subsurface scattering. */
+  sss: boolean;
 }
 
 /**
@@ -85,14 +253,17 @@ export function deriveForwardPlusOptions(
   renderQueue: RenderQueue
 ): ForwardPlusOptions {
   const ssr = camera.SSR && scene.env.light.envLight && scene.env.light.envLight.hasRadiance();
+  const sss = camera.SSS && renderQueueHasActiveSSS(renderQueue);
   return {
     depthPrepass: true,
-    motionVectors: deviceType !== 'webgl' && (camera.TAA || camera.motionBlur),
+    motionVectors:
+      deviceType !== 'webgl' && (camera.TAA || camera.motionBlur || (!!ssr && camera.ssrTemporal)),
     hiZ: camera.HiZ && deviceType !== 'webgl',
     ssr: !!ssr,
     ssrCalcThickness: !!ssr && camera.ssrCalcThickness,
     gpuPicking: !!camera.getPickResultResolveFunc(),
-    needSceneColor: renderQueue.needSceneColor()
+    needSceneColor: renderQueue.needSceneColor(),
+    sss: !!sss
   };
 }
 
@@ -128,6 +299,13 @@ interface HistoryReadBinding {
   handle: RGHandle;
 }
 
+interface SSSProfilePassResult {
+  profileHandle: RGHandle;
+  paramHandle: RGHandle;
+  normalHandle?: RGHandle;
+  framebufferHandle: RGHandle;
+}
+
 // ─── Forward+ Graph Builder ─────────────────────────────────────────
 
 /**
@@ -161,6 +339,7 @@ function buildForwardPlusGraphInternal(
   options: ForwardPlusOptions
 ): ForwardPlusGraphBuildResult {
   const backbuffer = graph.importTexture('backbuffer');
+  ctx.SSS = !!options.sss;
 
   // Shared mutable frame state
   const frame: FrameState = {
@@ -323,6 +502,47 @@ function buildForwardPlusGraphInternal(
   }
 
   // ── 7. Main Light Pass ────────────────────────────────────────────
+  let sssProfileResult: SSSProfilePassResult | undefined;
+  if (options.sss) {
+    sssProfileResult = graph.addPass('SSSProfile', (builder) => {
+      builder.read(depthHandle);
+      builder.read(depthPassResult.depthFramebufferHandle);
+      const profileHandle = builder.createTexture({ format: 'rgba16f', label: 'sssProfile' });
+      const paramHandle = builder.createTexture({ format: 'rgba8unorm', label: 'sssParam' });
+      const normalHandle = options.ssr
+        ? undefined
+        : builder.createTexture({ format: getSurfaceTextureFormat(ctx), label: 'sssNormal' });
+      const colorAttachments = normalHandle
+        ? [ctx.colorFormat!, normalHandle, profileHandle, paramHandle]
+        : [ctx.colorFormat!, profileHandle, paramHandle];
+      const framebufferHandle = builder.createFramebuffer({
+        label: 'SSSProfileFramebuffer',
+        width: ctx.renderWidth,
+        height: ctx.renderHeight,
+        colorAttachments,
+        depthAttachment: renderDepthAttachment,
+        ignoreDepthStencil: false
+      });
+
+      builder.setExecute((rgCtx) => {
+        renderForwardSSSProfile(
+          frame,
+          rgCtx.getFramebuffer<FrameBuffer>(framebufferHandle),
+          rgCtx.getTexture<Texture2D>(profileHandle),
+          rgCtx.getTexture<Texture2D>(paramHandle),
+          normalHandle ? rgCtx.getTexture<Texture2D>(normalHandle) : null
+        );
+      });
+
+      return {
+        profileHandle,
+        paramHandle,
+        normalHandle,
+        framebufferHandle
+      };
+    });
+  }
+
   const lightPassResult = graph.addPass('LightPass', (builder) => {
     builder.read(depthHandle);
     builder.read(depthPassResult.depthFramebufferHandle);
@@ -344,6 +564,19 @@ function buildForwardPlusGraphInternal(
         label: 'sceneColorCopy'
       });
     }
+    if (sssProfileResult) {
+      builder.read(sssProfileResult.profileHandle);
+      builder.read(sssProfileResult.paramHandle);
+      if (sssProfileResult.normalHandle) {
+        builder.read(sssProfileResult.normalHandle);
+      }
+    }
+    const sssDiffuseHandle = options.sss
+      ? builder.createTexture({ format: ctx.colorFormat!, label: 'sssDiffuse' })
+      : undefined;
+    const sssTransmissionHandle = options.sss
+      ? builder.createTexture({ format: ctx.colorFormat!, label: 'sssTransmission' })
+      : undefined;
     const useFinalFramebufferAsIntermediate =
       !!depthPassResult.externalDepthAttachment &&
       depthPassResult.externalDepthAttachment === ctx.finalFramebuffer?.getDepthAttachment();
@@ -371,6 +604,17 @@ function buildForwardPlusGraphInternal(
       const sceneColorTex = rgCtx.getTexture<Texture2D>(sceneColorHandle);
       const sceneColorCopyTex = sceneColorCopyHandle
         ? rgCtx.getTexture<Texture2D>(sceneColorCopyHandle)
+        : null;
+      if (sssProfileResult) {
+        ctx.SSSProfileTexture = rgCtx.getTexture<Texture2D>(sssProfileResult.profileHandle);
+        ctx.SSSParamTexture = rgCtx.getTexture<Texture2D>(sssProfileResult.paramHandle);
+        if (sssProfileResult.normalHandle) {
+          ctx.SSRNormalTexture = rgCtx.getTexture<Texture2D>(sssProfileResult.normalHandle);
+        }
+      }
+      ctx.SSSDiffuseTexture = sssDiffuseHandle ? rgCtx.getTexture<Texture2D>(sssDiffuseHandle) : null;
+      ctx.SSSTransmissionTexture = sssTransmissionHandle
+        ? rgCtx.getTexture<Texture2D>(sssTransmissionHandle)
         : null;
       renderMainLightPass(
         frame,
@@ -493,6 +737,84 @@ function renderShadowMaps(ctx: DrawContext, lights: PunctualLight[]): void {
     }
   } finally {
     ctx.device.popDeviceStates();
+  }
+}
+
+function renderForwardSSSProfile(
+  frame: FrameState,
+  profileFramebuffer: FrameBuffer,
+  profileTexture: Texture2D,
+  paramTexture: Texture2D,
+  normalTexture: Nullable<Texture2D>
+): void {
+  const { ctx, renderQueue } = frame;
+  if (!ctx.SSS || !ctx.depthTexture) {
+    return;
+  }
+  const sssRenderQueue = createActualSSSRenderQueue(renderQueue);
+  if (!sssRenderQueue) {
+    return;
+  }
+
+  const device = ctx.device;
+  const savedMaterialFlags = ctx.materialFlags;
+  const savedCompositor = ctx.compositor;
+  const savedTransmission = _scenePass.transmission;
+  const savedRenderOpaque = _scenePass.renderOpaque;
+  const savedRenderTransparent = _scenePass.renderTransparent;
+  const savedClearColor = _scenePass.clearColor;
+  const savedClearDepth = _scenePass.clearDepth;
+  const savedClearStencil = _scenePass.clearStencil;
+  const savedCommandBufferReuse = ctx.camera.commandBufferReuse;
+  const savedProfileTexture = ctx.SSSProfileTexture;
+  const savedParamTexture = ctx.SSSParamTexture;
+  const savedNormalTexture = ctx.SSRNormalTexture;
+
+  let profileFlags = MaterialVaryingFlags.SSS_STORE_PROFILE;
+  if (normalTexture) {
+    profileFlags |= MaterialVaryingFlags.SSS_STORE_NORMAL;
+  }
+
+  device.pushDeviceStates();
+  try {
+    device.setFramebuffer(profileFramebuffer);
+    ctx.SSSProfileTexture = profileTexture;
+    ctx.SSSParamTexture = paramTexture;
+    ctx.SSRNormalTexture = normalTexture;
+    ctx.compositor = null;
+    ctx.camera.commandBufferReuse = false;
+    ctx.materialFlags =
+      (ctx.materialFlags &
+        ~(
+          MaterialVaryingFlags.SSR_STORE_ROUGHNESS |
+          MaterialVaryingFlags.SSS_STORE_PROFILE |
+          MaterialVaryingFlags.SSS_STORE_NORMAL |
+          MaterialVaryingFlags.SSS_STORE_DIFFUSE |
+          MaterialVaryingFlags.SSS_STORE_TRANSMISSION
+        )) |
+      profileFlags;
+    _scenePass.transmission = false;
+    _scenePass.renderOpaque = true;
+    _scenePass.renderTransparent = false;
+    _scenePass.clearColor = Vector4.zero();
+    _scenePass.clearDepth = null;
+    _scenePass.clearStencil = null;
+    _scenePass.render(ctx, null, null, sssRenderQueue);
+  } finally {
+    _scenePass.clearColor = savedClearColor;
+    _scenePass.clearDepth = savedClearDepth;
+    _scenePass.clearStencil = savedClearStencil;
+    _scenePass.renderTransparent = savedRenderTransparent;
+    _scenePass.renderOpaque = savedRenderOpaque;
+    _scenePass.transmission = savedTransmission;
+    ctx.camera.commandBufferReuse = savedCommandBufferReuse;
+    ctx.materialFlags = savedMaterialFlags;
+    ctx.compositor = savedCompositor;
+    ctx.SSSProfileTexture = savedProfileTexture;
+    ctx.SSSParamTexture = savedParamTexture;
+    ctx.SSRNormalTexture = savedNormalTexture;
+    device.popDeviceStates();
+    sssRenderQueue.dispose();
   }
 }
 
@@ -759,15 +1081,23 @@ function renderMainLightPass(
   // Use RenderGraph-allocated scene color texture
   const depthTex = frame.depthFramebuffer?.getDepthAttachment() as Texture2D;
 
+  if (ctx.SSR && !renderQueue.needSceneColor()) {
+    ctx.materialFlags |= MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
+  }
+  if (ctx.SSS) {
+    ctx.materialFlags |=
+      MaterialVaryingFlags.SSS_STORE_DIFFUSE | MaterialVaryingFlags.SSS_STORE_TRANSMISSION;
+  }
+
   if (depthTex === ctx.finalFramebuffer?.getDepthAttachment()) {
     ctx.intermediateFramebuffer = ctx.finalFramebuffer;
-  } else if (sceneColorFramebufferHandle) {
+  } else if (sceneColorFramebufferHandle && !hasSurfaceMRT(ctx)) {
     ctx.intermediateFramebuffer = rgCtx.getFramebuffer<FrameBuffer>(sceneColorFramebufferHandle);
   } else {
     ctx.intermediateFramebuffer = rgCtx.createFramebuffer<FrameBuffer>({
       width: sceneColorTex.width,
       height: sceneColorTex.height,
-      colorAttachments: sceneColorTex,
+      colorAttachments: getLightPassColorAttachments(ctx, sceneColorTex),
       depthAttachment: depthTex
     });
   }
@@ -785,10 +1115,6 @@ function renderMainLightPass(
   _scenePass.clearDepth = depthTex ? null : 1;
   _scenePass.clearStencil = depthTex ? null : 0;
 
-  if (ctx.SSR && !renderQueue.needSceneColor()) {
-    ctx.materialFlags |= MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
-  }
-
   ctx.compositor?.begin(ctx);
 
   if (renderQueue.needSceneColor() && sceneColorCopyTex) {
@@ -797,19 +1123,12 @@ function renderMainLightPass(
 
     // Use RenderGraph-allocated sceneColorCopy texture
     const sceneColorFramebuffer =
-      sceneColorCopyFramebufferHandle && !(ctx.materialFlags & MaterialVaryingFlags.SSR_STORE_ROUGHNESS)
+      sceneColorCopyFramebufferHandle && !hasSurfaceMRT(ctx)
         ? rgCtx.getFramebuffer<FrameBuffer>(sceneColorCopyFramebufferHandle)
         : rgCtx.createFramebuffer<FrameBuffer>({
             width: sceneColorCopyTex.width,
             height: sceneColorCopyTex.height,
-            colorAttachments:
-              ctx.materialFlags & MaterialVaryingFlags.SSR_STORE_ROUGHNESS
-                ? [
-                    sceneColorCopyTex,
-                    device.getFramebuffer()!.getColorAttachments()[1]!,
-                    device.getFramebuffer()!.getColorAttachments()[2]!
-                  ]
-                : sceneColorCopyTex,
+            colorAttachments: getLightPassColorAttachments(ctx, sceneColorCopyTex),
             depthAttachment: depthTex,
             ignoreDepthStencil: false
           });
@@ -853,6 +1172,10 @@ function renderComposite(frame: FrameState): void {
   ctx.compositor?.end(ctx);
   disposeRenderQueue(frame);
   ctx.materialFlags &= ~MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
+  ctx.materialFlags &= ~MaterialVaryingFlags.SSS_STORE_PROFILE;
+  ctx.materialFlags &= ~MaterialVaryingFlags.SSS_STORE_DIFFUSE;
+  ctx.materialFlags &= ~MaterialVaryingFlags.SSS_STORE_NORMAL;
+  ctx.materialFlags &= ~MaterialVaryingFlags.SSS_STORE_TRANSMISSION;
 
   if (ctx.intermediateFramebuffer && ctx.intermediateFramebuffer !== ctx.finalFramebuffer) {
     const blitter = new CopyBlitter();
@@ -885,6 +1208,7 @@ export function executeForwardPlusGraph(ctx: DrawContext): void {
   const renderQueue = _scenePass.cullScene(ctx, ctx.camera);
 
   const options = deriveForwardPlusOptions(ctx.scene, ctx.camera, device.type, renderQueue);
+  ctx.SSS = options.sss;
 
   // Ensure the camera has a history resource manager for temporal effects (TAA, motion blur)
   let historyManager = ctx.camera.getHistoryResourceManager();

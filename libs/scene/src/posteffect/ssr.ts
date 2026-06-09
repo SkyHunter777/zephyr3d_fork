@@ -20,7 +20,6 @@ import { ShaderHelper } from '../material';
  * @internal
  */
 export class SSR extends AbstractPostEffect {
-  private static readonly _sdfMaxBoxes = 24;
   private static _programs: Record<string, GPUProgram> = {};
   private static _resolveProgram: Record<string, GPUProgram> = {};
   private static _combineProgram?: GPUProgram;
@@ -236,13 +235,6 @@ export class SSR extends AbstractPostEffect {
     if (ctx.HiZTexture) {
       bindGroup.setTexture('hizTex', ctx.HiZTexture, nearestSampler);
       bindGroup.setValue('depthMipLevels', ctx.HiZTexture.mipLevelCount);
-      bindGroup.setValue('ssrHiZFallback', ctx.camera.ssrHiZFallback ? 1 : 0);
-      bindGroup.setValue('ssrHiZFallbackSteps', ctx.camera.ssrHiZFallbackSteps);
-      bindGroup.setValue('ssrHiZFallbackStride', ctx.camera.ssrHiZFallbackStride);
-      bindGroup.setValue('ssrSDFBoxCount', ctx.ssrSDFBoxCount ?? 0);
-      if (ctx.ssrSDFBoxBuffer) {
-        bindGroup.setBuffer('zSDFBoxes', ctx.ssrSDFBoxBuffer);
-      }
       bindGroup.setValue(
         'targetSize',
         new Vector4(
@@ -901,11 +893,6 @@ export class SSR extends AbstractPostEffect {
         if (ctx.HiZTexture) {
           this.hizTex = pb.tex2D().uniform(0);
           this.depthMipLevels = pb.int().uniform(0);
-          this.ssrHiZFallback = pb.int().uniform(0);
-          this.ssrHiZFallbackSteps = pb.float().uniform(0);
-          this.ssrHiZFallbackStride = pb.float().uniform(0);
-          this.ssrSDFBoxCount = pb.int().uniform(0);
-          this.zSDFBoxes = pb.vec4[SSR._sdfMaxBoxes * 2]().uniformBuffer(0);
         } else {
           this.ssrStride = pb.float().uniform(0);
         }
@@ -966,91 +953,6 @@ export class SSR extends AbstractPostEffect {
             );
           }
         );
-        if (ctx.HiZTexture) {
-          pb.func('sdAABB', [pb.vec3('p'), pb.vec3('bmin'), pb.vec3('bmax')], function () {
-            this.$l.c = pb.mul(pb.add(this.bmin, this.bmax), 0.5);
-            this.$l.e = pb.mul(pb.sub(this.bmax, this.bmin), 0.5);
-            this.$l.q = pb.sub(pb.abs(pb.sub(this.p, this.c)), this.e);
-            this.$l.outside = pb.length(pb.max(this.q, pb.vec3(0)));
-            this.$l.inside = pb.min(pb.max(this.q.x, pb.max(this.q.y, this.q.z)), 0);
-            this.$return(pb.add(this.outside, this.inside));
-          });
-          pb.func(
-            'traceSDFBoxes',
-            [
-              pb.vec3('rayOrigin'),
-              pb.vec3('rayDir'),
-              pb.float('maxDistance'),
-              pb.float('maxIterations'),
-              pb.float('thickness'),
-              pb.float('stepScale'),
-              pb.vec2('cameraNearFar'),
-              pb.mat4('projMatrix'),
-              pb.vec4('textureSize')
-            ],
-            function () {
-              this.$if(pb.lessThanEqual(this.ssrSDFBoxCount, 0), function () {
-                this.$return(pb.vec4(0));
-              });
-              this.$l.t = pb.float(0.05);
-              this.$l.hitInfo = pb.vec4(0);
-              this.$for(
-                pb.float('i'),
-                0,
-                pb.getDevice().type === 'webgl' ? 256 : this.maxIterations,
-                function () {
-                  if (pb.getDevice().type === 'webgl') {
-                    this.$if(pb.greaterThanEqual(this.i, this.maxIterations), function () {
-                      this.$break();
-                    });
-                  }
-                  this.$if(pb.greaterThan(this.t, this.maxDistance), function () {
-                    this.$break();
-                  });
-                  this.$l.p = pb.add(this.rayOrigin, pb.mul(this.rayDir, this.t));
-                  this.$l.sd = pb.float(1e6);
-                  this.$for(pb.int('b'), 0, SSR._sdfMaxBoxes, function () {
-                    this.$if(pb.greaterThanEqual(this.b, this.ssrSDFBoxCount), function () {
-                      this.$break();
-                    });
-                    this.$l.bmin = this.zSDFBoxes.at(pb.mul(this.b, 2)).xyz;
-                    this.$l.bmax = this.zSDFBoxes.at(pb.add(pb.mul(this.b, 2), 1)).xyz;
-                    this.sd = pb.min(this.sd, this.sdAABB(this.p, this.bmin, this.bmax));
-                  });
-                  this.$if(pb.lessThan(this.sd, 0.02), function () {
-                    this.$l.clip = pb.mul(this.projMatrix, pb.vec4(this.p, 1));
-                    this.$if(pb.lessThan(pb.abs(this.clip.w), 1e-5), function () {
-                      this.$break();
-                    });
-                    this.$l.uv = pb.add(pb.mul(pb.div(this.clip.xy, this.clip.w), 0.5), pb.vec2(0.5));
-                    this.$if(
-                      pb.or(
-                        pb.any(pb.lessThan(this.uv, pb.vec2(0))),
-                        pb.any(pb.greaterThan(this.uv, pb.vec2(1)))
-                      ),
-                      function () {
-                        this.$break();
-                      }
-                    );
-                    this.$l.sceneDepth01 = ShaderHelper.sampleLinearDepth(this, this.depthTex, this.uv, 0);
-                    this.$if(pb.lessThan(this.sceneDepth01, 1), function () {
-                      this.$l.sceneDepth = pb.mul(this.sceneDepth01, this.cameraNearFar.y);
-                      this.$l.hitDepth = pb.max(pb.neg(this.p.z), 0);
-                      this.$l.depthDelta = pb.abs(pb.sub(this.sceneDepth, this.hitDepth));
-                      this.$l.depthTol = pb.max(pb.mul(this.thickness, this.cameraNearFar.y), 0.25);
-                      this.$l.alpha = pb.sub(1, pb.smoothStep(0, this.depthTol, this.depthDelta));
-                      this.hitInfo = pb.vec4(this.uv, this.t, pb.clamp(this.alpha, 0, 1));
-                    });
-                    this.$break();
-                  });
-                  this.$l.step = pb.max(pb.mul(this.sd, pb.max(this.stepScale, 0.25)), 0.02);
-                  this.t = pb.add(this.t, this.step);
-                }
-              );
-              this.$return(this.hitInfo);
-            }
-          );
-        }
         pb.main(function () {
           this.$l.screenUV = pb.div(pb.vec2(this.$builtins.fragCoord.xy), this.targetSize.xy);
           this.$l.roughnessValue = pb.textureSampleLevel(this.roughnessTex, this.screenUV, 0);
@@ -1096,68 +998,6 @@ export class SSR extends AbstractPostEffect {
                   this.targetSize,
                   this.hizTex,
                   this.normalTex
-                );
-                this.$if(
-                  pb.and(
-                    pb.notEqual(this.ssrHiZFallback, 0),
-                    pb.lessThanEqual(pb.clamp(this.hitInfo.w, 0, 1), 0)
-                  ),
-                  function () {
-                    this.$l.hitInfoFallback = pb.vec4(0);
-                    this.$if(pb.greaterThan(this.ssrSDFBoxCount, 0), function () {
-                      this.hitInfoFallback = this.traceSDFBoxes(
-                        this.viewPos,
-                        this.reflectVec,
-                        this.ssrParams.x,
-                        this.ssrHiZFallbackSteps,
-                        this.ssrParams.z,
-                        this.ssrHiZFallbackStride,
-                        this.cameraNearFar,
-                        this.projMatrix,
-                        this.targetSize
-                      );
-                    }).$else(function () {
-                      this.hitInfoFallback = screenSpaceRayTracing_Linear2D(
-                        this,
-                        this.viewPos,
-                        this.reflectVec,
-                        this.viewMatrix,
-                        this.projMatrix,
-                        this.invProjMatrix,
-                        this.cameraNearFar,
-                        this.ssrParams.x,
-                        this.ssrHiZFallbackSteps,
-                        this.ssrParams.z,
-                        this.ssrHiZFallbackStride,
-                        this.targetSize,
-                        this.depthTex,
-                        this.normalTex,
-                        !!ctx.camera.ssrCalcThickness
-                      );
-                    });
-                    this.$if(pb.lessThanEqual(pb.clamp(this.hitInfoFallback.w, 0, 1), 0), function () {
-                      this.hitInfoFallback = screenSpaceRayTracing_Linear2D(
-                        this,
-                        this.viewPos,
-                        this.reflectVec,
-                        this.viewMatrix,
-                        this.projMatrix,
-                        this.invProjMatrix,
-                        this.cameraNearFar,
-                        this.ssrParams.x,
-                        this.ssrHiZFallbackSteps,
-                        this.ssrParams.z,
-                        this.ssrHiZFallbackStride,
-                        this.targetSize,
-                        this.depthTex,
-                        this.normalTex,
-                        !!ctx.camera.ssrCalcThickness
-                      );
-                    });
-                    this.$if(pb.greaterThan(this.hitInfoFallback.w, this.hitInfo.w), function () {
-                      this.hitInfo = this.hitInfoFallback;
-                    });
-                  }
                 );
               } else {
                 this.hitInfo = screenSpaceRayTracing_Linear2D(

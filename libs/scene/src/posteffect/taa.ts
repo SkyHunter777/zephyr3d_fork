@@ -7,6 +7,7 @@ import { BoxShape } from '../shapes';
 import { temporalResolve } from '../shaders/temporal';
 import type { Nullable } from '@zephyr3d/base';
 import { Vector2 } from '@zephyr3d/base';
+import { RGHistoryResources } from '../render/rendergraph/history_resources';
 
 /** @internal */
 export class TAA extends AbstractPostEffect {
@@ -49,12 +50,20 @@ export class TAA extends AbstractPostEffect {
     ctx.device.pool.releaseFrameBuffer(fb);
   }
   apply(ctx: DrawContext, inputColorTexture: Texture2D, sceneDepthTexture: Texture2D, srgbOutput: boolean) {
-    const data = ctx.camera.getHistoryData();
+    const historyManager = ctx.camera.getHistoryResourceManager();
+    const useGraphHistory = !!historyManager?.frameActive;
+    const data = useGraphHistory ? null : ctx.camera.getHistoryData();
+    const prevColorTex = useGraphHistory
+      ? historyManager.tryGetPrevious(RGHistoryResources.TAA_COLOR)
+      : data!.prevColorTex;
+    const prevMotionVectorTex = useGraphHistory
+      ? historyManager.tryGetPrevious(RGHistoryResources.TAA_MOTION_VECTOR)
+      : data!.prevMotionVectorTex;
     if (
-      !data.prevColorTex ||
-      !data.prevMotionVectorTex ||
-      data.prevColorTex.width !== inputColorTexture.width ||
-      data.prevColorTex.height !== inputColorTexture.height
+      !prevColorTex ||
+      !prevMotionVectorTex ||
+      prevColorTex.width !== inputColorTexture.width ||
+      prevColorTex.height !== inputColorTexture.height
     ) {
       this.passThrough(ctx, inputColorTexture, srgbOutput);
     } else {
@@ -66,7 +75,7 @@ export class TAA extends AbstractPostEffect {
       if (!this._bindGroup) {
         this._bindGroup = ctx.device.createBindGroup(program.bindGroupLayouts[0]);
       }
-      this._bindGroup.setTexture('historyColorTex', data.prevColorTex, fetchSampler('clamp_linear_nomip'));
+      this._bindGroup.setTexture('historyColorTex', prevColorTex, fetchSampler('clamp_linear_nomip'));
       this._bindGroup.setTexture('currentColorTex', inputColorTexture, fetchSampler('clamp_nearest_nomip'));
       this._bindGroup.setTexture('currentDepthTex', sceneDepthTexture, fetchSampler('clamp_nearest_nomip'));
       this._bindGroup.setTexture(
@@ -76,7 +85,7 @@ export class TAA extends AbstractPostEffect {
       );
       this._bindGroup.setTexture(
         'prevMotionVector',
-        data.prevMotionVectorTex,
+        prevMotionVectorTex,
         fetchSampler('clamp_nearest_nomip')
       );
       this._bindGroup.setValue('flip', this.needFlip(ctx.device) ? 1 : 0);
@@ -87,17 +96,49 @@ export class TAA extends AbstractPostEffect {
       ctx.device.setBindGroup(0, this._bindGroup);
       this.drawFullscreenQuad();
     }
-    if (data.prevColorTex) {
-      ctx.device.pool.releaseTexture(data.prevColorTex);
+    const currentColorTex = ctx.device.getFramebuffer()!.getColorAttachments()[0] as Texture2D;
+    if (useGraphHistory) {
+      const colorSize = { width: currentColorTex.width, height: currentColorTex.height };
+      historyManager.queueRetainedCommit(
+        RGHistoryResources.TAA_COLOR,
+        {
+          format: currentColorTex.format,
+          sizeMode: 'absolute',
+          width: currentColorTex.width,
+          height: currentColorTex.height
+        },
+        colorSize,
+        currentColorTex
+      );
+      if (ctx.motionVectorTexture) {
+        const motionVectorSize = {
+          width: ctx.motionVectorTexture.width,
+          height: ctx.motionVectorTexture.height
+        };
+        historyManager.queueRetainedCommit(
+          RGHistoryResources.TAA_MOTION_VECTOR,
+          {
+            format: ctx.motionVectorTexture.format,
+            sizeMode: 'absolute',
+            width: ctx.motionVectorTexture.width,
+            height: ctx.motionVectorTexture.height
+          },
+          motionVectorSize,
+          ctx.motionVectorTexture
+        );
+      }
+    } else {
+      if (data!.prevColorTex) {
+        ctx.device.pool.releaseTexture(data!.prevColorTex);
+      }
+      ctx.device.pool.retainTexture(currentColorTex);
+      data!.prevColorTex = currentColorTex;
+      if (data!.prevMotionVectorTex) {
+        ctx.device.pool.releaseTexture(data!.prevMotionVectorTex);
+      }
+      ctx.device.pool.retainTexture(ctx.motionVectorTexture!);
+      data!.prevMotionVectorTex = ctx.motionVectorTexture!;
     }
-    const currentColorTex = ctx.device.getFramebuffer()!.getColorAttachments()[0];
-    ctx.device.pool.retainTexture(currentColorTex);
-    data.prevColorTex = currentColorTex;
-    if (data.prevMotionVectorTex) {
-      ctx.device.pool.releaseTexture(data.prevMotionVectorTex);
-    }
-    ctx.device.pool.retainTexture(ctx.motionVectorTexture!);
-    data.prevMotionVectorTex = ctx.motionVectorTexture!;
   }
   requireLinearDepthTexture(_ctx: DrawContext) {
     return true;

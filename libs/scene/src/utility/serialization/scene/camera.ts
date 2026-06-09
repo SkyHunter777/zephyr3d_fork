@@ -736,67 +736,6 @@ export function getCameraClass(): SerializableClass {
           }
         },
         {
-          name: 'SSRHiZFallback',
-          type: 'bool',
-          phase: 1,
-          default: true,
-          options: {
-            label: 'HiZFallback',
-            group: 'PostProcessing/SSR'
-          },
-          get(this: Camera, value) {
-            value.bool[0] = this.ssrHiZFallback;
-          },
-          set(this: Camera, value) {
-            this.ssrHiZFallback = value.bool[0];
-          },
-          isValid(this: Camera) {
-            return this.SSR && this.HiZ;
-          }
-        },
-        {
-          name: 'SSRHiZFallbackSteps',
-          type: 'int',
-          phase: 1,
-          default: 24,
-          options: {
-            label: 'FallbackSteps',
-            group: 'PostProcessing/SSR',
-            minValue: 1,
-            maxValue: 512
-          },
-          get(this: Camera, value) {
-            value.num[0] = this.ssrHiZFallbackSteps;
-          },
-          set(this: Camera, value) {
-            this.ssrHiZFallbackSteps = value.num[0];
-          },
-          isValid(this: Camera) {
-            return this.SSR && this.HiZ && this.ssrHiZFallback;
-          }
-        },
-        {
-          name: 'SSRHiZFallbackStride',
-          type: 'float',
-          phase: 1,
-          default: 1,
-          options: {
-            label: 'FallbackStride',
-            group: 'PostProcessing/SSR',
-            minValue: 1,
-            maxValue: 8
-          },
-          get(this: Camera, value) {
-            value.num[0] = this.ssrHiZFallbackStride;
-          },
-          set(this: Camera, value) {
-            this.ssrHiZFallbackStride = value.num[0];
-          },
-          isValid(this: Camera) {
-            return this.SSR && this.HiZ && this.ssrHiZFallback;
-          }
-        },
-        {
           name: 'SSRTemporal',
           type: 'bool',
           phase: 1,

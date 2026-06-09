@@ -53,6 +53,7 @@ export class HistoryResourceManager<TTexture = Texture2D> {
   private _pendingImports: Map<RGHandle, TTexture> = new Map();
   private _pendingCommits: Map<string, PendingHistoryCommit<TTexture>> = new Map();
   private _readScopeStack: Array<Map<string, TTexture>> = [];
+  private _frameActive = false;
 
   /**
    * Create a new history resource manager.
@@ -86,6 +87,25 @@ export class HistoryResourceManager<TTexture = Texture2D> {
   }
 
   /**
+   * Try to get a previous-frame texture from the current render graph read scope.
+   *
+   * Returns null when the resource was not imported for the current pass.
+   *
+   * @param name - Name of the history resource.
+   * @returns The scoped previous-frame texture, or null.
+   */
+  tryGetPrevious(name: string): TTexture | null {
+    return this._getScopedRead(name);
+  }
+
+  /**
+   * Whether this manager is currently collecting imports/commits for a graph frame.
+   */
+  get frameActive(): boolean {
+    return this._frameActive;
+  }
+
+  /**
    * Check whether a valid history resource exists and matches the descriptor.
    *
    * @param name - Name of the history resource.
@@ -105,6 +125,7 @@ export class HistoryResourceManager<TTexture = Texture2D> {
     this.discardFrame();
     this._pendingImports.clear();
     this._readScopeStack.length = 0;
+    this._frameActive = true;
   }
 
   /**
@@ -300,6 +321,7 @@ export class HistoryResourceManager<TTexture = Texture2D> {
     this._pendingCommits.clear();
     this._pendingImports.clear();
     this._readScopeStack.length = 0;
+    this._frameActive = false;
   }
 
   /**
@@ -314,6 +336,7 @@ export class HistoryResourceManager<TTexture = Texture2D> {
     this._pendingCommits.clear();
     this._pendingImports.clear();
     this._readScopeStack.length = 0;
+    this._frameActive = false;
   }
 
   /**

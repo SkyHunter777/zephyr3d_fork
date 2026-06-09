@@ -291,12 +291,6 @@ export class Camera extends SceneNode {
   protected _ssrBlurKernelSize: number;
   /** @internal SSR Gaussian blur standard deviation. */
   protected _ssrBlurStdDev: number;
-  /** @internal Whether HiZ miss falls back to linear SSR tracing. */
-  protected _ssrHiZFallback: boolean;
-  /** @internal Max iterations for HiZ miss linear SSR fallback. */
-  protected _ssrHiZFallbackSteps: number;
-  /** @internal Stride for HiZ miss linear SSR fallback. */
-  protected _ssrHiZFallbackStride: number;
   /** @internal Whether SSR temporal accumulation is enabled. */
   protected _ssrTemporal: boolean;
   /** @internal SSR temporal blending weight in [0, 1]. */
@@ -442,9 +436,6 @@ export class Camera extends SceneNode {
     this._ssrBlurDepthCutoff = 2;
     this._ssrBlurKernelSize = 5;
     this._ssrBlurStdDev = 4;
-    this._ssrHiZFallback = true;
-    this._ssrHiZFallbackSteps = 24;
-    this._ssrHiZFallbackStride = 1;
     this._ssrTemporal = true;
     this._ssrTemporalWeight = 0.85;
     this._SSS = false;
@@ -876,33 +867,6 @@ export class Camera extends SceneNode {
   }
   set ssrBlurStdDev(val) {
     this._ssrBlurStdDev = val;
-  }
-  /**
-   * Gets whether HiZ miss should fall back to linear SSR tracing.
-   */
-  get ssrHiZFallback() {
-    return this._ssrHiZFallback;
-  }
-  set ssrHiZFallback(val) {
-    this._ssrHiZFallback = !!val;
-  }
-  /**
-   * Gets maximum steps for HiZ miss linear SSR fallback.
-   */
-  get ssrHiZFallbackSteps() {
-    return this._ssrHiZFallbackSteps;
-  }
-  set ssrHiZFallbackSteps(val) {
-    this._ssrHiZFallbackSteps = Math.max(1, val ?? 1);
-  }
-  /**
-   * Gets stride for HiZ miss linear SSR fallback.
-   */
-  get ssrHiZFallbackStride() {
-    return this._ssrHiZFallbackStride;
-  }
-  set ssrHiZFallbackStride(val) {
-    this._ssrHiZFallbackStride = Math.max(1, val ?? 1);
   }
   /**
    * Gets whether SSR temporal accumulation is enabled.
