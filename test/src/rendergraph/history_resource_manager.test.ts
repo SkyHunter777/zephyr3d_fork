@@ -34,6 +34,31 @@ function createTexture(id: number, desc: RGTextureDesc, size: RGResolvedSize): M
   return { id, desc, size };
 }
 
+function createRefcountAllocator() {
+  let nextId = 0;
+  const refs = new Map<MockTexture, number>();
+  const events: string[] = [];
+  const allocator: RGTextureAllocator<MockTexture> = {
+    allocate(desc, size) {
+      const texture = { id: nextId++, desc, size };
+      refs.set(texture, 1);
+      events.push(`allocate:${texture.id}:1`);
+      return texture;
+    },
+    retain(texture) {
+      const nextRef = (refs.get(texture) ?? 0) + 1;
+      refs.set(texture, nextRef);
+      events.push(`retain:${texture.id}:${nextRef}`);
+    },
+    release(texture) {
+      const nextRef = (refs.get(texture) ?? 0) - 1;
+      refs.set(texture, nextRef);
+      events.push(`release:${texture.id}:${nextRef}`);
+    }
+  };
+  return { allocator, refs, events };
+}
+
 describe('HistoryResourceManager', () => {
   const desc: RGTextureDesc = {
     format: 'rgba8unorm',
@@ -184,5 +209,57 @@ describe('HistoryResourceManager', () => {
     executor.execute(graph.compile([backbuffer]));
 
     expect(resolvedHistory).toBe(third);
+  });
+
+  test('queueCommitFromGraph retains graph-produced texture across executor release', () => {
+    const { allocator, refs, events } = createRefcountAllocator();
+    const manager = new HistoryResourceManager(allocator);
+    const graph = new RenderGraph();
+    let committedTexture: MockTexture | null = null;
+
+    manager.beginFrame();
+
+    graph.addPass('ProduceHistory', (builder) => {
+      const current = builder.createTexture(desc);
+      builder.sideEffect();
+      builder.setExecute((ctx) => {
+        committedTexture = manager.queueCommitFromGraph('color', desc, size, ctx, current);
+        expect(refs.get(committedTexture)).toBe(2);
+      });
+    });
+
+    const executor = new RenderGraphExecutor(allocator, 64, 32);
+    executor.execute(graph.compile([]));
+
+    expect(committedTexture).not.toBeNull();
+    expect(refs.get(committedTexture!)).toBe(1);
+
+    manager.commitFrame();
+    expect(manager.importPrevious(new RenderGraph(), 'color')).not.toBeNull();
+
+    manager.dispose();
+    expect(refs.get(committedTexture!)).toBe(0);
+    expect(events).toEqual(['allocate:0:1', 'retain:0:2', 'release:0:1', 'release:0:0']);
+  });
+
+  test('queueCommitFromGraph requires allocator retain support and still releases transient', () => {
+    const { allocator, released } = createMockAllocator();
+    const manager = new HistoryResourceManager(allocator);
+    const graph = new RenderGraph();
+
+    manager.beginFrame();
+
+    graph.addPass('ProduceHistory', (builder) => {
+      const current = builder.createTexture(desc);
+      builder.sideEffect();
+      builder.setExecute((ctx) => {
+        manager.queueCommitFromGraph('color', desc, size, ctx, current);
+      });
+    });
+
+    const executor = new RenderGraphExecutor(allocator, 64, 32);
+    expect(() => executor.execute(graph.compile([]))).toThrow(/does not support retained graph texture/);
+    expect(released).toHaveLength(1);
+    expect(manager.importPrevious(new RenderGraph(), 'color')).toBeNull();
   });
 });

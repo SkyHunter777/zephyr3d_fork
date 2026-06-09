@@ -57,6 +57,16 @@ export class DevicePoolAllocator implements RGTextureAllocator<Texture2D, FrameB
   }
 
   /**
+   * Retain a pooled texture so it can be owned outside the graph lifetime.
+   *
+   * @param texture - The texture to retain.
+   */
+  retain(texture: Texture2D): void {
+    const device = getDevice();
+    device.pool.retainTexture(texture);
+  }
+
+  /**
    * Allocate a temporary framebuffer from the device pool.
    *
    * @param desc - Framebuffer descriptor from the render graph pass.

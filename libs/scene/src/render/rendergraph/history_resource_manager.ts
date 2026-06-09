@@ -1,7 +1,13 @@
 import type { Texture2D } from '@zephyr3d/device';
 import type { RenderGraph } from './rendergraph';
 import type { RenderGraphExecutor } from './executor';
-import type { RGHandle, RGTextureAllocator, RGTextureDesc, RGResolvedSize } from './types';
+import type {
+  RGHandle,
+  RGExecuteContext,
+  RGTextureAllocator,
+  RGTextureDesc,
+  RGResolvedSize
+} from './types';
 
 interface HistoryResource<TTexture> {
   desc: RGTextureDesc;
@@ -203,6 +209,60 @@ export class HistoryResourceManager<TTexture = Texture2D> {
       texture,
       ownsTexture
     });
+  }
+
+  /**
+   * Queue a graph-produced texture as a current-frame history write.
+   *
+   * The allocator must retain the texture before the graph executor releases its
+   * transient reference. Use this from inside the pass that declares access to
+   * the handle being committed.
+   *
+   * @param name - History resource name.
+   * @param desc - Texture descriptor.
+   * @param size - Resolved texture size.
+   * @param ctx - Current render graph execute context.
+   * @param handle - Graph texture handle to commit.
+   * @returns The retained texture.
+   */
+  queueCommitFromGraph(
+    name: string,
+    desc: RGTextureDesc,
+    size: RGResolvedSize,
+    ctx: Pick<RGExecuteContext, 'getTexture'>,
+    handle: RGHandle
+  ): TTexture {
+    const texture = ctx.getTexture<TTexture>(handle);
+    this.queueRetainedCommit(name, desc, size, texture);
+    return texture;
+  }
+
+  /**
+   * Queue a texture after retaining it through the allocator.
+   *
+   * Use this for textures produced by the graph allocator. The manager owns the
+   * retained reference and releases it when the history slot is overwritten,
+   * discarded, or disposed.
+   *
+   * @param name - History resource name.
+   * @param desc - Texture descriptor.
+   * @param size - Resolved texture size.
+   * @param texture - Texture to retain and commit.
+   */
+  queueRetainedCommit(
+    name: string,
+    desc: RGTextureDesc,
+    size: RGResolvedSize,
+    texture: TTexture
+  ): void {
+    if (!this._allocator.retain) {
+      throw new Error(
+        `HistoryResourceManager: cannot retain history resource '${name}'. ` +
+          `The allocator does not support retained graph texture handoff.`
+      );
+    }
+    this._allocator.retain(texture);
+    this.queueCommit(name, desc, size, texture, true);
   }
 
   /**

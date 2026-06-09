@@ -421,6 +421,20 @@ export interface RGTextureAllocator<TTexture = unknown, TFramebuffer = unknown> 
   release(texture: TTexture): void;
 
   /**
+   * Retain a texture allocated by this allocator so it can outlive the graph pass
+   * that produced it.
+   *
+   * This is used when a graph-produced transient texture must be handed off to
+   * an external owner, such as a cross-frame history resource. Executors still
+   * release the graph's own reference at the resource's last use; the external
+   * owner must later call {@link RGTextureAllocator.release} for the retained
+   * reference.
+   *
+   * Allocators that cannot retain transient textures should leave this undefined.
+   */
+  retain?(texture: TTexture): void;
+
+  /**
    * Allocate a temporary framebuffer matching the given descriptor.
    *
    * Implementations should not auto-release this framebuffer; the graph executor
