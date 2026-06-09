@@ -313,6 +313,14 @@ class PropertyGroup {
   }
 }
 
+function isScriptArrayElementObject(value: unknown): value is {
+  constructor: { __scriptArrayElement?: boolean };
+  propertyName?: unknown;
+  index?: unknown;
+} {
+  return !!value && typeof value === 'object' && !!(value as any).constructor?.__scriptArrayElement;
+}
+
 export class PropertyEditor extends Observable<{
   request_edit_aabb: [aabb: AABB];
   end_edit_aabb: [aabb: AABB];
@@ -425,6 +433,19 @@ export class PropertyEditor extends Observable<{
   private getGroupLabel(group: PropertyGroup) {
     if (group === this._rootGroup) {
       return 'Root';
+    }
+    const currentObject = group.value.object?.[0];
+    if (isScriptArrayElementObject(currentObject) && group.prop?.type === 'object_array') {
+      const baseLabel =
+        group.prop.options?.label ??
+        (typeof currentObject.propertyName === 'string' && currentObject.propertyName
+          ? currentObject.propertyName
+          : group.name);
+      const index =
+        typeof currentObject.index === 'number' && Number.isFinite(currentObject.index)
+          ? currentObject.index
+          : group.index;
+      return `${baseLabel}[${index}]`;
     }
     return group.prop?.options?.label ?? group.name;
   }
@@ -700,7 +721,11 @@ export class PropertyEditor extends Observable<{
       return;
     }
     const opened = this._groupOpenStates.get(group.statePath);
-    group.opened = opened ?? this.getNearestObjectGroup(group) === this._rootGroup;
+    group.opened =
+      opened ??
+      (isScriptArrayElementObject(group.value.object?.[0])
+        ? true
+        : this.getNearestObjectGroup(group) === this._rootGroup);
   }
   private getPropertyHeight(property: Property<any>) {
     return this.getTableRowHeight(property.value?.options?.multiline ? 100 : undefined);
@@ -821,6 +846,7 @@ export class PropertyEditor extends Observable<{
       (group.prop.type === 'object' || group.prop.type === 'object_array') &&
       group.objectTypes
     ) {
+      const isScriptArrayElement = isScriptArrayElementObject(group.value.object?.[0]);
       const editable =
         (group.value.object?.[0] instanceof AABB && group.prop.options?.edit === 'aabb') ||
         (group.value.object?.[0] instanceof PropertyTrack && group.prop.options?.edit === 'proptrack') ||
@@ -830,7 +856,7 @@ export class PropertyEditor extends Observable<{
       const settable =
         !group.prop.readonly &&
         !!group.prop.set &&
-        (group.prop.type === 'object' || group.index < group.count);
+        (group.prop.type === 'object' || (!isScriptArrayElement && group.index < group.count));
       const addable = group.prop.type === 'object_array' && !!group.prop.add;
       const deletable = group.prop.type === 'object_array' && group.prop.delete && group.index < group.count;
       const showTypeSelector = group.objectTypes.length > 1;
@@ -894,12 +920,19 @@ export class PropertyEditor extends Observable<{
             ) {
               this.inspectGroup(group);
               const ctor = group.objectTypes[group.selected[0]]?.ctor;
-              const newObj = ctor
-                ? group.prop.create
-                  ? group.prop.create.call(group.object, ctor, group.index)
-                  : new ctor()
-                : null;
-              (group.prop.add<'object'>).call(group.object, { object: [newObj] }, group.index);
+              const insertIndex = group.index + 1;
+              const newObj = isScriptArrayElement
+                ? null
+                : ctor
+                  ? group.prop.create
+                    ? group.prop.create.call(group.object, ctor, insertIndex)
+                    : new ctor()
+                  : null;
+              (group.prop.add<'object'>).call(
+                group.object,
+                { object: newObj ? [newObj] : [] },
+                insertIndex
+              );
               this.dispatchEvent('object_property_changed', group.object, group.prop);
               this.refresh();
             }
@@ -995,12 +1028,19 @@ export class PropertyEditor extends Observable<{
             if (ImGui.Button(`${FontGlyph.glyphs['plus']}##add`, new ImGui.ImVec2(buttonSize, 0))) {
               this.inspectGroup(group);
               const ctor = group.objectTypes[0]?.ctor;
-              const newObj = ctor
-                ? group.prop.create
-                  ? group.prop.create.call(group.object, ctor, group.index)
-                  : new ctor()
-                : null;
-              (group.prop.add<'object'>).call(group.object, { object: [newObj] }, group.index);
+              const insertIndex = group.index + 1;
+              const newObj = isScriptArrayElement
+                ? null
+                : ctor
+                  ? group.prop.create
+                    ? group.prop.create.call(group.object, ctor, insertIndex)
+                    : new ctor()
+                  : null;
+              (group.prop.add<'object'>).call(
+                group.object,
+                { object: newObj ? [newObj] : [] },
+                insertIndex
+              );
               this.dispatchEvent('object_property_changed', group.object, group.prop);
               this.refresh();
             }
