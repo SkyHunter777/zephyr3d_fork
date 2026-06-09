@@ -722,6 +722,7 @@ export class Editor {
         '',
         'Select or enter a parent directory',
         'Select Project Parent Directory',
+        undefined,
         560
       );
       if (!result) {
