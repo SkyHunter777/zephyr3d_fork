@@ -41,9 +41,7 @@ function getPluginDependencySummary(plugin: SystemPluginRecord): string {
 }
 
 function getPluginModeSummary(plugin: SystemPluginRecord): string {
-  return plugin.linked?.directory
-    ? `Mode: linked (${plugin.linked.directory})`
-    : 'Mode: installed package';
+  return plugin.linked?.directory ? `Mode: linked (${plugin.linked.directory})` : 'Mode: installed package';
 }
 
 const AUTO_SCRIPT_PATHS_BY_PLUGIN_ID: Record<string, string[]> = {
@@ -748,7 +746,9 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
       this.linkPlugin();
     }
     if (ImGui.IsItemHovered()) {
-      ImGui.SetTooltip('Links a desktop plugin directory for development. Supports plugin.dev.json source entry.');
+      ImGui.SetTooltip(
+        'Links a desktop plugin directory for development. Supports plugin.dev.json source entry.'
+      );
     }
     ImGui.SameLine();
     if (ImGui.Button('New Template...') && !this._busy) {
@@ -837,8 +837,7 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
         });
         updateProgress(4, 4, '插件列表已刷新');
       });
-    } catch {
-    }
+    } catch {}
   }
 
   private async installPlugin() {
@@ -855,8 +854,7 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
           updateProgress(4, 4, '插件安装完成');
         });
       }
-    } catch {
-    }
+    } catch {}
   }
 
   private async installPluginFolder() {
@@ -873,8 +871,7 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
           updateProgress(4, 4, '插件安装完成');
         });
       }
-    } catch {
-    }
+    } catch {}
   }
 
   private async linkPlugin() {

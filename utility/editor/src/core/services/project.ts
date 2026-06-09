@@ -91,8 +91,13 @@ export function getProjectStorageId(project: ProjectInfo): string {
 }
 
 function resolveDesktopProjectDirectory(parentDirectory: string, projectName: string): string {
-  const normalizedParent = String(parentDirectory || '').trim().replace(/[\\/]+$/, '');
-  const normalizedName = String(projectName || '').trim().replace(/[\\/]+/g, ' ').trim();
+  const normalizedParent = String(parentDirectory || '')
+    .trim()
+    .replace(/[\\/]+$/, '');
+  const normalizedName = String(projectName || '')
+    .trim()
+    .replace(/[\\/]+/g, ' ')
+    .trim();
   if (!normalizedParent || !normalizedName) {
     return normalizedParent || normalizedName;
   }
@@ -155,9 +160,7 @@ export class ProjectService {
     const name = nameOverride?.trim() || PathUtils.basename(baseDir);
     const desktop = getDesktopAPI();
     if (desktop && directory && !isAbsoluteProjectId(directory)) {
-      throw new Error(
-        `Import project failed: Parent directory must be an absolute path, got <${directory}>`
-      );
+      throw new Error(`Import project failed: Parent directory must be an absolute path, got <${directory}>`);
     }
     const selectedDirectory = desktop
       ? directory ||
@@ -204,9 +207,7 @@ export class ProjectService {
     }
     const desktop = getDesktopAPI();
     if (desktop && directory && !isAbsoluteProjectId(directory)) {
-      throw new Error(
-        `Create project failed: Parent directory must be an absolute path, got <${directory}>`
-      );
+      throw new Error(`Create project failed: Parent directory must be an absolute path, got <${directory}>`);
     }
     const selectedDirectory = desktop
       ? directory ||

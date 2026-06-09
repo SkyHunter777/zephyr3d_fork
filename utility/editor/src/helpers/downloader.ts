@@ -73,7 +73,12 @@ export async function exportMultipleFilesAsZip(
 ) {
   const zipDownloader = new ZipDownloader(zipFilename);
   const zipWriter = zipDownloader.zipWriter;
-  const { commonPrefix, directoryEntries, uniqueFiles } = await collectExportEntries(files, directories, vfs, options);
+  const { commonPrefix, directoryEntries, uniqueFiles } = await collectExportEntries(
+    files,
+    directories,
+    vfs,
+    options
+  );
   const totalSteps = directoryEntries.length + uniqueFiles.length || 1;
   let currentStep = 0;
   options?.onProgress?.(currentStep, totalSteps);
@@ -114,7 +119,12 @@ export async function exportMultipleFilesToDirectory(
     return false;
   }
   const outputFS = new ElectronFS(`project:${targetRoot}`);
-  const { commonPrefix, directoryEntries, uniqueFiles } = await collectExportEntries(files, directories, vfs, options);
+  const { commonPrefix, directoryEntries, uniqueFiles } = await collectExportEntries(
+    files,
+    directories,
+    vfs,
+    options
+  );
   try {
     const totalSteps = directoryEntries.length + uniqueFiles.length || 1;
     let currentStep = 0;

@@ -928,11 +928,7 @@ export class PropertyEditor extends Observable<{
                     ? group.prop.create.call(group.object, ctor, insertIndex)
                     : new ctor()
                   : null;
-              (group.prop.add<'object'>).call(
-                group.object,
-                { object: newObj ? [newObj] : [] },
-                insertIndex
-              );
+              (group.prop.add<'object'>).call(group.object, { object: newObj ? [newObj] : [] }, insertIndex);
               this.dispatchEvent('object_property_changed', group.object, group.prop);
               this.refresh();
             }
@@ -1036,11 +1032,7 @@ export class PropertyEditor extends Observable<{
                     ? group.prop.create.call(group.object, ctor, insertIndex)
                     : new ctor()
                   : null;
-              (group.prop.add<'object'>).call(
-                group.object,
-                { object: newObj ? [newObj] : [] },
-                insertIndex
-              );
+              (group.prop.add<'object'>).call(group.object, { object: newObj ? [newObj] : [] }, insertIndex);
               this.dispatchEvent('object_property_changed', group.object, group.prop);
               this.refresh();
             }
@@ -1536,9 +1528,9 @@ export class PropertyEditor extends Observable<{
     }
     const host = this.resolveSceneNodeRefHost(object);
     const scope = host
-      ? ((typeof (host as any)?.getPrefabNode === 'function' && (host as any).getPrefabNode()) ||
+      ? (typeof (host as any)?.getPrefabNode === 'function' && (host as any).getPrefabNode()) ||
         host.scene?.rootNode ||
-        host)
+        host
       : null;
     const node = scope?.findNodeById?.(id);
     if (node instanceof SceneNode) {

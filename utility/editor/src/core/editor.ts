@@ -281,9 +281,16 @@ export class Editor {
         continue;
       }
       onProgress?.(`Installing dependency ${packageName} (${index}/${dependencyEntries.length})...`);
-      await installDeps(projectId, ProjectService.VFS, '/', packageName, (message) => {
-        onProgress?.(`${message} (${index}/${dependencyEntries.length})`);
-      }, false);
+      await installDeps(
+        projectId,
+        ProjectService.VFS,
+        '/',
+        packageName,
+        (message) => {
+          onProgress?.(`${message} (${index}/${dependencyEntries.length})`);
+        },
+        false
+      );
     }
   }
   async saveProject() {
@@ -812,7 +819,10 @@ export class Editor {
           throw new Error(`Cannot read remote project at <${url}>`);
         }
         updateProgress(2, 5, 'Opening remote project...');
-        const project = await ProjectService.openRemoteProject(url as string, new RemoteProjectDirectoryReader(fileList));
+        const project = await ProjectService.openRemoteProject(
+          url as string,
+          new RemoteProjectDirectoryReader(fileList)
+        );
         this._currentProject = project;
         this._isRemoteProject = true;
         updateProgress(3, 5, 'Loading project settings...');
