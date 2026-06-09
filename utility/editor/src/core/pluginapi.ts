@@ -60,6 +60,35 @@ export type EditorToolbarContribution =
   | EditorToolbarItem
   | ((ctx: EditorToolbarContext) => EditorToolbarItem);
 
+export type EditorPluginPanelLocation = 'left' | 'right' | 'bottom';
+
+export type EditorPluginPanelContribution = {
+  id: string;
+  title: string;
+  location: EditorPluginPanelLocation;
+  order?: number;
+  visible?: () => boolean;
+  render: () => void;
+};
+
+export type EditorPluginWindowContext<TResult = unknown> = {
+  id: string;
+  title: string;
+  close(result?: TResult | null): void;
+};
+
+export type EditorPluginWindowOptions<TResult = unknown> = {
+  id: string;
+  title: string;
+  width?: number;
+  height?: number;
+  mask?: boolean;
+  noResize?: boolean;
+  noMove?: boolean;
+  center?: boolean;
+  render: (ctx: EditorPluginWindowContext<TResult>) => void;
+};
+
 export type EditorEditToolFactory = {
   id: string;
   canEdit: (obj: unknown, ctx: EditorEditToolFactoryContext) => boolean;
@@ -241,6 +270,8 @@ export type EditorPluginContext = {
   ui: {
     message(title: string, message: string, width?: number, height?: number): Promise<void>;
     confirm(title: string, message: string, okLabel?: string, cancelLabel?: string): Promise<boolean>;
+    openWindow<TResult = unknown>(options: EditorPluginWindowOptions<TResult>): Promise<TResult | null>;
+    openDialog<TResult = unknown>(options: EditorPluginWindowOptions<TResult>): Promise<TResult | null>;
     selectProjectFiles(
       title: string,
       rootDir: string,
@@ -268,6 +299,7 @@ export type EditorPluginContext = {
   getSceneContext(): EditorSceneContext;
   refreshProperties(): void;
   notifySceneChanged(): void;
+  registerPanel(panel: EditorPluginPanelContribution): () => void;
   registerMenuItems(contribution: EditorMenuContribution): () => void;
   registerToolbarItem(item: EditorToolbarContribution): () => void;
   registerEditTool(factory: EditorEditToolFactory): () => void;
