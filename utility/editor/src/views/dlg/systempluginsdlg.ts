@@ -45,6 +45,10 @@ function getPluginModeSummary(plugin: SystemPluginRecord): string {
     : 'Mode: installed package';
 }
 
+const AUTO_SCRIPT_PATHS_BY_PLUGIN_ID: Record<string, string[]> = {
+  'com.0yao.zephyr3d-plugin': ['/assets/scripts/gpucloth.ts', '/assets/scripts/springtest.ts']
+};
+
 function normalizePluginSettingsForSchema(
   schema: EditorPluginSettingsSchema,
   settings: Record<string, unknown> | null | undefined
@@ -925,7 +929,37 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
   private async removeSelected(plugin: SystemPluginRecord) {
     this._busy = true;
     try {
+      const autoScriptPaths = AUTO_SCRIPT_PATHS_BY_PLUGIN_ID[plugin.id] ?? [];
+      let shouldDeleteScripts = false;
+      if (autoScriptPaths.length > 0 && this._editor.currentProject && !this._editor.isProjectReadOnly()) {
+        const existingPaths: string[] = [];
+        for (const path of autoScriptPaths) {
+          if (await this._editor.projectFileExists(path)) {
+            existingPaths.push(path);
+          }
+        }
+        if (existingPaths.length > 0) {
+          const confirmed = await DlgMessageBoxEx.messageBoxEx(
+            'Remove plugin scripts',
+            `Also remove these generated project scripts?\n\n${existingPaths.join('\n')}`,
+            ['Remove Plugin And Scripts', 'Keep Scripts', 'Cancel'],
+            460,
+            0,
+            true
+          );
+          if (confirmed === 'Cancel') {
+            return;
+          }
+          shouldDeleteScripts = confirmed === 'Remove Plugin And Scripts';
+          if (shouldDeleteScripts) {
+            for (const path of existingPaths) {
+              await this._editor.deleteProjectFile(path);
+            }
+          }
+        }
+      }
       await this._editor.removeSystemPlugin(plugin.id);
+      void shouldDeleteScripts;
       await this.reload();
     } catch {
     } finally {
