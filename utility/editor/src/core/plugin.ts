@@ -1,4 +1,4 @@
-import type { FileMetadata, Nullable, VFS } from '@zephyr3d/base';
+import type { FileMetadata, IDisposable, Nullable, VFS } from '@zephyr3d/base';
 import { Disposable, Observable } from '@zephyr3d/base';
 import type { Scene, SceneNode, Camera, PropertyAccessor } from '@zephyr3d/scene';
 import { ClipmapTerrain } from '@zephyr3d/scene';

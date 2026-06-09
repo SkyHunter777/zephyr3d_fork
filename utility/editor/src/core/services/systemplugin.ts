@@ -1311,20 +1311,6 @@ export class SystemPluginService {
     return this.normalizePackageManifest(parsed);
   }
 
-  private static readPackageManifestFromLinkedFiles(files: SystemPluginFileInput[]) {
-    const devManifestFile = files.find((file) => file.path === SYSTEM_PLUGIN_DEV_PACKAGE_MANIFEST);
-    if (devManifestFile) {
-      return {
-        manifestFileName: SYSTEM_PLUGIN_DEV_PACKAGE_MANIFEST,
-        packageManifest: this.parsePackageManifest(devManifestFile.source, SYSTEM_PLUGIN_DEV_PACKAGE_MANIFEST)
-      };
-    }
-    return {
-      manifestFileName: SYSTEM_PLUGIN_PACKAGE_MANIFEST,
-      packageManifest: this.readPackageManifestFromFiles(files)
-    };
-  }
-
   private static async readLinkedPackageManifest(
     directory: string,
     linkedVFS: ReturnType<typeof createLinkedDirectoryVFS>
