@@ -8,6 +8,7 @@ export class DlgProgress extends DialogRenderer<void> {
   private _total2: number;
   private _twoLevel: boolean;
   private _barSize: ImGui.ImVec2;
+  private _message: string;
   constructor(id: string, width: number, twoLevel = false) {
     super(id, width, 0, false, true, true);
     this._current = 0;
@@ -16,6 +17,7 @@ export class DlgProgress extends DialogRenderer<void> {
     this._total2 = 1;
     this._twoLevel = twoLevel;
     this._barSize = new ImGui.ImVec2();
+    this._message = '';
   }
   setProgress(current: number, total: number) {
     this._current = current;
@@ -25,9 +27,15 @@ export class DlgProgress extends DialogRenderer<void> {
     this._current2 = current;
     this._total2 = total;
   }
+  setMessage(message: string) {
+    this._message = message;
+  }
   doRender(): void {
     this._barSize.x = ImGui.GetContentRegionAvail().x;
     this._barSize.y = 5;
+    if (this._message) {
+      ImGui.TextWrapped(this._message);
+    }
     ImGui.Text(`Finished: ${this._current} of ${this._total}`);
     ImGui.ProgressBar(this._current / this._total, this._barSize, '');
     if (this._twoLevel) {
