@@ -27,6 +27,7 @@ import { FilePicker } from '../components/filepicker';
 import { fileListFileName, generateIndexTS, libDir } from './build/templates';
 import { DlgMessageBoxEx } from '../views/dlg/messageexdlg';
 import { DlgMessage } from '../views/dlg/messagedlg';
+import { DlgProgress } from '../views/dlg/progressdlg';
 import { EditorPluginManager, type EditorPlugin, type EditorPluginDefinition } from './plugin';
 import { ScriptRegistry } from '@zephyr3d/scene';
 import {
@@ -239,6 +240,51 @@ export class Editor {
   }
   private formatProjectLabel(project: ProjectInfo) {
     return project.path ? `${project.name} (${project.path})` : project.name;
+  }
+
+  private async runProjectOpenTask<T>(
+    title: string,
+    action: (updateProgress: (current: number, total: number, message: string) => void) => Promise<T>
+  ) {
+    const progress = new DlgProgress(`${title}##ProjectOpenProgress`, 420);
+    progress.showModal();
+    progress.setProgress(0, 5);
+    progress.setMessage('Preparing project...');
+    try {
+      const result = await action((current, total, message) => {
+        progress.setProgress(current, total);
+        progress.setMessage(message);
+      });
+      progress.setProgress(5, 5);
+      progress.setMessage('Project ready');
+      return result;
+    } finally {
+      progress.close();
+    }
+  }
+
+  private async ensureProjectDependenciesInstalled(
+    projectId: string,
+    settings: ProjectSettings,
+    onProgress?: (message: string) => void
+  ) {
+    const dependencyEntries = Object.entries(settings.dependencies ?? {});
+    if (dependencyEntries.length === 0) {
+      return;
+    }
+    let index = 0;
+    for (const [depName, depVersion] of dependencyEntries) {
+      index++;
+      const packageName = `${depName}@${depVersion}`;
+      const installed = await ProjectService.VFS.exists(`/${libDir}/deps/${packageName}`);
+      if (installed) {
+        continue;
+      }
+      onProgress?.(`Installing dependency ${packageName} (${index}/${dependencyEntries.length})...`);
+      await installDeps(projectId, ProjectService.VFS, '/', packageName, (message) => {
+        onProgress?.(`${message} (${index}/${dependencyEntries.length})`);
+      }, false);
+    }
   }
   async saveProject() {
     if (this._currentProject && !this._isRemoteProject) {
@@ -728,26 +774,30 @@ export class Editor {
     if (!url) {
       return;
     }
-    const fileList = await this.loadFileList(url);
-    if (!fileList) {
-      await DlgMessage.messageBox('Error', `Cannot read remote project at <${url}>`);
-      return;
-    }
-    const loading = new DlgMessageBoxEx('zephyr3d', 'Loading project, please wait...', []);
-    loading.showModal();
     try {
-      const project = await ProjectService.openRemoteProject(url, new RemoteProjectDirectoryReader(fileList));
-      this._currentProject = project;
-      this._isRemoteProject = true;
-      this._plugins.dispatchEvent('projectOpened', project);
-      this.loadDepTypes();
-      const settings = await ProjectService.getCurrentProjectSettings();
-      await this._moduleManager.activate(
-        'Scene',
-        settings.startupScene || this._currentProject.lastEditScene || ''
-      );
-    } finally {
-      loading.close('');
+      await this.runProjectOpenTask('Open Remote Project', async (updateProgress) => {
+        updateProgress(1, 5, 'Reading remote project file list...');
+        const fileList = await this.loadFileList(url as string);
+        if (!fileList) {
+          throw new Error(`Cannot read remote project at <${url}>`);
+        }
+        updateProgress(2, 5, 'Opening remote project...');
+        const project = await ProjectService.openRemoteProject(url as string, new RemoteProjectDirectoryReader(fileList));
+        this._currentProject = project;
+        this._isRemoteProject = true;
+        updateProgress(3, 5, 'Loading project settings...');
+        const settings = await ProjectService.getCurrentProjectSettings();
+        this._plugins.dispatchEvent('projectOpened', project);
+        updateProgress(4, 5, 'Loading script type hints...');
+        await this.loadDepTypes();
+        updateProgress(5, 5, 'Opening startup scene...');
+        await this._moduleManager.activate(
+          'Scene',
+          settings.startupScene || this._currentProject.lastEditScene || ''
+        );
+      });
+    } catch (err) {
+      await DlgMessage.messageBox('Error', `${err}`);
     }
   }
   async openProject(id?: string): Promise<{ id: Nullable<string>; err: Nullable<string> }> {
@@ -759,32 +809,23 @@ export class Editor {
         id = await Dialog.openFromList('Open Project', names, ids, 400, 400);
       }
       if (id) {
-        this._isRemoteProject = false;
-        const project = await ProjectService.openProject(id);
-        const settings = await ProjectService.getCurrentProjectSettings();
-        this._currentProject = project;
-        this._plugins.dispatchEvent('projectOpened', project);
-        this.loadDepTypes();
-        this._moduleManager.activate('Scene', settings.startupScene ?? project.lastEditScene ?? '');
-        for (const dep of Object.keys(settings.dependencies ?? {})) {
-          const depName = dep;
-          const depVersion = settings.dependencies[dep];
-          const packageName = `${depName}@${depVersion}`;
-          const installed = await ProjectService.VFS.exists(`/${libDir}/deps/${packageName}`);
-          if (!installed) {
-            const dlgMessageBoxEx = new DlgMessageBoxEx(
-              'Install package',
-              `Installing ${packageName}`,
-              [],
-              400,
-              0,
-              false
-            );
-            dlgMessageBoxEx.showModal();
-            await installDeps(id, ProjectService.VFS, '/', packageName, null, false);
-            dlgMessageBoxEx.close('');
-          }
-        }
+        await this.runProjectOpenTask('Open Project', async (updateProgress) => {
+          this._isRemoteProject = false;
+          updateProgress(1, 5, 'Opening project files...');
+          const project = await ProjectService.openProject(id as string);
+          this._currentProject = project;
+          updateProgress(2, 5, 'Loading project settings...');
+          const settings = await ProjectService.getCurrentProjectSettings();
+          this._plugins.dispatchEvent('projectOpened', project);
+          updateProgress(3, 5, 'Checking project dependencies...');
+          await this.ensureProjectDependenciesInstalled(id as string, settings, (message) => {
+            updateProgress(3, 5, message);
+          });
+          updateProgress(4, 5, 'Loading script type hints...');
+          await this.loadDepTypes();
+          updateProgress(5, 5, 'Opening startup scene...');
+          await this._moduleManager.activate('Scene', settings.startupScene ?? project.lastEditScene ?? '');
+        });
       }
       return {
         id,
@@ -925,33 +966,62 @@ export class Editor {
   }
 
   async refreshSystemPlugins() {
-    const refreshedLinkedPlugins = await SystemPluginService.refreshLinkedPlugins();
+    return this.refreshSystemPluginsWithProgress();
+  }
+
+  async refreshSystemPluginsWithProgress(onProgress?: (stage: string) => void) {
+    onProgress?.('正在刷新已 Link 的插件...');
+    const refreshedLinkedPlugins = await SystemPluginService.refreshLinkedPlugins(onProgress);
     for (const plugin of refreshedLinkedPlugins) {
       if (plugin.enabled) {
+        onProgress?.(`正在重新加载插件 ${plugin.name || plugin.id}...`);
         await this.tryLoadSystemPlugin(plugin.id, true);
       }
     }
+    onProgress?.('正在刷新插件列表...');
     return SystemPluginService.listPlugins();
   }
 
   async installSystemPluginFromFile(file: File) {
-    const plugin = await SystemPluginService.installPluginFromFile(file);
+    return this.installSystemPluginFromFileWithProgress(file);
+  }
+
+  async installSystemPluginFromFileWithProgress(file: File, onProgress?: (stage: string) => void) {
+    const plugin = await SystemPluginService.installPluginFromFile(file, onProgress);
+    onProgress?.(`正在加载插件 ${plugin.name || plugin.id}...`);
     const loadedId = await this.tryLoadSystemPlugin(plugin.id, true);
     return (await SystemPluginService.getPlugin(loadedId ?? plugin.id)) ?? plugin;
   }
 
   async installSystemPluginFromDirectory(files: File[]) {
-    const plugin = await SystemPluginService.installPluginFromDirectory(files);
+    return this.installSystemPluginFromDirectoryWithProgress(files);
+  }
+
+  async installSystemPluginFromDirectoryWithProgress(files: File[], onProgress?: (stage: string) => void) {
+    const plugin = await SystemPluginService.installPluginFromDirectory(files, onProgress);
+    onProgress?.(`正在加载插件 ${plugin.name || plugin.id}...`);
     const loadedId = await this.tryLoadSystemPlugin(plugin.id, true);
     return (await SystemPluginService.getPlugin(loadedId ?? plugin.id)) ?? plugin;
   }
 
   async linkSystemPlugin(directory: string, entryFileName?: string) {
-    const plugin = await SystemPluginService.linkPlugin({
-      directory,
-      entryFileName,
-      enabled: true
-    });
+    return this.linkSystemPluginWithProgress(directory, entryFileName);
+  }
+
+  async linkSystemPluginWithProgress(
+    directory: string,
+    entryFileName?: string,
+    onProgress?: (stage: string) => void
+  ) {
+    const plugin = await SystemPluginService.linkPlugin(
+      {
+        directory,
+        entryFileName,
+        enabled: true
+      },
+      onProgress
+    );
+    onProgress?.(`正在加载插件 ${plugin.name || plugin.id}...`);
     const loadedId = await this.tryLoadSystemPlugin(plugin.id, true);
     return (await SystemPluginService.getPlugin(loadedId ?? plugin.id)) ?? plugin;
   }

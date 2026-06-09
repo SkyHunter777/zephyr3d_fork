@@ -92,6 +92,8 @@ export type LinkSystemPluginInput = {
   enabled?: boolean;
 };
 
+export type SystemPluginProgressHandler = (stage: string) => void;
+
 export type SystemPluginFileRecord = {
   path: string;
   relativePath: string;
@@ -508,7 +510,11 @@ export class SystemPluginService {
     });
   }
 
-  static async installPluginFiles(input: InstallSystemPluginFilesInput): Promise<SystemPluginRecord> {
+  static async installPluginFiles(
+    input: InstallSystemPluginFilesInput,
+    onProgress?: SystemPluginProgressHandler
+  ): Promise<SystemPluginRecord> {
+    onProgress?.('正在校验插件清单...');
     await this.ensureLayout();
     const packageManifest = this.resolvePackageManifestForInstall(input);
     const normalizedFiles = this.withPackageManifestFile(
@@ -523,10 +529,12 @@ export class SystemPluginService {
     const oldEntry = manifest.plugins[packageManifest.id];
     const packageDir = this.getPackageDir(packageManifest.id);
 
+    onProgress?.('正在清理旧插件文件...');
     await this.unmountLinkedPlugin(packageManifest.id);
 
     await systemPluginVFS.deleteDirectory(packageDir, true).catch(() => undefined);
     await systemPluginVFS.makeDirectory(packageDir, true);
+    onProgress?.('正在写入插件文件...');
     for (const file of normalizedFiles) {
       const fullPath = systemPluginVFS.join(packageDir, file.path);
       await this.ensureParentDirectory(fullPath);
@@ -539,6 +547,7 @@ export class SystemPluginService {
       await systemPluginVFS.makeDirectory(systemPluginVFS.join(packageDir, libDir), true);
     }
 
+    onProgress?.('正在更新插件清单...');
     manifest.plugins[packageManifest.id] = {
       id: packageManifest.id,
       name: packageManifest.name,
@@ -557,9 +566,13 @@ export class SystemPluginService {
     return this.toRecord(manifest.plugins[packageManifest.id]);
   }
 
-  static async linkPlugin(input: LinkSystemPluginInput): Promise<SystemPluginRecord> {
+  static async linkPlugin(
+    input: LinkSystemPluginInput,
+    onProgress?: SystemPluginProgressHandler
+  ): Promise<SystemPluginRecord> {
+    onProgress?.('正在读取插件源码...');
     await this.ensureLayout();
-    const linkedInfo = await this.readLinkedPluginInput(input.directory, input.entryFileName);
+    const linkedInfo = await this.readLinkedPluginInput(input.directory, input.entryFileName, onProgress);
     const packageManifest = linkedInfo.packageManifest;
     const entryFileName = linkedInfo.entryFileName;
 
@@ -584,22 +597,32 @@ export class SystemPluginService {
       installedAt: oldEntry?.installedAt ?? now,
       updatedAt: now
     };
+    onProgress?.('正在写入 Link 信息...');
     await this.writeManifest(manifest);
+    onProgress?.('正在挂载插件目录...');
     await this.mountLinkedPlugin(this.toRecord(manifest.plugins[packageManifest.id]));
     return this.toRecord(manifest.plugins[packageManifest.id]);
   }
 
-  static async refreshLinkedPlugins(): Promise<SystemPluginRecord[]> {
+  static async refreshLinkedPlugins(onProgress?: SystemPluginProgressHandler): Promise<SystemPluginRecord[]> {
     await this.ensureLayout();
     const manifest = await this.readManifest();
+    const linkedEntries = Object.values(manifest.plugins).filter((plugin) => !!plugin.linked?.directory);
     const refreshed: SystemPluginRecord[] = [];
     let dirty = false;
+    let index = 0;
     for (const plugin of Object.values(manifest.plugins)) {
       const directory = plugin.linked?.directory?.trim();
       if (!directory) {
         continue;
       }
-      const linkedInfo = await this.readLinkedPluginInput(directory, plugin.linked?.entry?.replace(/^\/+/, ''));
+      index++;
+      onProgress?.(`正在刷新插件 ${plugin.name || plugin.id} (${index}/${linkedEntries.length})...`);
+      const linkedInfo = await this.readLinkedPluginInput(
+        directory,
+        plugin.linked?.entry?.replace(/^\/+/, ''),
+        onProgress
+      );
       const nextManifest = linkedInfo.packageManifest;
       const nextEntry = linkedInfo.entryFileName;
       if (
@@ -620,8 +643,10 @@ export class SystemPluginService {
       refreshed.push(this.toRecord(plugin));
     }
     if (dirty) {
+      onProgress?.('正在写回刷新后的插件清单...');
       await this.writeManifest(manifest);
     }
+    onProgress?.('正在同步已 Link 的插件目录...');
     await this.syncLinkedPluginMounts();
     return refreshed;
   }
@@ -706,23 +731,31 @@ export class SystemPluginService {
     )}\n`;
   }
 
-  static async installPluginFromFile(file: File): Promise<SystemPluginRecord> {
+  static async installPluginFromFile(
+    file: File,
+    onProgress?: SystemPluginProgressHandler
+  ): Promise<SystemPluginRecord> {
     const fileName = (file.name || '').toLowerCase();
     if (!fileName.endsWith('.zip')) {
       throw new Error(
         "Install Plugin only accepts '.zip' plugin packages. Use Install Folder for unpacked plugins."
       );
     }
-    return this.installPluginFromZip(file);
+    return this.installPluginFromZip(file, onProgress);
   }
 
-  static async installPluginFromDirectory(files: File[]): Promise<SystemPluginRecord> {
+  static async installPluginFromDirectory(
+    files: File[],
+    onProgress?: SystemPluginProgressHandler
+  ): Promise<SystemPluginRecord> {
+    onProgress?.('正在读取插件目录文件...');
     const inputFiles = await Promise.all(
       files.map(async (file) => ({
         path: this.normalizePluginFilePath(file.webkitRelativePath || file.name),
         source: await file.text()
       }))
     );
+    onProgress?.('正在解析插件目录结构...');
     const packageFiles = this.normalizeImportedPluginFiles(inputFiles);
     const packageManifest = this.readPackageManifestFromFiles(packageFiles);
     return this.installPluginFiles({
@@ -734,14 +767,19 @@ export class SystemPluginService {
       dependencies: packageManifest.dependencies,
       files: packageFiles,
       enabled: true
-    });
+    }, onProgress);
   }
 
-  static async installPluginFromZip(file: Blob): Promise<SystemPluginRecord> {
+  static async installPluginFromZip(
+    file: Blob,
+    onProgress?: SystemPluginProgressHandler
+  ): Promise<SystemPluginRecord> {
+    onProgress?.('正在读取 ZIP 插件包...');
     const zipReader = new ZipReader(new BlobReader(file));
     try {
       const entries = await zipReader.getEntries();
       const inputFiles: SystemPluginFileInput[] = [];
+      onProgress?.(`正在解压插件文件（共 ${entries.filter((entry) => !entry.directory).length} 个）...`);
       for (const entry of entries) {
         if (entry.directory) {
           continue;
@@ -751,6 +789,7 @@ export class SystemPluginService {
           source: await (entry as FileEntry).getData(new TextWriter())
         });
       }
+      onProgress?.('正在解析插件包结构...');
       const packageFiles = this.normalizeImportedPluginFiles(inputFiles);
       const packageManifest = this.readPackageManifestFromFiles(packageFiles);
       return this.installPluginFiles({
@@ -762,7 +801,7 @@ export class SystemPluginService {
         dependencies: packageManifest.dependencies,
         files: packageFiles,
         enabled: true
-      });
+      }, onProgress);
     } finally {
       await zipReader.close();
     }
@@ -1614,14 +1653,20 @@ export class SystemPluginService {
     }
   }
 
-  private static async readLinkedPluginInput(directory: string, entryFileName?: string) {
+  private static async readLinkedPluginInput(
+    directory: string,
+    entryFileName?: string,
+    onProgress?: SystemPluginProgressHandler
+  ) {
     const linkedVFS = createLinkedDirectoryVFS(directory);
     try {
+      onProgress?.('正在读取插件清单...');
       const { manifestFileName, manifestSource, packageManifest } = await this.readLinkedPackageManifest(
         directory,
         linkedVFS
       );
       const normalizedEntryFileName = this.normalizeEntryFileName(entryFileName ?? packageManifest.entry);
+      onProgress?.('正在分析插件入口依赖...');
       const graphFilesResult = await this.collectLinkedPluginGraphFiles(directory, linkedVFS, normalizedEntryFileName);
       const graphFiles = graphFilesResult.files;
       const packageFiles =
@@ -1632,12 +1677,14 @@ export class SystemPluginService {
         manifestFileName === SYSTEM_PLUGIN_PACKAGE_MANIFEST
           ? packageFiles
           : this.withPackageManifestFile(packageFiles, packageManifest);
+      onProgress?.('正在校验插件源码...');
       this.validatePluginFiles(
         validationFiles,
         normalizedEntryFileName,
         packageManifest.id,
         graphFilesResult.importSpecifiersByPath
       );
+      onProgress?.('正在检查插件依赖缓存...');
       await this.ensureLinkedPluginDependencies(linkedVFS, packageManifest);
       return {
         packageManifest,
