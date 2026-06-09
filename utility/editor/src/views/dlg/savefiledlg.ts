@@ -5,7 +5,7 @@ import { VFSRenderer } from '../../components/vfsrenderer';
 import { PathUtils, type VFS } from '@zephyr3d/base';
 import { CustomInputTextFlags, customTextInput } from '../../components/textinput';
 
-export class DlgSaveFile extends DialogRenderer<string> {
+export class DlgSaveFile extends DialogRenderer<string | null> {
   private readonly _renderer: VFSRenderer;
   private _name: [string];
   private _filterLabels: string[];
@@ -20,7 +20,7 @@ export class DlgSaveFile extends DialogRenderer<string> {
     width: number,
     height: number,
     defaultName?: string
-  ) {
+  ): Promise<string | null> {
     return new DlgSaveFile(title, vfs, rootDir, filter, width, height, defaultName).showModal();
   }
   constructor(
@@ -105,7 +105,7 @@ export class DlgSaveFile extends DialogRenderer<string> {
     if (ImGui.Button('Cancel')) {
       this._renderer.off('selection_changed', this.updateSelection, this);
       this._renderer.dispose();
-      this.close('');
+      this.close(null);
     }
     if (this._error) {
       ImGui.SameLine();

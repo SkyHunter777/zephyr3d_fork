@@ -89,7 +89,7 @@ export class Dialog {
     width: number,
     height: number,
     defaultName?: string
-  ) {
+  ): Promise<string | null> {
     return DlgSaveFile.saveFile(title, vfs, rootDir, filter, width, height, defaultName);
   }
   public static async openFile(

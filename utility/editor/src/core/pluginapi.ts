@@ -294,7 +294,7 @@ export type EditorPluginContext = {
       defaultName?: string,
       width?: number,
       height?: number
-    ): Promise<string>;
+    ): Promise<string | null>;
   };
   getSceneContext(): EditorSceneContext;
   refreshProperties(): void;
