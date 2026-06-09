@@ -9,12 +9,20 @@ export class DlgOpen extends DialogRenderer<string> {
     title: string,
     names: string[],
     ids: string[],
+    extraActionLabel?: string,
     width?: number,
     height?: number
   ): Promise<string> {
-    return new DlgOpen(title, names, ids, width, height).showModal();
+    return new DlgOpen(title, names, ids, extraActionLabel, width, height).showModal();
   }
-  constructor(id: string, names: string[], ids: string[], width: number, height: number) {
+  constructor(
+    id: string,
+    names: string[],
+    ids: string[],
+    private readonly _extraActionLabel = '',
+    width: number,
+    height: number
+  ) {
     super(id, width, height);
     this._names = names.slice();
     this._ids = ids.slice();
@@ -35,6 +43,12 @@ export class DlgOpen extends DialogRenderer<string> {
     if (ImGui.Button('Open')) {
       if (this._selected[0] >= 0 && this._selected[0] < this._ids.length) {
         this.close(this._ids[this._selected[0]]);
+      }
+    }
+    if (this._extraActionLabel) {
+      ImGui.SameLine();
+      if (ImGui.Button(this._extraActionLabel)) {
+        this.close(`__action__:${this._extraActionLabel}`);
       }
     }
     ImGui.SameLine();
