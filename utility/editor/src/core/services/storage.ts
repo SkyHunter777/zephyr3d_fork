@@ -18,6 +18,13 @@ export function createProjectVFS(uuid: string): VFS {
   return getDesktopAPI() ? createElectronProjectFS(uuid) : new IndexedDBFS(uuid, STORE_NAME);
 }
 
+export function createLinkedDirectoryVFS(directory: string): VFS {
+  if (!getDesktopAPI()) {
+    throw new Error('Linked plugins are only supported in the desktop editor');
+  }
+  return createElectronProjectFS(directory);
+}
+
 export async function deleteProjectVFS(uuid: string) {
   if (getDesktopAPI()) {
     await createElectronProjectFS(uuid).deleteFileSystem();
