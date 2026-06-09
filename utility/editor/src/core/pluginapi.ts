@@ -156,6 +156,7 @@ export type EditorEditToolFactoryContext = {
 };
 
 export type EditorEventMap = {
+  projectOpened: [project: EditorProjectInfo];
   sceneOpening: [path: string];
   sceneOpened: [scene: unknown, path: string];
   sceneCreated: [scene: unknown, path: string];

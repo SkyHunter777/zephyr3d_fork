@@ -287,6 +287,17 @@ export class Editor {
     }
     await ProjectService.VFS.writeFile(path, content, { encoding: 'utf8', create: true });
   }
+  async deleteProjectFile(path: string) {
+    if (!this._currentProject) {
+      throw new Error('No project is currently open');
+    }
+    if (ProjectService.VFS.readOnly) {
+      throw new Error('Current project is read-only');
+    }
+    if (await ProjectService.VFS.exists(path)) {
+      await ProjectService.VFS.deleteFile(path);
+    }
+  }
   async openProjectCodeFile(path: string, language?: string) {
     if (!this._currentProject) {
       throw new Error('No project is currently open');
@@ -641,6 +652,7 @@ export class Editor {
         const project = await ProjectService.openProject(uuid);
         const settings = await ProjectService.getCurrentProjectSettings();
         this._currentProject = project;
+        this._plugins.dispatchEvent('projectOpened', project);
         let scene = settings.startupScene ?? project.lastEditScene ?? '';
         if (!scene) {
           const sceneFiles = await ProjectService.VFS.glob('/**/*.zscn', {
@@ -699,6 +711,7 @@ export class Editor {
         }
         const project = await ProjectService.openProject(uuid);
         this._currentProject = project;
+        this._plugins.dispatchEvent('projectOpened', project);
         this._moduleManager.activate('Scene', '');
         return this._currentProject.uuid;
       } catch (err) {
@@ -726,6 +739,7 @@ export class Editor {
       const project = await ProjectService.openRemoteProject(url, new RemoteProjectDirectoryReader(fileList));
       this._currentProject = project;
       this._isRemoteProject = true;
+      this._plugins.dispatchEvent('projectOpened', project);
       this.loadDepTypes();
       const settings = await ProjectService.getCurrentProjectSettings();
       await this._moduleManager.activate(
@@ -749,6 +763,7 @@ export class Editor {
         const project = await ProjectService.openProject(id);
         const settings = await ProjectService.getCurrentProjectSettings();
         this._currentProject = project;
+        this._plugins.dispatchEvent('projectOpened', project);
         this.loadDepTypes();
         this._moduleManager.activate('Scene', settings.startupScene ?? project.lastEditScene ?? '');
         for (const dep of Object.keys(settings.dependencies ?? {})) {
