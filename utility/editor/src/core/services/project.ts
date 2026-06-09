@@ -5,7 +5,7 @@ import { fileListFileName, libDir, projectFileName } from '../build/templates';
 import { DlgMessage } from '../../views/dlg/messagedlg';
 import { installDeps } from '../build/dep';
 import { createEditorMetaVFS, createProjectVFS, deleteProjectVFS } from './storage';
-import { getDesktopAPI } from './desktop';
+import { getDesktopAPI, type DesktopFSScope } from './desktop';
 
 export type ProjectInfo = {
   name: string;
@@ -90,6 +90,16 @@ export function getProjectStorageId(project: ProjectInfo): string {
   return project.path || project.uuid;
 }
 
+function resolveDesktopProjectDirectory(parentDirectory: string, projectName: string): string {
+  const normalizedParent = String(parentDirectory || '').trim().replace(/[\\/]+$/, '');
+  const normalizedName = String(projectName || '').trim().replace(/[\\/]+/g, ' ').trim();
+  if (!normalizedParent || !normalizedName) {
+    return normalizedParent || normalizedName;
+  }
+  const separator = normalizedParent.includes('\\') ? '\\' : '/';
+  return `${normalizedParent}${separator}${normalizedName}`;
+}
+
 const metaVFS = createEditorMetaVFS();
 let projectVFS: VFS = metaVFS;
 
@@ -119,18 +129,18 @@ export class ProjectService {
     return this._currentProjectInfo ? getProjectStorageId(this._currentProjectInfo) : '';
   }
   static async listProjects(): Promise<ProjectInfo[]> {
-    const manifest = await this.readManifest();
+    const manifest = await this.readManifest(true);
     return Object.values(manifest.projectList).map((project) => normalizeProjectInfo(project));
   }
   static async getRecentProjects(): Promise<ProjectInfo[]> {
-    const manifest = await this.readManifest();
+    const manifest = await this.readManifest(true);
     return Object.keys(manifest.history)
       .sort((a, b) => manifest.history[b] - manifest.history[a])
       .map((v) => manifest.projectList[v])
       .map((project) => normalizeProjectInfo(project))
       .filter((v) => !!v);
   }
-  static async importProject(files: File[]) {
+  static async importProject(files: File[], directory?: string, nameOverride?: string) {
     let baseDir = '';
     for (const f of files) {
       if (f.name === projectFileName) {
@@ -142,15 +152,32 @@ export class ProjectService {
       await DlgMessage.messageBox('Error', 'No project found in specified directory');
       return '';
     }
-    const name = PathUtils.basename(baseDir);
-    const uuid = randomUUID();
-    const manifest = await this.readManifest();
-    manifest.projectList[uuid] = {
+    const name = nameOverride?.trim() || PathUtils.basename(baseDir);
+    const desktop = getDesktopAPI();
+    if (desktop && directory && !isAbsoluteProjectId(directory)) {
+      throw new Error(
+        `Import project failed: Parent directory must be an absolute path, got <${directory}>`
+      );
+    }
+    const selectedDirectory = desktop
+      ? directory ||
+        (desktop.fs.pickDirectory
+          ? await desktop.fs.pickDirectory({
+              title: 'Select Import Parent Directory',
+              buttonLabel: 'Select Folder'
+            })
+          : '')
+      : randomUUID();
+    if (!selectedDirectory) {
+      return '';
+    }
+    const uuid = desktop ? resolveDesktopProjectDirectory(selectedDirectory, name) : selectedDirectory;
+    const project = normalizeProjectInfo({
       name,
       uuid
-    };
-    await this.writeManifest(manifest);
-    const vfs = createProjectVFS(uuid);
+    });
+    await this.ensureProjectLocationAvailable(project);
+    const vfs = createProjectVFS(getProjectStorageId(project));
     try {
       for (const f of files) {
         const path = `/${PathUtils.relative(baseDir, f.webkitRelativePath)}`;
@@ -166,6 +193,9 @@ export class ProjectService {
     } finally {
       await vfs.close();
     }
+    const manifest = await this.readManifest();
+    manifest.projectList[uuid] = project;
+    await this.writeManifest(manifest);
     return uuid;
   }
   static async createProject(name: string, directory?: string) {
@@ -175,21 +205,22 @@ export class ProjectService {
     const desktop = getDesktopAPI();
     if (desktop && directory && !isAbsoluteProjectId(directory)) {
       throw new Error(
-        `Create project failed: Project directory must be an absolute path, got <${directory}>`
+        `Create project failed: Parent directory must be an absolute path, got <${directory}>`
       );
     }
-    const uuid = desktop
+    const selectedDirectory = desktop
       ? directory ||
         (desktop.fs.pickDirectory
           ? await desktop.fs.pickDirectory({
-              title: 'Select Project Directory',
+              title: 'Select Project Parent Directory',
               buttonLabel: 'Select Folder'
             })
           : '')
       : randomUUID();
-    if (!uuid) {
+    if (!selectedDirectory) {
       return '';
     }
+    const uuid = desktop ? resolveDesktopProjectDirectory(selectedDirectory, name) : selectedDirectory;
     const project = normalizeProjectInfo({
       name,
       uuid
@@ -210,6 +241,34 @@ export class ProjectService {
     manifest.projectList[uuid] = project;
     await this.writeManifest(manifest);
     return uuid;
+  }
+  static async registerProjectDirectory(directory?: string) {
+    const desktop = getDesktopAPI();
+    if (!desktop) {
+      throw new Error('Open project directory is only supported in the desktop editor');
+    }
+    if (directory && !isAbsoluteProjectId(directory)) {
+      throw new Error(
+        `Open project directory failed: Project directory must be an absolute path, got <${directory}>`
+      );
+    }
+    const projectDirectory =
+      directory ||
+      (desktop.fs.pickDirectory
+        ? await desktop.fs.pickDirectory({
+            title: 'Select Project Directory',
+            buttonLabel: 'Select Folder'
+          })
+        : '');
+    if (!projectDirectory) {
+      return '';
+    }
+    const project = await this.loadProjectFromDirectory(projectDirectory);
+    const manifest = await this.readManifest();
+    manifest.projectList[project.uuid] = project;
+    manifest.history[project.uuid] = Date.now();
+    await this.writeManifest(manifest);
+    return project.uuid;
   }
   static async getCurrentProjectInfo() {
     if (!this._currentProject) {
@@ -257,10 +316,16 @@ export class ProjectService {
     }
   }
   static async openProject(uuid: string): Promise<ProjectInfo> {
-    const manifest = await this.readManifest();
+    const manifest = await this.readManifest(true);
     const info = normalizeProjectInfo(manifest.projectList[uuid]);
     if (!info) {
       throw new Error(`Cannot open project: Project <${uuid}> not found`);
+    }
+    if (!(await this.isProjectAvailable(info))) {
+      delete manifest.projectList[uuid];
+      delete manifest.history[uuid];
+      await this.writeManifest(manifest);
+      throw new Error(`Cannot open project: Project <${uuid}> is no longer available`);
     }
     if (this._currentProject) {
       throw new Error('Current project must be closed before opening another project');
@@ -309,7 +374,7 @@ export class ProjectService {
     if (this._currentProject === uuid) {
       throw new Error('Project must be closed before delete it');
     }
-    const manifest = await this.readManifest();
+    const manifest = await this.readManifest(true);
     const info = normalizeProjectInfo(manifest.projectList[uuid]);
     if (info) {
       delete manifest.projectList[uuid];
@@ -328,18 +393,43 @@ export class ProjectService {
       this._currentProjectInfo = { ...normalizedProject };
     }
   }
-  private static async readManifest() {
+  private static async readManifest(validate = false) {
     const exists = await metaVFS.exists(ProjectService.PROJECT_MANIFEST);
-    if (!exists) {
-      return {
-        history: {},
-        projectList: {}
-      };
+    const manifest = !exists
+      ? {
+          history: {},
+          projectList: {}
+        }
+      : (((JSON.parse(
+          (await metaVFS.readFile(ProjectService.PROJECT_MANIFEST, {
+            encoding: 'utf8'
+          })) as string
+        ) as EditorManifest) ?? {
+          history: {},
+          projectList: {}
+        }) as EditorManifest);
+    if (!validate) {
+      return manifest;
     }
-    const content = (await metaVFS.readFile(ProjectService.PROJECT_MANIFEST, {
-      encoding: 'utf8'
-    })) as string;
-    return JSON.parse(content) as EditorManifest;
+    let dirty = false;
+    for (const uuid of Object.keys(manifest.projectList)) {
+      const info = normalizeProjectInfo(manifest.projectList[uuid]);
+      if (!info || !(await this.isProjectAvailable(info))) {
+        delete manifest.projectList[uuid];
+        delete manifest.history[uuid];
+        dirty = true;
+      }
+    }
+    for (const uuid of Object.keys(manifest.history)) {
+      if (!manifest.projectList[uuid]) {
+        delete manifest.history[uuid];
+        dirty = true;
+      }
+    }
+    if (dirty) {
+      await this.writeManifest(manifest);
+    }
+    return manifest;
   }
   private static async writeManifest(manifest: EditorManifest) {
     await metaVFS.writeFile(ProjectService.PROJECT_MANIFEST, JSON.stringify(manifest, null, 2), {
@@ -348,8 +438,46 @@ export class ProjectService {
     });
   }
   private static async getProjectInfo(uuid: string) {
-    const manifest = await this.readManifest();
+    const manifest = await this.readManifest(true);
     return normalizeProjectInfo(manifest.projectList[uuid]);
+  }
+  private static async loadProjectFromDirectory(directory: string): Promise<ProjectInfo> {
+    const project = normalizeProjectInfo({
+      name: '',
+      uuid: directory
+    });
+    const vfs = createProjectVFS(getProjectStorageId(project));
+    try {
+      const exists = await vfs.exists(`/${projectFileName}`);
+      if (!exists) {
+        throw new Error(`Open project directory failed: <${directory}> does not contain ${projectFileName}`);
+      }
+      const content = (await vfs.readFile(`/${projectFileName}`, { encoding: 'utf8' })) as string;
+      const settings = normalizeProjectSettings(JSON.parse(content));
+      const name = settings.title?.trim() || PathUtils.basename(directory.replace(/\\/g, '/'));
+      return normalizeProjectInfo({
+        name,
+        uuid: directory
+      });
+    } finally {
+      await vfs.close();
+    }
+  }
+  private static async isProjectAvailable(project: ProjectInfo) {
+    const storageId = getProjectStorageId(project);
+    if (!storageId) {
+      return false;
+    }
+    const desktop = getDesktopAPI();
+    if (desktop?.fs?.exists) {
+      return await desktop.fs.exists(`project:${storageId}` as DesktopFSScope, `/${projectFileName}`);
+    }
+    const vfs = createProjectVFS(storageId);
+    try {
+      return await vfs.exists(`/${projectFileName}`);
+    } finally {
+      await vfs.close();
+    }
   }
   private static async ensureProjectLocationAvailable(project: ProjectInfo) {
     const storageId = getProjectStorageId(project);
