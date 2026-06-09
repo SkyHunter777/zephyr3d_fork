@@ -229,6 +229,21 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
     this.objectColor = other.objectColor;
   }
   /**
+   * Capture the active draw context for both cached and freshly-built program paths.
+   *
+   * The shader-building hooks access `this.drawContext`, but uniform application may also
+   * consult it on subsequent frames when the GPU program is reused from cache. Updating it
+   * here keeps material mixins in sync even when `createProgram()` is skipped.
+   *
+   * @param ctx - Current draw context.
+   * @returns Whether material preparation succeeded.
+   */
+  apply(ctx: DrawContext) {
+    this._ctx = ctx;
+    this._materialPass = -1;
+    return super.apply(ctx);
+  }
+  /**
    * Mark uniform-only changes so uniforms are re-uploaded on next apply, without
    * rebuilding shader programs.
    */
@@ -897,6 +912,9 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
    */
   needFragmentColor(ctx?: DrawContext) {
     const drawContext = ctx ?? this.drawContext;
+    if (!drawContext?.renderPass) {
+      return this._alphaCutoff > 0 || this.alphaToCoverage;
+    }
     return (
       drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT || this._alphaCutoff > 0 || this.alphaToCoverage
     );
