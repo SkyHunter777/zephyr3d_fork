@@ -518,6 +518,7 @@ class DlgPluginFiles extends DialogRenderer<void> {
       'Remove Package',
       dependencyNames.map((name) => `${name}@${this._plugin.dependencies[name]}`),
       dependencyNames,
+      undefined,
       420,
       320
     );
@@ -746,7 +747,7 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
       this.linkPlugin();
     }
     if (ImGui.IsItemHovered()) {
-      ImGui.SetTooltip('Links a desktop plugin to an external dist directory for development');
+      ImGui.SetTooltip('Links a desktop plugin directory for development. Supports plugin.dev.json source entry.');
     }
     ImGui.SameLine();
     if (ImGui.Button('New Template...') && !this._busy) {
@@ -850,14 +851,22 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
     this._busy = true;
     try {
       const directory = await desktop.fs.pickDirectory({
-        title: 'Select Plugin Dist Directory',
+        title: 'Select Plugin Directory',
         buttonLabel: 'Link Plugin'
       });
       if (directory) {
-        await this._editor.linkSystemPlugin(directory, 'index.js');
+        await this._editor.linkSystemPlugin(directory);
         await this.reload();
       }
-    } catch {
+    } catch (err) {
+      await DlgMessageBoxEx.messageBoxEx(
+        'Link Plugin Failed',
+        err instanceof Error ? err.message : String(err),
+        ['Close'],
+        480,
+        0,
+        true
+      );
     } finally {
       this._busy = false;
     }
@@ -1034,6 +1043,7 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
       'Remove Package',
       dependencyNames.map((name) => `${name}@${plugin.dependencies[name]}`),
       dependencyNames,
+      undefined,
       420,
       320
     );
