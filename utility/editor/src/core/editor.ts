@@ -909,6 +909,16 @@ export class Editor {
     return SystemPluginService.listPlugins();
   }
 
+  async refreshSystemPlugins() {
+    const refreshedLinkedPlugins = await SystemPluginService.refreshLinkedPlugins();
+    for (const plugin of refreshedLinkedPlugins) {
+      if (plugin.enabled) {
+        await this.tryLoadSystemPlugin(plugin.id, true);
+      }
+    }
+    return SystemPluginService.listPlugins();
+  }
+
   async installSystemPluginFromFile(file: File) {
     const plugin = await SystemPluginService.installPluginFromFile(file);
     const loadedId = await this.tryLoadSystemPlugin(plugin.id, true);
@@ -919,6 +929,20 @@ export class Editor {
     const plugin = await SystemPluginService.installPluginFromDirectory(files);
     const loadedId = await this.tryLoadSystemPlugin(plugin.id, true);
     return (await SystemPluginService.getPlugin(loadedId ?? plugin.id)) ?? plugin;
+  }
+
+  async linkSystemPlugin(directory: string, entryFileName?: string) {
+    const plugin = await SystemPluginService.linkPlugin({
+      directory,
+      entryFileName,
+      enabled: true
+    });
+    const loadedId = await this.tryLoadSystemPlugin(plugin.id, true);
+    return (await SystemPluginService.getPlugin(loadedId ?? plugin.id)) ?? plugin;
+  }
+
+  async unlinkSystemPlugin(id: string) {
+    await this.removeSystemPlugin(id);
   }
 
   async installSystemPluginFiles(input: {

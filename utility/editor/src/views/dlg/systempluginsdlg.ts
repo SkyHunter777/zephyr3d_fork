@@ -7,6 +7,7 @@ import type { SystemPluginRecord } from '../../core/services/systemplugin';
 import { FilePicker } from '../../components/filepicker';
 import { templateEditorPluginFiles } from '../../core/build/templates';
 import { SystemPluginService } from '../../core/services/systemplugin';
+import { getDesktopAPI } from '../../core/services/desktop';
 import { DlgPromptName } from './promptnamedlg';
 import { DlgMessageBoxEx } from './messageexdlg';
 import { Dialog } from './dlg';
@@ -36,6 +37,12 @@ function getPluginDependencySummary(plugin: SystemPluginRecord): string {
     return 'Dependencies: none';
   }
   return `Dependencies: ${dependencies.map(([name, version]) => `${name}@${version}`).join(', ')}`;
+}
+
+function getPluginModeSummary(plugin: SystemPluginRecord): string {
+  return plugin.linked?.directory
+    ? `Mode: linked (${plugin.linked.directory})`
+    : 'Mode: installed package';
 }
 
 function normalizePluginSettingsForSchema(
@@ -173,6 +180,7 @@ class SystemPluginListView extends ListView<{}, SystemPluginRecord> {
         item.description ? '' : null,
         `Id: ${item.id}`,
         `Entry: ${item.entry}`,
+        getPluginModeSummary(item),
         ...((item.description || item.entry) && Object.keys(item.dependencies ?? {}).length > 0 ? [''] : []),
         ...getPluginDependencyLines(item)
       ]
@@ -416,12 +424,15 @@ class DlgPluginFiles extends DialogRenderer<void> {
 
   doRender(): void {
     ImGui.Text(`Plugin: ${this._plugin.id}`);
+    if (this._plugin.linked?.directory) {
+      ImGui.TextDisabled(`Linked to: ${this._plugin.linked.directory}`);
+    }
     ImGui.Separator();
-    if (ImGui.Button('Install Package...')) {
+    if (ImGui.Button('Install Package...') && !this._plugin.linked?.directory) {
       this.installPackage();
     }
     ImGui.SameLine();
-    if (ImGui.Button('Remove Package...')) {
+    if (ImGui.Button('Remove Package...') && !this._plugin.linked?.directory) {
       this.removePackage();
     }
     ImGui.Separator();
@@ -727,12 +738,19 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
       ImGui.SetTooltip('Installs a plugin from directory');
     }
     ImGui.SameLine();
+    if (ImGui.Button('Link...') && !this._busy) {
+      this.linkPlugin();
+    }
+    if (ImGui.IsItemHovered()) {
+      ImGui.SetTooltip('Links a desktop plugin to an external dist directory for development');
+    }
+    ImGui.SameLine();
     if (ImGui.Button('New Template...') && !this._busy) {
       this.createTemplatePlugin();
     }
     ImGui.SameLine();
     if (ImGui.Button('Refresh') && !this._busy) {
-      this.reload().catch(() => undefined);
+      this.refreshPlugins().catch(() => undefined);
     }
 
     ImGui.Separator();
@@ -755,17 +773,18 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
         this.browseFiles(selected);
       }
       ImGui.SameLine();
-      if (ImGui.Button('Install Package...') && !this._busy) {
+      if (ImGui.Button('Install Package...') && !this._busy && !selected.linked?.directory) {
         this.installPluginPackage(selected);
       }
       ImGui.SameLine();
-      if (ImGui.Button('Remove Package...') && !this._busy) {
+      if (ImGui.Button('Remove Package...') && !this._busy && !selected.linked?.directory) {
         this.removePluginPackage(selected);
       }
       ImGui.SameLine();
       if (ImGui.Button('Settings...') && !this._busy) {
         this.editPluginSettings(selected);
       }
+      ImGui.TextWrapped(getPluginModeSummary(selected));
       ImGui.TextWrapped(getPluginDependencySummary(selected));
     } else {
       ImGui.TextDisabled('Select a plugin to inspect or remove it.');
@@ -779,6 +798,16 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
 
   private async reload() {
     this._listData.elements = await this._editor.listSystemPlugins();
+  }
+
+  private async refreshPlugins() {
+    this._busy = true;
+    try {
+      this._listData.elements = await this._editor.refreshSystemPlugins();
+    } catch {
+    } finally {
+      this._busy = false;
+    }
   }
 
   private async installPlugin() {
@@ -801,6 +830,27 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
       const files = await FilePicker.chooseDirectory();
       if (files?.length) {
         await this._editor.installSystemPluginFromDirectory(files);
+        await this.reload();
+      }
+    } catch {
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  private async linkPlugin() {
+    const desktop = getDesktopAPI();
+    if (!desktop?.fs?.pickDirectory) {
+      return;
+    }
+    this._busy = true;
+    try {
+      const directory = await desktop.fs.pickDirectory({
+        title: 'Select Plugin Dist Directory',
+        buttonLabel: 'Link Plugin'
+      });
+      if (directory) {
+        await this._editor.linkSystemPlugin(directory, 'index.js');
         await this.reload();
       }
     } catch {
