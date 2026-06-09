@@ -41,7 +41,7 @@ import { getTextureNodeCategories } from './texture';
 import { GNode } from '../node';
 import type { GenericConstructor, Nullable } from '@zephyr3d/base';
 import type { RequireOptionals } from '@zephyr3d/base';
-import { ASSERT, DRef, guessMimeType, randomUUID, Vector3, Vector4 } from '@zephyr3d/base';
+import { ASSERT, DRef, guessMimeType, mimeTypeOf, randomUUID, Vector3, Vector4 } from '@zephyr3d/base';
 import { ImGui } from '@zephyr3d/imgui';
 import type { FrameBuffer, Texture2D, TextureAddressMode, TextureFilterMode } from '@zephyr3d/device';
 import { getInputNodeCategories } from './inputs';
@@ -807,10 +807,7 @@ export class PBRMaterialEditor extends GraphEditor {
     );
   }
   private dragdropFrag(x: number, y: number, _payload: { isDir: boolean; path: string }[]) {
-    if (
-      _payload.length === 1 &&
-      guessMimeType(_payload[0].path) === 'application/vnd.zephyr3d.blueprint.mf+json'
-    ) {
+    if (_payload.length === 1 && guessMimeType(_payload[0].path) === mimeTypeOf('.zmf')) {
       getEngine()
         .resourceManager.loadBluePrint(_payload[0].path)
         .then((IRs) => {
@@ -832,10 +829,7 @@ export class PBRMaterialEditor extends GraphEditor {
     }
   }
   private dragdropVertex(x: number, y: number, _payload: { isDir: boolean; path: string }[]) {
-    if (
-      _payload.length === 1 &&
-      guessMimeType(_payload[0].path) === 'application/vnd.zephyr3d.blueprint.mf+json'
-    ) {
+    if (_payload.length === 1 && guessMimeType(_payload[0].path) === mimeTypeOf('.zmf')) {
       getEngine()
         .resourceManager.loadBluePrint(_payload[0].path)
         .then((IRs) => {

@@ -10,6 +10,7 @@ import {
   DRef,
   guessMimeType,
   Matrix4x4,
+  mimeTypeOf,
   PathUtils,
   Quaternion,
   uint8ArrayToBase64,
@@ -1688,7 +1689,7 @@ async function dispatch(editor: Editor, method: string, params: any): Promise<an
             err: `Asset path is not a file: ${params.path}`
           };
         }
-        if (guessMimeType(params.path) !== 'application/vnd.zephyr3d.prefab+json') {
+        if (guessMimeType(params.path) !== mimeTypeOf('.zprefab')) {
           return {
             node_id: null,
             err: `Unsupported asset type for mesh_load_from_asset, expected a .zprefab prefab JSON file: ${params.path}`

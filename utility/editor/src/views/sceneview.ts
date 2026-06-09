@@ -41,7 +41,7 @@ import { ToolBar } from '../components/toolbar';
 import type { ToolBarItem } from '../components/toolbar';
 import { FontGlyph } from '../core/fontglyph';
 import type { AABB, GenericConstructor, Interpolator, Nullable } from '@zephyr3d/base';
-import { Vector4 } from '@zephyr3d/base';
+import { mimeTypeOf, Vector4 } from '@zephyr3d/base';
 import { DRef, HttpFS } from '@zephyr3d/base';
 import { ASSERT, Matrix4x4, Quaternion, Vector3 } from '@zephyr3d/base';
 import type { TRS } from '../types';
@@ -2434,7 +2434,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     const mimeType = getEngine().VFS.guessMIMEType(payload.path);
     if (mimeType === 'model/gltf-binary' || mimeType === 'model/gltf+json' || mimeType === 'model/fbx') {
       this.handleAddAsset(payload.path);
-    } else if (mimeType === 'application/vnd.zephyr3d.prefab+json') {
+    } else if (mimeType === mimeTypeOf('.zprefab')) {
       this.handleAddPrefab(payload.path);
     }
   }

@@ -1,6 +1,13 @@
 import type { FileMetadata, GenericConstructor, Immutable, Nullable, VFS } from '@zephyr3d/base';
 import UPNG from 'upng-js';
-import { DataTransferVFS, Disposable, guessMimeType, makeObservable, PathUtils } from '@zephyr3d/base';
+import {
+  DataTransferVFS,
+  Disposable,
+  guessMimeType,
+  makeObservable,
+  mimeTypeOf,
+  PathUtils
+} from '@zephyr3d/base';
 import { DockPannel, ResizeDirection } from './dockpanel';
 import { ImGui, imGuiCalcTextSize } from '@zephyr3d/imgui';
 import { convertEmojiString } from '../helpers/emoji';
@@ -352,7 +359,7 @@ export class ContentListView extends ListView<{}, FileInfo | DirectoryInfo> {
         const item = selectedItems[0];
         if (!('subDir' in item)) {
           const mimeType = this.renderer.VFS.guessMIMEType(item.meta.path);
-          if (mimeType === 'application/vnd.zephyr3d.material+json') {
+          if (mimeType === mimeTypeOf('.zmtl')) {
             ImGui.Separator();
             if (ImGui.MenuItem('Create Material Instance...')) {
               DlgSaveFile.saveFile(

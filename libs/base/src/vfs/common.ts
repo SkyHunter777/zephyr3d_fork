@@ -1,3 +1,46 @@
+const mimeTypes: Record<string, string> = {
+  '.txt': 'text/plain',
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.ts': 'text/x-typescript',
+  '.wasm': 'application/wasm',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.tga': 'image/tga',
+  '.ico': 'image/x-icon',
+  '.dds': 'image/x-dds',
+  '.svg': 'image/svg+xml',
+  '.hdr': 'image/vnd.radiance',
+  '.exr': 'image/x-exr',
+  '.tiff': 'image/tiff',
+  '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+  '.zip': 'application/zip',
+  '.fbx': 'model/fbx',
+  '.obj': 'model/obj',
+  '.gltf': 'model/gltf+json',
+  '.glb': 'model/gltf-binary',
+  '.vrm': 'model/gltf-binary',
+  '.ktx': 'image/ktx',
+  '.ktx2': 'image/ktx2',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+  // zephyr3d specific
+  '.zbpt': 'application/vnd.zephyr3d.blueprint+json',
+  '.zmsh': 'application/vnd.zephyr3d.mesh+json',
+  '.zmtl': 'application/vnd.zephyr3d.material+json',
+  '.zmf': 'application/vnd.zephyr3d.blueprint.mf+json',
+  '.zscn': 'application/vnd.zephyr3d.scene+json',
+  '.zprefab': 'application/vnd.zephyr3d.prefab+json',
+  '.zabc': 'application/vnd.zephyr3d.alembic-cache+json'
+};
+
 /**
  * Path utilities.
  *
@@ -266,48 +309,21 @@ export class PathUtils {
  */
 export function guessMimeType(path: string) {
   const ext = PathUtils.extname(path).toLowerCase();
-  const mimeTypes: Record<string, string> = {
-    '.txt': 'text/plain',
-    '.html': 'text/html',
-    '.js': 'text/javascript',
-    '.mjs': 'text/javascript',
-    '.ts': 'text/x-typescript',
-    '.wasm': 'application/wasm',
-    '.json': 'application/json',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.webp': 'image/webp',
-    '.gif': 'image/gif',
-    '.tga': 'image/tga',
-    '.ico': 'image/x-icon',
-    '.dds': 'image/x-dds',
-    '.svg': 'image/svg+xml',
-    '.hdr': 'image/vnd.radiance',
-    '.exr': 'image/x-exr',
-    '.tiff': 'image/tiff',
-    '.wav': 'audio/wav',
-    '.mp3': 'audio/mpeg',
-    '.mp4': 'video/mp4',
-    '.zip': 'application/zip',
-    '.fbx': 'model/fbx',
-    '.obj': 'model/obj',
-    '.gltf': 'model/gltf+json',
-    '.glb': 'model/gltf-binary',
-    '.vrm': 'model/gltf-binary',
-    '.ktx': 'image/ktx',
-    '.ktx2': 'image/ktx2',
-    '.ttf': 'font/ttf',
-    '.otf': 'font/otf',
-    // zephyr3d specific
-    '.zbpt': 'application/vnd.zephyr3d.blueprint+json',
-    '.zmsh': 'application/vnd.zephyr3d.mesh+json',
-    '.zmtl': 'application/vnd.zephyr3d.material+json',
-    '.zmf': 'application/vnd.zephyr3d.blueprint.mf+json',
-    '.zscn': 'application/vnd.zephyr3d.scene+json',
-    '.zprefab': 'application/vnd.zephyr3d.prefab+json',
-    '.zabc': 'application/vnd.zephyr3d.alembic-cache+json'
-  };
+  return mimeTypes[ext] || 'application/octet-stream';
+}
 
+/**
+ * Gets the MIME type based on a file extension.
+ *
+ * @param ext - File extension (e.g., "png", ".jpg").
+ * @returns The corresponding MIME type or 'application/octet-stream' if unknown.
+ *
+ * @public
+ */
+export function mimeTypeOf(ext: string) {
+  ext = ext.toLowerCase();
+  if (!ext.startsWith('.')) {
+    ext = '.' + ext;
+  }
   return mimeTypes[ext] || 'application/octet-stream';
 }

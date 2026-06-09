@@ -1,13 +1,7 @@
 import type { Texture2D } from '@zephyr3d/device';
 import type { RenderGraph } from './rendergraph';
 import type { RenderGraphExecutor } from './executor';
-import type {
-  RGHandle,
-  RGExecuteContext,
-  RGTextureAllocator,
-  RGTextureDesc,
-  RGResolvedSize
-} from './types';
+import type { RGHandle, RGExecuteContext, RGTextureAllocator, RGTextureDesc, RGResolvedSize } from './types';
 
 interface HistoryResource<TTexture> {
   desc: RGTextureDesc;
@@ -270,12 +264,7 @@ export class HistoryResourceManager<TTexture = Texture2D> {
    * @param size - Resolved texture size.
    * @param texture - Texture to retain and commit.
    */
-  queueRetainedCommit(
-    name: string,
-    desc: RGTextureDesc,
-    size: RGResolvedSize,
-    texture: TTexture
-  ): void {
+  queueRetainedCommit(name: string, desc: RGTextureDesc, size: RGResolvedSize, texture: TTexture): void {
     if (!this._allocator.retain) {
       throw new Error(
         `HistoryResourceManager: cannot retain history resource '${name}'. ` +

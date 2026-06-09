@@ -3,7 +3,16 @@ import type { SceneNodeVisible, SerializedMorphTargetGroup } from '../../../scen
 import { Scene } from '../../../scene/scene';
 import { defineProps, type SerializableClass } from '../types';
 import type { DiffPatch, DiffValue } from '@zephyr3d/base';
-import { applyPatch, ASSERT, degree2radian, diff, DRef, guessMimeType, radian2degree } from '@zephyr3d/base';
+import {
+  applyPatch,
+  ASSERT,
+  degree2radian,
+  diff,
+  DRef,
+  guessMimeType,
+  mimeTypeOf,
+  radian2degree
+} from '@zephyr3d/base';
 import { GraphNode } from '../../../scene';
 import type { ResourceManager } from '../manager';
 import {
@@ -144,7 +153,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
       let prefabId = obj.prefabId;
       const assetId = manager.getAssetId(obj);
       let patch: DiffPatch | undefined = undefined;
-      if (prefabId && guessMimeType(prefabId) === 'application/vnd.zephyr3d.prefab+json') {
+      if (prefabId && guessMimeType(prefabId) === mimeTypeOf('.zprefab')) {
         try {
           obj.prefabId = '';
           const prefabData = (await manager.loadPrefabContent(prefabId))!.data as DiffValue;
@@ -362,9 +371,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
             return true;
           },
           isPersistent(this: SceneNode) {
-            return (
-              !this._prefabId || guessMimeType(this._prefabId) === 'application/vnd.zephyr3d.prefab+json'
-            );
+            return !this._prefabId || guessMimeType(this._prefabId) === mimeTypeOf('.zprefab');
           },
           get(this: SceneNode, value) {
             value.object = [];
@@ -401,9 +408,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
             return true;
           },
           isPersistent(this: SceneNode) {
-            return (
-              !this._prefabId || guessMimeType(this._prefabId) === 'application/vnd.zephyr3d.prefab+json'
-            );
+            return !this._prefabId || guessMimeType(this._prefabId) === mimeTypeOf('.zprefab');
           },
           get(this: SceneNode, value) {
             const groups = this.getSerializedMorphTargetGroups();
@@ -423,7 +428,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
           options: {
             group: 'Animation',
             label: 'Geometry Cache',
-            mimeTypes: ['application/vnd.zephyr3d.alembic-cache+json']
+            mimeTypes: [mimeTypeOf('.zabc')]
           },
           isValid(this: SceneNode) {
             return this !== this.scene?.rootNode && hasMeshDescendants(this);
@@ -503,9 +508,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
             objectTypes: [AnimationClip]
           },
           isPersistent(this: SceneNode) {
-            return (
-              !this._prefabId || guessMimeType(this._prefabId) === 'application/vnd.zephyr3d.prefab+json'
-            );
+            return !this._prefabId || guessMimeType(this._prefabId) === mimeTypeOf('.zprefab');
           },
           get(this: SceneNode, value) {
             const animationSet = this.animationSet;
@@ -555,9 +558,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
             return true;
           },
           isPersistent(this: SceneNode) {
-            return (
-              !this._prefabId || guessMimeType(this._prefabId) === 'application/vnd.zephyr3d.prefab+json'
-            );
+            return !this._prefabId || guessMimeType(this._prefabId) === mimeTypeOf('.zprefab');
           },
           get(this: SceneNode, value) {
             const animationSet = this.animationSet;
@@ -586,9 +587,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
             return true;
           },
           isPersistent(this: SceneNode) {
-            return (
-              !this._prefabId || guessMimeType(this._prefabId) === 'application/vnd.zephyr3d.prefab+json'
-            );
+            return !this._prefabId || guessMimeType(this._prefabId) === mimeTypeOf('.zprefab');
           },
           get(this: SceneNode, value) {
             const animationSet = this.animationSet;
@@ -617,9 +616,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
             objectTypes: [JointDynamicsModifier]
           },
           isPersistent(this: SceneNode) {
-            return (
-              !this._prefabId || guessMimeType(this._prefabId) === 'application/vnd.zephyr3d.prefab+json'
-            );
+            return !this._prefabId || guessMimeType(this._prefabId) === mimeTypeOf('.zprefab');
           },
           getDefaultValue(this: SceneNode) {
             const animationSet = this.animationSet;

@@ -60,7 +60,8 @@ export class SceneRenderer {
         renderWidth,
         renderHeight,
         oit: null,
-        motionVectors: device.type !== 'webgl' && (camera.TAA || camera.motionBlur || (SSR && camera.ssrTemporal)),
+        motionVectors:
+          device.type !== 'webgl' && (camera.TAA || camera.motionBlur || (SSR && camera.ssrTemporal)),
         HiZ: camera.HiZ && device.type !== 'webgl',
         HiZTexture: null,
         globalBindGroupAllocator,

@@ -5,7 +5,7 @@ import { defineProps, type SerializableClass } from '../types';
 import { meshInstanceClsMap } from './common';
 import { Sprite } from '../../../scene/sprite';
 import { SpriteMaterial } from '../../../material/sprite';
-import { Vector2 } from '@zephyr3d/base';
+import { mimeTypeOf, Vector2 } from '@zephyr3d/base';
 
 /** @internal */
 export function getSpriteClass(): SerializableClass {
@@ -68,7 +68,7 @@ export function getSpriteClass(): SerializableClass {
           description: 'Sprite material object',
           type: 'object',
           options: {
-            mimeTypes: ['application/vnd.zephyr3d.material+json']
+            mimeTypes: [mimeTypeOf('.zmtl')]
           },
           get(this: Sprite, value) {
             const m = this.material?.coreMaterial;

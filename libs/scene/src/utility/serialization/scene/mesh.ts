@@ -1,4 +1,4 @@
-import { base64ToUint8Array, uint8ArrayToBase64, Vector3 } from '@zephyr3d/base';
+import { base64ToUint8Array, uint8ArrayToBase64, Vector3, mimeTypeOf } from '@zephyr3d/base';
 import { getEngine } from '../../../app/api';
 import type { MeshMaterial } from '../../../material/meshmaterial';
 import { GraphNode, Mesh, type SceneNode } from '../../../scene';
@@ -287,7 +287,7 @@ export function getMeshClass(): SerializableClass {
           description: 'Primitive object of this mesh',
           type: 'object',
           options: {
-            mimeTypes: ['application/vnd.zephyr3d.mesh+json']
+            mimeTypes: [mimeTypeOf('.zmsh')]
           },
           get(this: Mesh, value) {
             value.str[0] = this.primitive
@@ -310,7 +310,7 @@ export function getMeshClass(): SerializableClass {
           description: 'Material object of this mesh',
           type: 'object',
           options: {
-            mimeTypes: ['application/vnd.zephyr3d.material+json']
+            mimeTypes: [mimeTypeOf('.zmtl')]
           },
           get(this: Mesh, value) {
             const m = this.material?.coreMaterial;

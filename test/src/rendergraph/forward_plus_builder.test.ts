@@ -5,6 +5,7 @@ import {
   type RGTextureAllocator
 } from '../../../libs/scene/src/render/rendergraph';
 import {
+  deriveForwardPlusOptions,
   buildForwardPlusGraph,
   type ForwardPlusOptions
 } from '../../../libs/scene/src/render/rendergraph/forward_plus_builder';
@@ -50,6 +51,8 @@ function createOptions(overrides: Partial<ForwardPlusOptions> = {}): ForwardPlus
     ssrCalcThickness: false,
     gpuPicking: false,
     needSceneColor: false,
+    needSceneColorWithDepth: false,
+    needsTransmissionDepthForSSR: false,
     sss: false,
     ...overrides
   };
@@ -91,7 +94,7 @@ describe('Forward+ render graph builder', () => {
     expect(passNames.indexOf('LightPass')).toBeLessThan(passNames.indexOf('Composite'));
   });
 
-  test('inserts TransmissionDepth between LightPass and Composite when scene color copy is needed', () => {
+  test('inserts TransmissionDepth between LightPass and Composite when scene color copy is needed without SSR prepass', () => {
     const passNames = compileForwardPlusPassNames(createOptions({ needSceneColor: true }));
 
     expect(passNames).toContain('LightPass');
@@ -99,6 +102,122 @@ describe('Forward+ render graph builder', () => {
     expect(passNames).toContain('Composite');
     expect(passNames.indexOf('LightPass')).toBeLessThan(passNames.indexOf('TransmissionDepth'));
     expect(passNames.indexOf('TransmissionDepth')).toBeLessThan(passNames.indexOf('Composite'));
+  });
+
+  test('inserts SSR transmission depth before LightPass and omits late TransmissionDepth', () => {
+    const passNames = compileForwardPlusPassNames(
+      createOptions({
+        hiZ: true,
+        needSceneColor: true,
+        ssr: true,
+        needsTransmissionDepthForSSR: true
+      })
+    );
+
+    expect(passNames).toContain('DepthPrepass');
+    expect(passNames).toContain('TransmissionDepthForSSR');
+    expect(passNames).toContain('HiZ');
+    expect(passNames).toContain('LightPass');
+    expect(passNames).not.toContain('TransmissionDepth');
+    expect(passNames.indexOf('DepthPrepass')).toBeLessThan(passNames.indexOf('TransmissionDepthForSSR'));
+    expect(passNames.indexOf('TransmissionDepthForSSR')).toBeLessThan(passNames.indexOf('HiZ'));
+    expect(passNames.indexOf('HiZ')).toBeLessThan(passNames.indexOf('LightPass'));
+    expect(passNames.indexOf('TransmissionDepthForSSR')).toBeLessThan(passNames.indexOf('LightPass'));
+  });
+
+  test('keeps TransmissionDepth after LightPass when SSR scene-color materials also need depth', () => {
+    const passNames = compileForwardPlusPassNames(
+      createOptions({
+        needSceneColor: true,
+        needSceneColorWithDepth: true,
+        ssr: true,
+        needsTransmissionDepthForSSR: false
+      })
+    );
+
+    expect(passNames).not.toContain('TransmissionDepthForSSR');
+    expect(passNames).toContain('TransmissionDepth');
+    expect(passNames.indexOf('LightPass')).toBeLessThan(passNames.indexOf('TransmissionDepth'));
+    expect(passNames.indexOf('TransmissionDepth')).toBeLessThan(passNames.indexOf('Composite'));
+  });
+
+  test('derives SSR transmission depth prepass only when scene-color materials do not need depth', () => {
+    const scene = {
+      env: {
+        light: {
+          envLight: {
+            hasRadiance: () => true
+          }
+        }
+      }
+    };
+    const camera = {
+      SSR: true,
+      SSS: false,
+      TAA: false,
+      motionBlur: false,
+      ssrTemporal: false,
+      ssrCalcThickness: false,
+      HiZ: false,
+      getPickResultResolveFunc: () => null
+    };
+    const baseRenderQueue = {
+      needSceneColor: () => true,
+      itemList: {
+        opaque: { lit: [], unlit: [] }
+      }
+    };
+
+    expect(
+      deriveForwardPlusOptions(scene as any, camera as any, 'webgpu', {
+        ...baseRenderQueue,
+        needSceneColorWithDepth: () => false
+      } as any).needsTransmissionDepthForSSR
+    ).toBe(true);
+    expect(
+      deriveForwardPlusOptions(scene as any, camera as any, 'webgpu', {
+        ...baseRenderQueue,
+        needSceneColorWithDepth: () => true
+      } as any).needsTransmissionDepthForSSR
+    ).toBe(false);
+  });
+
+  test('does not enable SSS for non-opaque-only SSS materials', () => {
+    const scene = {
+      env: {
+        light: {
+          envLight: {
+            hasRadiance: () => false
+          }
+        }
+      }
+    };
+    const camera = {
+      SSR: false,
+      SSS: true,
+      TAA: false,
+      motionBlur: false,
+      ssrTemporal: false,
+      ssrCalcThickness: false,
+      HiZ: false,
+      getPickResultResolveFunc: () => null
+    };
+    const sssInfo = { materialList: new Set([{ subsurfaceProfile: {} }]) };
+    const emptyBundle = { lit: [], unlit: [] };
+    const renderQueue = {
+      needSceneColor: () => false,
+      needSceneColorWithDepth: () => false,
+      itemList: {
+        opaque: emptyBundle,
+        transmission: { lit: [sssInfo], unlit: [] },
+        transparent: emptyBundle,
+        transmission_trans: emptyBundle
+      }
+    };
+
+    expect(deriveForwardPlusOptions(scene as any, camera as any, 'webgpu', renderQueue as any).sss).toBe(
+      false
+    );
   });
 
   test('omits HiZ when disabled', () => {
@@ -113,6 +232,17 @@ describe('Forward+ render graph builder', () => {
     expect(passNames).toContain('HiZ');
     expect(passNames).toContain('LightPass');
     expect(passNames.indexOf('HiZ')).toBeLessThan(passNames.indexOf('LightPass'));
+  });
+
+  test('computes HiZ mip levels from render size', () => {
+    const { graph } = buildForwardPlusGraphForTest(
+      createOptions({ hiZ: true }),
+      {},
+      { renderWidth: 256, renderHeight: 128 }
+    );
+    const hiZResource = [...graph.resources.values()].find((resource) => resource.name === 'hiZ');
+
+    expect(hiZResource?.desc).toMatchObject({ mipLevels: 9 });
   });
 
   test('inserts SSSProfile before LightPass and declares SSS MRT resources when enabled', () => {
@@ -179,6 +309,59 @@ describe('Forward+ render graph builder', () => {
     });
 
     expect(passNames).not.toContain('ShadowMaps');
+  });
+
+  test('declares compatible SSR history imports as LightPass reads', () => {
+    const allocator: RGTextureAllocator<any> = {
+      allocate: (_desc, _size) => ({}),
+      release: () => {}
+    };
+    const historyManager = new HistoryResourceManager(allocator);
+    const size = { width: 1920, height: 1080 };
+    historyManager.beginFrame();
+    historyManager.queueCommit(
+      RGHistoryResources.SSR_REFLECT,
+      {
+        format: 'rgba16f',
+        sizeMode: 'absolute',
+        width: 1920,
+        height: 1080
+      },
+      size,
+      { id: 'historySSRReflect' }
+    );
+    historyManager.queueCommit(
+      RGHistoryResources.SSR_MOTION_VECTOR,
+      {
+        format: 'rgba16f',
+        sizeMode: 'absolute',
+        width: 1920,
+        height: 1080
+      },
+      size,
+      { id: 'historySSRMotionVector' }
+    );
+    historyManager.commitFrame();
+
+    const { graph } = buildForwardPlusGraphForTest(
+      createOptions({ ssr: true, motionVectors: true }),
+      {},
+      {
+        camera: {
+          TAA: false,
+          ssrTemporal: true,
+          getHistoryResourceManager: () => historyManager
+        }
+      }
+    );
+
+    const lightPass = graph.passes.find((pass) => pass.name === 'LightPass');
+    expect(lightPass?.reads.map((resource) => resource.name)).toEqual(
+      expect.arrayContaining([
+        `history:${RGHistoryResources.SSR_REFLECT}:previous`,
+        `history:${RGHistoryResources.SSR_MOTION_VECTOR}:previous`
+      ])
+    );
   });
 
   test('declares compatible TAA history imports as Composite reads', () => {

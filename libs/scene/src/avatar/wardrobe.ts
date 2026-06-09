@@ -1,9 +1,10 @@
-import { DRef, Disposable, Matrix4x4, guessMimeType } from '@zephyr3d/base';
+import { DRef, Disposable, Matrix4x4, guessMimeType, mimeTypeOf } from '@zephyr3d/base';
 import type { Nullable } from '@zephyr3d/base';
 import { getEngine } from '../app/api';
 import type { ModelFetchOptions } from '../asset/assetmanager';
 import { SharedModel } from '../asset/model';
-import type { SceneNode, SceneNodeVisible } from '../scene/scene_node';
+import type { SceneNodeVisible } from '../scene/scene_node';
+import { SceneNode } from '../scene/scene_node';
 import type { Mesh } from '../scene/mesh';
 import type { SkeletonBindPose } from '../animation/skeleton';
 import { SkeletonRig, SkinBinding } from '../animation/skeleton';
@@ -388,11 +389,14 @@ export class AvatarWardrobe extends Disposable {
     source: AvatarOutfitSource,
     options?: AvatarEquipOptions
   ): Promise<Nullable<SceneNode>> {
+    if (source instanceof SceneNode) {
+      return source;
+    }
     const resourceManager = getEngine().resourceManager;
     if (typeof source === 'string') {
       const scene = this._root.scene!;
       const root =
-        guessMimeType(source) === 'application/vnd.zephyr3d.prefab+json'
+        guessMimeType(source) === mimeTypeOf('.zprefab')
           ? await resourceManager.instantiatePrefab(scene.rootNode, source)
           : await resourceManager.fetchModel(source, scene, {
               loadAnimations: false,
@@ -422,7 +426,7 @@ export class AvatarWardrobe extends Disposable {
       );
       return root;
     }
-    return source;
+    return null;
   }
 
   private collectSkinnedMeshes(root: SceneNode): MeshBindingUse[] {

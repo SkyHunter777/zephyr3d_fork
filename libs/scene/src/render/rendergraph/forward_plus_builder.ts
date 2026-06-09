@@ -66,16 +66,7 @@ function renderQueueHasActiveSSS(renderQueue: RenderQueue): boolean {
   if (!itemList) {
     return false;
   }
-  const lists = [
-    ...itemList.opaque.lit,
-    ...itemList.opaque.unlit,
-    ...itemList.transmission.lit,
-    ...itemList.transmission.unlit,
-    ...itemList.transparent.lit,
-    ...itemList.transparent.unlit,
-    ...itemList.transmission_trans.lit,
-    ...itemList.transmission_trans.unlit
-  ];
+  const lists = [...itemList.opaque.lit, ...itemList.opaque.unlit];
   for (const list of lists) {
     for (const material of list.materialList) {
       if (hasSSSMaterialCore(material)) {
@@ -181,6 +172,10 @@ function getSurfaceTextureFormat(ctx: DrawContext): TextureFormat {
   return caps?.textureCaps.supportHalfFloatColorBuffer ? 'rgba16f' : 'rgba8unorm';
 }
 
+function getFullMipLevelCount(width: number, height: number): number {
+  return Math.max(1, Math.floor(Math.log2(Math.max(1, width, height))) + 1);
+}
+
 function hasSurfaceMRT(ctx: DrawContext): boolean {
   return !!(
     ctx.materialFlags &
@@ -238,6 +233,10 @@ export interface ForwardPlusOptions {
   gpuPicking: boolean;
   /** Whether transmission/refraction materials are present. */
   needSceneColor: boolean;
+  /** Whether scene-color-dependent materials also require scene depth. */
+  needSceneColorWithDepth: boolean;
+  /** Whether SSR needs transmission depth before the main light pass. */
+  needsTransmissionDepthForSSR: boolean;
   /** Enable screen-space subsurface scattering. */
   sss: boolean;
 }
@@ -254,6 +253,8 @@ export function deriveForwardPlusOptions(
 ): ForwardPlusOptions {
   const ssr = camera.SSR && scene.env.light.envLight && scene.env.light.envLight.hasRadiance();
   const sss = camera.SSS && renderQueueHasActiveSSS(renderQueue);
+  const needSceneColor = renderQueue.needSceneColor();
+  const needSceneColorWithDepth = renderQueue.needSceneColorWithDepth();
   return {
     depthPrepass: true,
     motionVectors:
@@ -262,7 +263,9 @@ export function deriveForwardPlusOptions(
     ssr: !!ssr,
     ssrCalcThickness: !!ssr && camera.ssrCalcThickness,
     gpuPicking: !!camera.getPickResultResolveFunc(),
-    needSceneColor: renderQueue.needSceneColor(),
+    needSceneColor,
+    needSceneColorWithDepth,
+    needsTransmissionDepthForSSR: !!ssr && needSceneColor && !needSceneColorWithDepth,
     sss: !!sss
   };
 }
@@ -474,13 +477,33 @@ function buildForwardPlusGraphInternal(
   const renderDepthAttachment =
     depthPassResult.graphDepthAttachmentHandle ?? depthPassResult.externalDepthAttachment ?? null;
 
+  let preLightTransmissionDepthToken: RGHandle | undefined;
+  if (options.needsTransmissionDepthForSSR) {
+    preLightTransmissionDepthToken = graph.addPass('TransmissionDepthForSSR', (builder) => {
+      builder.read(depthPassResult.depthFramebufferHandle);
+      const done = builder.createToken('TransmissionDepthForSSRDone');
+      builder.sideEffect();
+      builder.setExecute((rgCtx) => {
+        renderTransmissionDepthPass(frame, rgCtx);
+      });
+      return done;
+    });
+  }
+
   // ── 6. Hi-Z (optional) ───────────────────────────────────────────
   let hiZHandle: RGHandle | undefined;
   if (options.hiZ) {
     graph.addPass('HiZ', (builder) => {
       builder.read(depthHandle!);
       builder.read(depthPassResult.depthFramebufferHandle);
-      hiZHandle = builder.createTexture({ format: 'r32f', label: 'hiZ', mipLevels: 10 });
+      if (preLightTransmissionDepthToken) {
+        builder.read(preLightTransmissionDepthToken);
+      }
+      hiZHandle = builder.createTexture({
+        format: 'r32f',
+        label: 'hiZ',
+        mipLevels: getFullMipLevelCount(ctx.renderWidth, ctx.renderHeight)
+      });
       const hiZFramebufferHandle = builder.createFramebuffer({
         label: 'HiZFramebuffer',
         colorAttachments: hiZHandle,
@@ -502,11 +525,79 @@ function buildForwardPlusGraphInternal(
   }
 
   // ── 7. Main Light Pass ────────────────────────────────────────────
+  const historyManager = ctx.camera?.getHistoryResourceManager?.() ?? null;
+  const lightHistoryReadBindings: HistoryReadBinding[] = [];
+  const compositeHistoryReadBindings: HistoryReadBinding[] = [];
+  const historySize = { width: ctx.renderWidth, height: ctx.renderHeight };
+  if (historyManager && options.ssr && ctx.camera?.ssrTemporal && options.motionVectors) {
+    const reflectHistoryHandle = historyManager.importPreviousIfCompatible(
+      graph,
+      RGHistoryResources.SSR_REFLECT,
+      {
+        format: 'rgba16f',
+        sizeMode: 'absolute',
+        width: ctx.renderWidth,
+        height: ctx.renderHeight
+      },
+      historySize
+    );
+    const motionVectorHistoryHandle = historyManager.importPreviousIfCompatible(
+      graph,
+      RGHistoryResources.SSR_MOTION_VECTOR,
+      {
+        format: 'rgba16f',
+        sizeMode: 'absolute',
+        width: ctx.renderWidth,
+        height: ctx.renderHeight
+      },
+      historySize
+    );
+    if (reflectHistoryHandle && motionVectorHistoryHandle) {
+      lightHistoryReadBindings.push(
+        { name: RGHistoryResources.SSR_REFLECT, handle: reflectHistoryHandle },
+        { name: RGHistoryResources.SSR_MOTION_VECTOR, handle: motionVectorHistoryHandle }
+      );
+    }
+  }
+  if (historyManager && ctx.camera?.TAA && options.motionVectors) {
+    const colorHistoryHandle = historyManager.importPreviousIfCompatible(
+      graph,
+      RGHistoryResources.TAA_COLOR,
+      {
+        format: ctx.colorFormat!,
+        sizeMode: 'absolute',
+        width: ctx.renderWidth,
+        height: ctx.renderHeight
+      },
+      historySize
+    );
+    const motionVectorHistoryHandle = historyManager.importPreviousIfCompatible(
+      graph,
+      RGHistoryResources.TAA_MOTION_VECTOR,
+      {
+        format: 'rgba16f',
+        sizeMode: 'absolute',
+        width: ctx.renderWidth,
+        height: ctx.renderHeight
+      },
+      historySize
+    );
+    if (colorHistoryHandle && motionVectorHistoryHandle) {
+      compositeHistoryReadBindings.push(
+        { name: RGHistoryResources.TAA_COLOR, handle: colorHistoryHandle },
+        { name: RGHistoryResources.TAA_MOTION_VECTOR, handle: motionVectorHistoryHandle }
+      );
+    }
+  }
+
   let sssProfileResult: SSSProfilePassResult | undefined;
   if (options.sss) {
     sssProfileResult = graph.addPass('SSSProfile', (builder) => {
       builder.read(depthHandle);
       builder.read(depthPassResult.depthFramebufferHandle);
+      if (preLightTransmissionDepthToken) {
+        builder.read(preLightTransmissionDepthToken);
+      }
       const profileHandle = builder.createTexture({ format: 'rgba16f', label: 'sssProfile' });
       const paramHandle = builder.createTexture({ format: 'rgba8unorm', label: 'sssParam' });
       const normalHandle = options.ssr
@@ -546,8 +637,14 @@ function buildForwardPlusGraphInternal(
   const lightPassResult = graph.addPass('LightPass', (builder) => {
     builder.read(depthHandle);
     builder.read(depthPassResult.depthFramebufferHandle);
+    if (preLightTransmissionDepthToken) {
+      builder.read(preLightTransmissionDepthToken);
+    }
     if (hiZHandle) {
       builder.read(hiZHandle);
+    }
+    for (const binding of lightHistoryReadBindings) {
+      builder.read(binding.handle);
     }
 
     // Create scene color texture (intermediate render target)
@@ -616,57 +713,40 @@ function buildForwardPlusGraphInternal(
       ctx.SSSTransmissionTexture = sssTransmissionHandle
         ? rgCtx.getTexture<Texture2D>(sssTransmissionHandle)
         : null;
-      renderMainLightPass(
-        frame,
-        sceneColorTex,
-        sceneColorCopyTex,
-        rgCtx,
-        sceneColorFramebufferHandle,
-        sceneColorCopyFramebufferHandle
-      );
+      const renderLightPass = () =>
+        renderMainLightPass(
+          frame,
+          sceneColorTex,
+          sceneColorCopyTex,
+          rgCtx,
+          sceneColorFramebufferHandle,
+          sceneColorCopyFramebufferHandle
+        );
+      if (historyManager && lightHistoryReadBindings.length > 0) {
+        historyManager.beginReadScope(
+          lightHistoryReadBindings.map((binding) => ({
+            name: binding.name,
+            texture: rgCtx.getTexture<Texture2D>(binding.handle)
+          }))
+        );
+        try {
+          renderLightPass();
+        } finally {
+          historyManager.endReadScope();
+        }
+      } else {
+        renderLightPass();
+      }
     });
 
     return { sceneColorHandle, sceneColorCopyHandle, sceneColorFramebufferHandle };
   });
 
   const sceneColorHandle = lightPassResult.sceneColorHandle;
-  const historyManager = ctx.camera?.getHistoryResourceManager?.() ?? null;
-  const historyReadBindings: HistoryReadBinding[] = [];
-  if (historyManager && ctx.camera?.TAA && options.motionVectors) {
-    const historySize = { width: ctx.renderWidth, height: ctx.renderHeight };
-    const colorHistoryHandle = historyManager.importPreviousIfCompatible(
-      graph,
-      RGHistoryResources.TAA_COLOR,
-      {
-        format: ctx.colorFormat!,
-        sizeMode: 'absolute',
-        width: ctx.renderWidth,
-        height: ctx.renderHeight
-      },
-      historySize
-    );
-    const motionVectorHistoryHandle = historyManager.importPreviousIfCompatible(
-      graph,
-      RGHistoryResources.TAA_MOTION_VECTOR,
-      {
-        format: 'rgba16f',
-        sizeMode: 'absolute',
-        width: ctx.renderWidth,
-        height: ctx.renderHeight
-      },
-      historySize
-    );
-    if (colorHistoryHandle && motionVectorHistoryHandle) {
-      historyReadBindings.push(
-        { name: RGHistoryResources.TAA_COLOR, handle: colorHistoryHandle },
-        { name: RGHistoryResources.TAA_MOTION_VECTOR, handle: motionVectorHistoryHandle }
-      );
-    }
-  }
 
   // 8. Transmission depth pass (optional)
   let transmissionDepthToken: RGHandle | undefined;
-  if (options.needSceneColor) {
+  if (options.needSceneColor && !options.needsTransmissionDepthForSSR) {
     transmissionDepthToken = graph.addPass('TransmissionDepth', (builder) => {
       builder.read(sceneColorHandle);
       builder.read(depthPassResult.depthFramebufferHandle);
@@ -695,14 +775,14 @@ function buildForwardPlusGraphInternal(
     if (transmissionDepthToken) {
       builder.read(transmissionDepthToken);
     }
-    for (const binding of historyReadBindings) {
+    for (const binding of compositeHistoryReadBindings) {
       builder.read(binding.handle);
     }
     const outputBackbuffer = builder.write(backbuffer);
     builder.setExecute((rgCtx) => {
-      if (historyManager && historyReadBindings.length > 0) {
+      if (historyManager && compositeHistoryReadBindings.length > 0) {
         historyManager.beginReadScope(
-          historyReadBindings.map((binding) => ({
+          compositeHistoryReadBindings.map((binding) => ({
             name: binding.name,
             texture: rgCtx.getTexture<Texture2D>(binding.handle)
           }))
@@ -1085,8 +1165,7 @@ function renderMainLightPass(
     ctx.materialFlags |= MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
   }
   if (ctx.SSS) {
-    ctx.materialFlags |=
-      MaterialVaryingFlags.SSS_STORE_DIFFUSE | MaterialVaryingFlags.SSS_STORE_TRANSMISSION;
+    ctx.materialFlags |= MaterialVaryingFlags.SSS_STORE_DIFFUSE | MaterialVaryingFlags.SSS_STORE_TRANSMISSION;
   }
 
   if (depthTex === ctx.finalFramebuffer?.getDepthAttachment()) {
@@ -1203,41 +1282,54 @@ function renderComposite(frame: FrameState): void {
 export function executeForwardPlusGraph(ctx: DrawContext): void {
   const device = ctx.device;
   const graph = new RenderGraph();
-
-  // Cull scene first (needed to derive options)
-  const renderQueue = _scenePass.cullScene(ctx, ctx.camera);
-
-  const options = deriveForwardPlusOptions(ctx.scene, ctx.camera, device.type, renderQueue);
-  ctx.SSS = options.sss;
-
-  // Ensure the camera has a history resource manager for temporal effects (TAA, motion blur)
-  let historyManager = ctx.camera.getHistoryResourceManager();
-  if (!historyManager) {
-    historyManager = new HistoryResourceManager<Texture2D>(_devicePoolAllocator);
-    ctx.camera.setHistoryResourceManager(historyManager);
-  }
-  historyManager.beginFrame();
-
-  const { backbuffer, frame } = buildForwardPlusGraphInternal(graph, ctx, renderQueue, options);
-
-  const compiled = graph.compile([backbuffer]);
-
-  // Use RenderGraphExecutor for automatic resource management
-  const executor = new RenderGraphExecutor(_devicePoolAllocator, ctx.renderWidth, ctx.renderHeight);
-
-  // Register imported backbuffer (if using finalFramebuffer)
-  if (ctx.finalFramebuffer) {
-    const backbufferTex = ctx.finalFramebuffer.getColorAttachments()[0] as Texture2D;
-    executor.setImportedTexture(backbuffer, backbufferTex);
-  }
-  historyManager.bindImportedTextures(executor);
+  let renderQueue: RenderQueue | null = null;
+  let frame: FrameState | null = null;
+  let executor: RenderGraphExecutor<Texture2D, FrameBuffer> | null = null;
+  let historyManager: HistoryResourceManager<Texture2D> | null = null;
+  let historyFrameStarted = false;
 
   try {
+    // Cull scene first (needed to derive options)
+    renderQueue = _scenePass.cullScene(ctx, ctx.camera);
+
+    const options = deriveForwardPlusOptions(ctx.scene, ctx.camera, device.type, renderQueue);
+    ctx.SSS = options.sss;
+
+    // Ensure the camera has a history resource manager for temporal effects (TAA, motion blur)
+    historyManager = ctx.camera.getHistoryResourceManager();
+    if (!historyManager) {
+      historyManager = new HistoryResourceManager<Texture2D>(_devicePoolAllocator);
+      ctx.camera.setHistoryResourceManager(historyManager);
+    }
+    historyManager.beginFrame();
+    historyFrameStarted = true;
+
+    const buildResult = buildForwardPlusGraphInternal(graph, ctx, renderQueue, options);
+    frame = buildResult.frame;
+
+    const compiled = graph.compile([buildResult.backbuffer]);
+
+    // Use RenderGraphExecutor for automatic resource management
+    executor = new RenderGraphExecutor(_devicePoolAllocator, ctx.renderWidth, ctx.renderHeight);
+
+    // Register imported backbuffer (if using finalFramebuffer)
+    if (ctx.finalFramebuffer) {
+      const backbufferTex = ctx.finalFramebuffer.getColorAttachments()[0] as Texture2D;
+      executor.setImportedTexture(buildResult.backbuffer, backbufferTex);
+    }
+    historyManager.bindImportedTextures(executor);
+
     executor.execute(compiled);
     historyManager.commitFrame();
   } finally {
-    historyManager.discardFrame();
-    cleanupFrame(frame);
-    executor.reset();
+    if (historyFrameStarted) {
+      historyManager?.discardFrame();
+    }
+    if (frame) {
+      cleanupFrame(frame);
+    } else {
+      renderQueue?.dispose();
+    }
+    executor?.reset();
   }
 }
