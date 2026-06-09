@@ -16,6 +16,14 @@ npm run build --prefix utility/editor
 npm run electron:start --prefix utility/editor
 ```
 
+Windows development shortcut:
+
+```sh
+npm run electron:dev:install-shortcut --prefix utility/editor
+```
+
+This creates a desktop shortcut named `Zephyr3D Editor (Dev).lnk` that launches the development runtime without opening a terminal window.
+
 Packaging:
 
 ```sh

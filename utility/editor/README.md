@@ -46,6 +46,18 @@ Build and launch the Electron desktop app for development:
 npm run electron:dev --prefix utility/editor
 ```
 
+Install a Windows desktop shortcut for the development runtime:
+
+```sh
+npm run electron:dev:install-shortcut --prefix utility/editor
+```
+
+Launch the development runtime through the shortcut-compatible launcher:
+
+```sh
+npm run electron:dev:launch --prefix utility/editor
+```
+
 Launch the Electron app from an existing build:
 
 ```sh
@@ -65,6 +77,22 @@ The Electron build is an additive desktop runtime for the browser editor.
 - Browser builds continue to use the existing VFS abstraction and browser storage.
 - Desktop builds expose a constrained preload bridge instead of direct Node.js access in renderer code.
 - Editor metadata, system plugins, and local projects are stored under Electron `app.getPath('userData')/editor-storage`.
+
+## Windows Dev Shortcut
+
+The Windows development shortcut launches `utility/editor/scripts/launch-electron-dev.ps1`, which starts the same dev runtime as `npm run electron:dev`.
+
+- The first launch starts the Vite dev server and the Electron shell in the background.
+- Launching the shortcut again reuses the existing dev runtime when it is already running.
+- If the editor window was closed accidentally while the dev runtime is still alive, launching the shortcut again opens a new Electron window against the same dev server.
+- Runtime state and launcher logs are stored under `%LOCALAPPDATA%\Zephyr3DEditor\dev-runtime`. If that location is not writable, the launcher falls back to `utility/editor/.dev-runtime`.
+
+Development shortcut update behavior:
+
+- Changes under `utility/editor/src` update through the Vite dev server, usually with HMR or an automatic page reload.
+- Changes under `utility/editor/electron`, `utility/editor/mcp`, and `utility/editor/package.json` trigger an Electron process restart.
+- Changes under `libs/base`, `libs/device`, `libs/scene`, `libs/loaders`, `libs/backend-webgl`, and `libs/backend-webgpu` are wired to source in dev mode and should refresh into the running desktop editor.
+- Packaged desktop builds created by `npm run electron:dist` do not track source changes automatically. Rebuild or repackage them after code changes.
 
 ## MCP Integration
 
