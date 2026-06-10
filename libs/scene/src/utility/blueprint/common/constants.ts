@@ -23,8 +23,8 @@ export class ConstantScalarNode extends BaseGraphNode {
   constructor() {
     super();
     this._value = 0;
-    this._isUniform = false;
-    this._paramName = '';
+    this._isUniform = true;
+    this._paramName = getParamName();
     this._outputs = [{ id: 1, name: '' }];
   }
   /**
@@ -264,8 +264,8 @@ export class ConstantVec2Node extends BaseGraphNode {
   constructor() {
     super();
     this._value = [0, 0];
-    this._isUniform = false;
-    this._paramName = '';
+    this._isUniform = true;
+    this._paramName = getParamName();
     this._outputs = [
       { id: 1, name: '' },
       { id: 2, name: 'x', swizzle: 'x' },
@@ -561,8 +561,8 @@ export class ConstantVec3Node extends BaseGraphNode {
   constructor() {
     super();
     this._value = [0, 0, 0];
-    this._isUniform = false;
-    this._paramName = '';
+    this._isUniform = true;
+    this._paramName = getParamName();
     this._outputs = [
       { id: 1, name: '' },
       { id: 2, name: 'x', swizzle: 'x' },
@@ -922,8 +922,8 @@ export class ConstantVec4Node extends BaseGraphNode {
   constructor() {
     super();
     this._value = [0, 0, 0, 0];
-    this._isUniform = false;
-    this._paramName = '';
+    this._isUniform = true;
+    this._paramName = getParamName();
     this._outputs = [
       { id: 1, name: '' },
       { id: 2, name: 'x', swizzle: 'x' },
