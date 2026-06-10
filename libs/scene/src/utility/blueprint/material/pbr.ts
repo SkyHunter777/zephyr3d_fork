@@ -18,6 +18,8 @@ import { BaseGraphNode } from '../node';
  * - **Normal**: Surface normal in tangent/world space (for bump/normal mapping)
  * - **Tangent**: Surface tangent vector (for anisotropic effects)
  * - **Opacity**: Surface transparency (0 = fully transparent, 1 = fully opaque)
+ * - **SpecularWeight**: Scalar weight for the specular lobe
+ * - **AO**: Ambient occlusion multiplier
  *
  * All inputs are optional and have sensible defaults. Only the inputs you connect
  * will override the default values.
@@ -84,7 +86,9 @@ export class PBRBlockNode extends BaseGraphNode {
    * Creates a new PBR material output node
    *
    * @remarks
-   * Initializes with 8 input slots for all PBR material properties.
+ * Initializes with the full surface input set consumed by the PBR metallic-roughness backend.
+ * Existing slot ids are preserved for backward compatibility with saved `.zbpt` graphs,
+ * and new inputs are appended at the end.
    * Each input has:
    * - Flexible type acceptance (float can expand to vec3/vec4, etc.)
    * - Default values for when no connection is made
@@ -95,10 +99,12 @@ export class PBRBlockNode extends BaseGraphNode {
    * - Fully metallic (1.0)
    * - Fully rough (1.0)
    * - White specular (1, 1, 1)
-   * - No emission (0, 0, 0)
-   * - Default surface normal (from vertex data)
-   * - Default tangent (from vertex data)
-   * - Fully opaque (1.0)
+ * - No emission (0, 0, 0)
+ * - Default surface normal (from vertex data)
+ * - Default tangent (from vertex data)
+ * - Fully opaque (1.0)
+ * - Full specular weight (1)
+ * - Full AO (1)
    */
   constructor() {
     super();
@@ -153,6 +159,20 @@ export class PBRBlockNode extends BaseGraphNode {
       {
         id: 8,
         name: 'Opacity',
+        type: ['float'],
+        defaultValue: [1],
+        originType: 'float'
+      },
+      {
+        id: 9,
+        name: 'SpecularWeight',
+        type: ['float'],
+        defaultValue: [1],
+        originType: 'float'
+      },
+      {
+        id: 10,
+        name: 'AO',
         type: ['float'],
         defaultValue: [1],
         originType: 'float'
