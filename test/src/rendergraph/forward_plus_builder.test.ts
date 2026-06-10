@@ -10,6 +10,17 @@ import {
   type ForwardPlusOptions
 } from '../../../libs/scene/src/render/rendergraph/forward_plus_builder';
 
+function getMockTextureFormatSize(format: string): number {
+  switch (format) {
+    case 'rgba16f':
+      return 8;
+    case 'rgba32f':
+      return 16;
+    default:
+      return 4;
+  }
+}
+
 function createMockDrawContext(overrides: Record<string, unknown> = {}) {
   const { camera: cameraOverrides, ...restOverrides } = overrides as {
     camera?: Record<string, unknown>;
@@ -18,8 +29,14 @@ function createMockDrawContext(overrides: Record<string, unknown> = {}) {
     device: {
       type: 'webgpu',
       getDeviceCaps: () => ({
+        framebufferCaps: {
+          maxColorAttachmentBytesPerSample: 32
+        },
         textureCaps: {
-          supportHalfFloatColorBuffer: true
+          supportHalfFloatColorBuffer: true,
+          getTextureFormatInfo: (format: string) => ({
+            size: getMockTextureFormatSize(format)
+          })
         }
       })
     },
@@ -268,6 +285,29 @@ describe('Forward+ render graph builder', () => {
     expect(lightPass?.writes.map((resource) => resource.name)).toEqual(
       expect.arrayContaining(['sssDiffuse', 'sssTransmission'])
     );
+  });
+
+  test('keeps SSR surface MRT with scene-color materials and omits SSS transmission to reduce MRT count', () => {
+    const { graph } = buildForwardPlusGraphForTest(
+      createOptions({
+        sss: true,
+        ssr: true,
+        needSceneColor: true,
+        needSceneColorWithDepth: true
+      }),
+      {},
+      {
+        colorFormat: 'rgba16f',
+        SSRRoughnessTexture: { format: 'rgba16f' },
+        SSRNormalTexture: { format: 'rgba16f' }
+      }
+    );
+    const lightPassWrites = graph.passes
+      .find((pass) => pass.name === 'LightPass')
+      ?.writes.map((resource) => resource.name);
+
+    expect(lightPassWrites).toContain('sssDiffuse');
+    expect(lightPassWrites).not.toContain('sssTransmission');
   });
 
   test('uses a single DepthPrepass subpass when motion vectors are disabled', () => {

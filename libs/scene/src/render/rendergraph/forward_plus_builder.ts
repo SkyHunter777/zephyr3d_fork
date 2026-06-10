@@ -703,7 +703,7 @@ function buildForwardPlusGraphInternal(
         builder.read(sssProfileResult.normalHandle);
       }
     }
-    const includeSSRSurfaceMRT = !!options.ssr && !options.needSceneColor;
+    const includeSSRSurfaceMRT = !!options.ssr;
     const writeSSSDiffuse = options.sss && shouldStoreSSSDiffuse(ctx);
     let writeSSSTransmission = options.sss && shouldStoreSSSTransmission(ctx);
     if (
@@ -1229,7 +1229,7 @@ function renderMainLightPass(
       MaterialVaryingFlags.SSS_STORE_TRANSMISSION
     );
 
-  if (ctx.SSR && !renderQueue.needSceneColor()) {
+  if (ctx.SSR) {
     ctx.materialFlags |= MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
   }
   if (ctx.SSS) {
