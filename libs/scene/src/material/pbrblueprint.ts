@@ -323,7 +323,8 @@ export class PBRBluePrintMaterial
     const baseColor = this.getBlueprintOutput(scope, 'BaseColor');
     const opacity = this.getBlueprintOutput(scope, 'Opacity');
     if (baseColor !== undefined) {
-      return this.toVec4(scope, baseColor, (opacity as PBShaderExp | number) ?? 1);
+      const pb = scope.$builder;
+      return pb.vec4(this.toVec3(scope, baseColor), (opacity as PBShaderExp | number) ?? 1);
     }
     const albedo = super.calculateAlbedoColor(scope, uv);
     if (opacity !== undefined) {
@@ -555,7 +556,7 @@ export class PBRBluePrintMaterial
       DEFAULT_OUTPUT_NAMES.map((name) => {
         switch (name) {
           case 'BaseColor':
-            return pb.vec4(name);
+            return pb.vec3(name);
           case 'Specular':
           case 'Emissive':
           case 'Normal':
@@ -585,7 +586,7 @@ export class PBRBluePrintMaterial
           this.zVertexTangent = this.vertexTangent;
           this.zVertexBinormal = this.vertexBinormal;
           const outputs = that._irFrag.create(pb);
-          let baseColor: number | PBShaderExp = pb.vec4(1);
+          let baseColor: number | PBShaderExp = pb.vec3(1);
           let metallic: number | PBShaderExp = 0;
           let roughness: number | PBShaderExp = 1;
           let specular: number | PBShaderExp = pb.vec3(1);
@@ -598,7 +599,7 @@ export class PBRBluePrintMaterial
           if (outputs) {
             const map = that.toOutputMap(outputs);
             if (map.BaseColor !== undefined) {
-              baseColor = that.toVec4(scope, map.BaseColor, 1);
+              baseColor = that.toVec3(scope, map.BaseColor);
             }
             if (map.Metallic !== undefined) {
               metallic = map.Metallic as PBShaderExp | number;

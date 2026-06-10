@@ -95,7 +95,7 @@ export class PBRBlockNode extends BaseGraphNode {
    * - Origin type that defines the expected canonical type
    *
    * Default values provide a reasonable starting material:
-   * - White base color (1, 1, 1, 1)
+ * - White base color (1, 1, 1)
    * - Fully metallic (1.0)
    * - Fully rough (1.0)
    * - White specular (1, 1, 1)
@@ -113,8 +113,8 @@ export class PBRBlockNode extends BaseGraphNode {
         id: 1,
         name: 'BaseColor',
         type: ['float', 'vec2', 'vec3', 'vec4'],
-        defaultValue: [1, 1, 1, 1],
-        originType: 'vec4'
+        defaultValue: [1, 1, 1],
+        originType: 'vec3'
       },
       {
         id: 2,
