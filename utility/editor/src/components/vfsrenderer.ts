@@ -1,13 +1,7 @@
 import type { FileMetadata, GenericConstructor, Immutable, Nullable, VFS } from '@zephyr3d/base';
+import type { TextureAddressMode, TextureFilterMode, TextureSampler } from '@zephyr3d/device';
 import UPNG from 'upng-js';
-import {
-  DataTransferVFS,
-  Disposable,
-  guessMimeType,
-  makeObservable,
-  mimeTypeOf,
-  PathUtils
-} from '@zephyr3d/base';
+import { DataTransferVFS, Disposable, guessMimeType, makeObservable, PathUtils } from '@zephyr3d/base';
 import { DockPannel, ResizeDirection } from './dockpanel';
 import { ImGui, imGuiCalcTextSize } from '@zephyr3d/imgui';
 import { convertEmojiString } from '../helpers/emoji';
@@ -28,9 +22,28 @@ import { DlgZABCCompress, type ZABCCompressDialogResult } from '../views/dlg/zab
 import { ListView, ListViewData } from './listview';
 import { ResourceService } from '../core/services/resource';
 import { DlgSaveFile } from '../views/dlg/savefiledlg';
-import type { MeshMaterial, SharedModel } from '@zephyr3d/scene';
-import { getEngine, PBRBluePrintMaterial, SpriteBlueprintMaterial } from '@zephyr3d/scene';
-import { exportFile, exportMultipleFilesAsZip } from '../helpers/downloader';
+import type {
+  BluePrintUniformTexture,
+  BluePrintUniformValue,
+  MaterialBlueprintIR,
+  MeshMaterial,
+  SharedModel
+} from '@zephyr3d/scene';
+import {
+  CompAddNode,
+  CompMulNode,
+  CompSubNode,
+  ConstantScalarNode,
+  ConstantVec3Node,
+  ConstantVec4Node,
+  getEngine,
+  PBRBlockNode,
+  PBRBluePrintMaterial,
+  PBRMetallicRoughnessMaterial,
+  SpriteBlueprintMaterial,
+  TextureSampleNode
+} from '@zephyr3d/scene';
+import { exportFile, exportMultipleFilesAsZip, exportMultipleFilesToDirectory } from '../helpers/downloader';
 import { matchesMimeType } from '../helpers/mimematch';
 import { buildPrimitiveGlbFromZmshContent } from '../helpers/primitiveglb';
 import { DlgImportOptions } from '../views/dlg/importoptionsdlg';
@@ -39,8 +52,23 @@ import type { Editor } from '../core/editor';
 import type { RuntimeEditorAssetContext, RuntimeEditorMenuContext } from '../core/plugin';
 import type { PropertyAccessor } from '@zephyr3d/scene';
 import { AssetThumbnailService, ImageAssetThumbnailProvider } from './assetthumbnail';
-import { getDesktopAPI } from '../core/services/desktop';
+import { getDesktopAPI, isDesktopApp } from '../core/services/desktop';
 import { ElectronFS } from '../core/services/electronfs';
+
+type BlueprintNodeState = {
+  id: number;
+  position?: Nullable<number[]>;
+  title: string;
+  locked: boolean;
+  node: Record<string, unknown>;
+};
+
+type BlueprintLinkState = {
+  startNodeId: number;
+  startSlotId: number;
+  endNodeId: number;
+  endSlotId: number;
+};
 
 export type FileInfo = {
   meta: FileMetadata;
@@ -359,7 +387,7 @@ export class ContentListView extends ListView<{}, FileInfo | DirectoryInfo> {
         const item = selectedItems[0];
         if (!('subDir' in item)) {
           const mimeType = this.renderer.VFS.guessMIMEType(item.meta.path);
-          if (mimeType === mimeTypeOf('.zmtl')) {
+          if (mimeType === 'application/vnd.zephyr3d.material+json') {
             ImGui.Separator();
             if (ImGui.MenuItem('Create Material Instance...')) {
               DlgSaveFile.saveFile(
@@ -377,6 +405,9 @@ export class ContentListView extends ListView<{}, FileInfo | DirectoryInfo> {
                   this.renderer.copyFile(item.meta.path, name, 'prompt');
                 }
               });
+            }
+            if (ImGui.MenuItem('Convert To Blueprint Material...')) {
+              void this.renderer.convertMaterialToBlueprint(item.meta.path);
             }
           }
           if (item.meta.path.endsWith('.zmsh')) {
@@ -631,6 +662,455 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   }
   get currentDirContent() {
     return this._currentDirContent;
+  }
+  private async serializeBlueprintNode(
+    id: number,
+    impl: object,
+    position: [number, number] | null,
+    title = '',
+    locked = false
+  ): Promise<BlueprintNodeState> {
+    return {
+      id,
+      position: position ? [position[0], position[1]] : null,
+      title,
+      locked,
+      node: await getEngine().resourceManager.serializeObject(impl)
+    };
+  }
+  private getTextureAssetId(texture: unknown): string {
+    if (!texture) {
+      return '';
+    }
+    return getEngine().resourceManager.getAssetId(texture) ?? '';
+  }
+  private applyTextureSamplerToNode(
+    node: TextureSampleNode,
+    sampler: TextureSampler | null | undefined,
+    wrapS?: string | null,
+    wrapT?: string | null
+  ) {
+    const normalizeWrap = (mode: string | null | undefined): TextureAddressMode => {
+      if (mode === 'repeat' || mode === 'clamp' || mode === 'mirrored-repeat') {
+        return mode;
+      }
+      if (mode === 'mirrored_repeat') {
+        return 'mirrored-repeat';
+      }
+      return 'clamp';
+    };
+    const normalizeFilter = (
+      mode: TextureFilterMode | string | null | undefined,
+      fallback: TextureFilterMode
+    ): TextureFilterMode => {
+      return mode === 'nearest' || mode === 'linear' || mode === 'none' ? mode : fallback;
+    };
+    node.addressU = normalizeWrap(wrapS ?? sampler?.addressModeU);
+    node.addressV = normalizeWrap(wrapT ?? sampler?.addressModeV);
+    node.filterMin = normalizeFilter(sampler?.minFilter, 'linear');
+    node.filterMag = normalizeFilter(sampler?.magFilter, 'linear');
+    node.filterMip = normalizeFilter(sampler?.mipFilter, 'nearest');
+  }
+  private async createPBRBlueprintFragmentState(material: PBRMetallicRoughnessMaterial) {
+    let nextId = 1;
+    const nodes: BlueprintNodeState[] = [];
+    const links: BlueprintLinkState[] = [];
+    const rootId = nextId++;
+    nodes.push(await this.serializeBlueprintNode(rootId, new PBRBlockNode(), [640, 60], '', true));
+    const addLink = (startNodeId: number, startSlotId: number, endNodeId: number, endSlotId: number) => {
+      links.push({
+        startNodeId,
+        startSlotId,
+        endNodeId,
+        endSlotId
+      });
+    };
+    const connectRoot = (source: { nodeId: number; slotId?: number }, targetSlotId: number) => {
+      addLink(source.nodeId, source.slotId ?? 1, rootId, targetSlotId);
+    };
+    const addScalarNode = async (value: number, position: [number, number], targetSlotId: number | null = null) => {
+      const nodeId = nextId++;
+      const node = new ConstantScalarNode();
+      node.x = value;
+      nodes.push(await this.serializeBlueprintNode(nodeId, node, position));
+      if (targetSlotId !== null) {
+        connectRoot({ nodeId }, targetSlotId);
+      }
+      return nodeId;
+    };
+    const addVec3Node = async (
+      x: number,
+      y: number,
+      z: number,
+      position: [number, number],
+      targetSlotId: number | null = null
+    ) => {
+      const nodeId = nextId++;
+      const node = new ConstantVec3Node();
+      node.x = x;
+      node.y = y;
+      node.z = z;
+      nodes.push(await this.serializeBlueprintNode(nodeId, node, position));
+      if (targetSlotId !== null) {
+        connectRoot({ nodeId }, targetSlotId);
+      }
+      return nodeId;
+    };
+    const addVec4Node = async (
+      x: number,
+      y: number,
+      z: number,
+      w: number,
+      position: [number, number],
+      targetSlotId: number | null = null
+    ) => {
+      const nodeId = nextId++;
+      const node = new ConstantVec4Node();
+      node.x = x;
+      node.y = y;
+      node.z = z;
+      node.w = w;
+      nodes.push(await this.serializeBlueprintNode(nodeId, node, position));
+      if (targetSlotId !== null) {
+        connectRoot({ nodeId }, targetSlotId);
+      }
+      return nodeId;
+    };
+    const addBinaryNode = async (
+      NodeCtor: new () => CompAddNode | CompSubNode | CompMulNode,
+      inputA: { nodeId: number; slotId?: number },
+      inputB: { nodeId: number; slotId?: number },
+      position: [number, number],
+      targetSlotId: number | null = null
+    ) => {
+      const nodeId = nextId++;
+      const node = new NodeCtor();
+      nodes.push(await this.serializeBlueprintNode(nodeId, node, position));
+      addLink(inputA.nodeId, inputA.slotId ?? 1, nodeId, 1);
+      addLink(inputB.nodeId, inputB.slotId ?? 1, nodeId, 2);
+      if (targetSlotId !== null) {
+        connectRoot({ nodeId }, targetSlotId);
+      }
+      return nodeId;
+    };
+    const addMulNode = async (
+      inputA: { nodeId: number; slotId?: number },
+      inputB: { nodeId: number; slotId?: number },
+      position: [number, number],
+      targetSlotId: number | null = null
+    ) => addBinaryNode(CompMulNode, inputA, inputB, position, targetSlotId);
+    const addAddNode = async (
+      inputA: { nodeId: number; slotId?: number },
+      inputB: { nodeId: number; slotId?: number },
+      position: [number, number],
+      targetSlotId: number | null = null
+    ) => addBinaryNode(CompAddNode, inputA, inputB, position, targetSlotId);
+    const addSubNode = async (
+      inputA: { nodeId: number; slotId?: number },
+      inputB: { nodeId: number; slotId?: number },
+      position: [number, number],
+      targetSlotId: number | null = null
+    ) => addBinaryNode(CompSubNode, inputA, inputB, position, targetSlotId);
+    const addTextureNode = async (
+      texture: unknown,
+      options: {
+        samplerType?: 'Color' | 'Normal';
+        sRGB?: boolean;
+        position: [number, number];
+        sampler?: TextureSampler | null;
+        wrapS?: string | null;
+        wrapT?: string | null;
+      }
+    ) => {
+      const textureId = this.getTextureAssetId(texture);
+      if (!textureId) {
+        return null;
+      }
+      const nodeId = nextId++;
+      const node = new TextureSampleNode();
+      node.textureId = textureId;
+      node.samplerType = options.samplerType ?? 'Color';
+      node.sRGB = options.sRGB ?? true;
+      this.applyTextureSamplerToNode(node, options.sampler, options.wrapS, options.wrapT);
+      nodes.push(await this.serializeBlueprintNode(nodeId, node, options.position));
+      return nodeId;
+    };
+    const isVec3 = (x: number, y: number, z: number, value: number) => x === value && y === value && z === value;
+    const baseColorConstNodeId = await addVec4Node(
+      material.albedoColor.x,
+      material.albedoColor.y,
+      material.albedoColor.z,
+      material.albedoColor.w,
+      [40, -120]
+    );
+    let baseColorSource: { nodeId: number; slotId?: number } = { nodeId: baseColorConstNodeId, slotId: 1 };
+    if (material.albedoTexture) {
+      const albedoTexNodeId = await addTextureNode(material.albedoTexture, {
+        sRGB: true,
+        position: [250, -120],
+        sampler: material.albedoTextureSampler,
+        wrapS: (material as PBRMetallicRoughnessMaterial & { albedoTexCoordAddressU?: string }).albedoTexCoordAddressU,
+        wrapT: (material as PBRMetallicRoughnessMaterial & { albedoTexCoordAddressV?: string }).albedoTexCoordAddressV
+      });
+      baseColorSource = {
+        nodeId: await addMulNode(
+        { nodeId: baseColorConstNodeId, slotId: 1 },
+        { nodeId: albedoTexNodeId, slotId: 1 },
+        [470, -120]
+        ),
+        slotId: 1
+      };
+    }
+    connectRoot(baseColorSource, 1);
+    const metallicRoughnessTextureNodeId = material.metallicRoughnessTexture
+      ? await addTextureNode(material.metallicRoughnessTexture, {
+          sRGB: false,
+          position: [20, 80],
+          sampler: material.metallicRoughnessTextureSampler
+        })
+      : null;
+    if (metallicRoughnessTextureNodeId) {
+      if (material.metallic !== 1) {
+        const metallicFactorNodeId = await addScalarNode(material.metallic, [20, 20]);
+        connectRoot(
+          {
+            nodeId: await addMulNode(
+              { nodeId: metallicFactorNodeId },
+              { nodeId: metallicRoughnessTextureNodeId, slotId: 4 },
+              [240, 20]
+            )
+          },
+          2
+        );
+      } else {
+        connectRoot({ nodeId: metallicRoughnessTextureNodeId, slotId: 4 }, 2);
+      }
+      if (material.roughness !== 1) {
+        const roughnessFactorNodeId = await addScalarNode(material.roughness, [20, 140]);
+        connectRoot(
+          {
+            nodeId: await addMulNode(
+              { nodeId: roughnessFactorNodeId },
+              { nodeId: metallicRoughnessTextureNodeId, slotId: 3 },
+              [240, 140]
+            )
+          },
+          3
+        );
+      } else {
+        connectRoot({ nodeId: metallicRoughnessTextureNodeId, slotId: 3 }, 3);
+      }
+    } else {
+      if (material.metallic !== 1) {
+        await addScalarNode(material.metallic, [20, 20], 2);
+      }
+      if (material.roughness !== 1) {
+        await addScalarNode(material.roughness, [20, 140], 3);
+      }
+    }
+    const specularColorTextureNodeId = material.specularColorTexture
+      ? await addTextureNode(material.specularColorTexture, {
+          sRGB: true,
+          position: [20, 260],
+          sampler: material.specularColorTextureSampler
+        })
+      : null;
+    if (specularColorTextureNodeId) {
+      if (!isVec3(material.specularFactor.x, material.specularFactor.y, material.specularFactor.z, 1)) {
+        const specularFactorNodeId = await addVec3Node(
+          material.specularFactor.x,
+          material.specularFactor.y,
+          material.specularFactor.z,
+          [20, 320]
+        );
+        connectRoot(
+          {
+            nodeId: await addMulNode(
+              { nodeId: specularFactorNodeId },
+              { nodeId: specularColorTextureNodeId, slotId: 6 },
+              [240, 260]
+            )
+          },
+          4
+        );
+      } else {
+        connectRoot({ nodeId: specularColorTextureNodeId, slotId: 6 }, 4);
+      }
+    } else if (!isVec3(material.specularFactor.x, material.specularFactor.y, material.specularFactor.z, 1)) {
+      await addVec3Node(
+        material.specularFactor.x,
+        material.specularFactor.y,
+        material.specularFactor.z,
+        [20, 260],
+        4
+      );
+    }
+    const specularTextureNodeId = material.specularTexture
+      ? await addTextureNode(material.specularTexture, {
+          sRGB: false,
+          position: [20, 440],
+          sampler: material.specularTextureSampler
+        })
+      : null;
+    if (specularTextureNodeId) {
+      if (material.specularFactor.w !== 1) {
+        const specularWeightNodeId = await addScalarNode(material.specularFactor.w, [20, 380]);
+        connectRoot(
+          {
+            nodeId: await addMulNode(
+              { nodeId: specularWeightNodeId },
+              { nodeId: specularTextureNodeId, slotId: 5 },
+              [240, 440]
+            )
+          },
+          9
+        );
+      } else {
+        connectRoot({ nodeId: specularTextureNodeId, slotId: 5 }, 9);
+      }
+    } else if (material.specularFactor.w !== 1) {
+      await addScalarNode(material.specularFactor.w, [20, 380], 9);
+    }
+    const emissiveTextureNodeId = material.emissiveTexture
+      ? await addTextureNode(material.emissiveTexture, {
+          sRGB: true,
+          position: [300, 40],
+          sampler: material.emissiveTextureSampler
+        })
+      : null;
+    const emissiveFactor =
+      material.emissiveStrength !== 1
+        ? {
+            nodeId: await addVec3Node(
+              material.emissiveColor.x * material.emissiveStrength,
+              material.emissiveColor.y * material.emissiveStrength,
+              material.emissiveColor.z * material.emissiveStrength,
+              [300, -20]
+            )
+          }
+        : !isVec3(material.emissiveColor.x, material.emissiveColor.y, material.emissiveColor.z, 0)
+          ? {
+              nodeId: await addVec3Node(
+                material.emissiveColor.x,
+                material.emissiveColor.y,
+                material.emissiveColor.z,
+                [300, -20]
+              )
+            }
+          : null;
+    if (emissiveTextureNodeId) {
+      if (emissiveFactor) {
+        connectRoot(
+          {
+            nodeId: await addMulNode(emissiveFactor, { nodeId: emissiveTextureNodeId, slotId: 6 }, [520, 40])
+          },
+          5
+        );
+      } else {
+        connectRoot({ nodeId: emissiveTextureNodeId, slotId: 6 }, 5);
+      }
+    } else if (emissiveFactor) {
+      connectRoot(emissiveFactor, 5);
+    }
+    if (material.normalTexture) {
+      const normalTextureNodeId = await addTextureNode(material.normalTexture, {
+        samplerType: 'Normal',
+        sRGB: false,
+        position: [300, 160],
+        sampler: material.normalTextureSampler
+      });
+      connectRoot({ nodeId: normalTextureNodeId, slotId: 6 }, 6);
+    }
+    if (material.occlusionTexture) {
+      const occlusionTextureNodeId = await addTextureNode(material.occlusionTexture, {
+        sRGB: false,
+        position: [300, 440],
+        sampler: material.occlusionTextureSampler
+      });
+      if (material.occlusionStrength !== 1) {
+        const oneNodeId = await addScalarNode(1, [300, 560]);
+        const occlusionStrengthNodeId = await addScalarNode(material.occlusionStrength, [300, 620]);
+        const deltaNodeId = await addSubNode(
+          { nodeId: occlusionTextureNodeId, slotId: 2 },
+          { nodeId: oneNodeId },
+          [520, 500]
+        );
+        const scaledNodeId = await addMulNode(
+          { nodeId: deltaNodeId },
+          { nodeId: occlusionStrengthNodeId },
+          [740, 500]
+        );
+        connectRoot(
+          {
+            nodeId: await addAddNode({ nodeId: oneNodeId }, { nodeId: scaledNodeId }, [960, 500])
+          },
+          10
+        );
+      } else {
+        connectRoot({ nodeId: occlusionTextureNodeId, slotId: 2 }, 10);
+      }
+    }
+    return {
+      nodes,
+      links,
+      canvasOffset: [0, 0],
+      canvasScale: 1
+    };
+  }
+  private collectBlueprintUniforms(fragmentIR: MaterialBlueprintIR, vertexIR?: MaterialBlueprintIR | null) {
+    const uniformValues: BluePrintUniformValue[] = [];
+    const uniformTextures: BluePrintUniformTexture[] = [];
+    for (const ir of [fragmentIR, vertexIR]) {
+      if (!ir) {
+        continue;
+      }
+      for (const u of ir.uniformValues) {
+        const exists = uniformValues.find((v) => v.name === u.name);
+        if (exists) {
+          if (ir === fragmentIR) {
+            exists.inFragmentShader = true;
+          } else {
+            exists.inVertexShader = true;
+          }
+          continue;
+        }
+        uniformValues.push({
+          name: u.name,
+          type: u.type,
+          value: typeof u.value === 'number' ? [u.value] : [...u.value],
+          inVertexShader: ir === vertexIR,
+          inFragmentShader: ir === fragmentIR
+        });
+      }
+      for (const u of ir.uniformTextures) {
+        const exists = uniformTextures.find((v) => v.name === u.name);
+        if (exists) {
+          if (ir === fragmentIR) {
+            exists.inFragmentShader = true;
+          } else {
+            exists.inVertexShader = true;
+          }
+          continue;
+        }
+        uniformTextures.push({
+          name: u.name,
+          type: u.type,
+          texture: u.texture,
+          sRGB: u.sRGB,
+          wrapS: u.wrapS,
+          wrapT: u.wrapT,
+          minFilter: u.minFilter,
+          magFilter: u.magFilter,
+          mipFilter: u.mipFilter,
+          inVertexShader: ir === vertexIR,
+          inFragmentShader: ir === fragmentIR
+        });
+      }
+    }
+    return {
+      uniformValues,
+      uniformTextures
+    };
   }
   async runWithVFSBatchUpdate<T>(task: () => Promise<T>): Promise<T> {
     this._vfsBatchDepth++;
@@ -1186,12 +1666,106 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     }
   }
 
-  exportSelectedItems() {
+  async convertMaterialToBlueprint(sourcePath: string) {
+    const material = await getEngine().resourceManager.fetchMaterial(sourcePath, { overrideVFS: this._vfs });
+    if (!(material instanceof PBRMetallicRoughnessMaterial)) {
+      DlgMessage.messageBox('Convert Material', 'Only PBR metallic-roughness materials can be converted right now.');
+      return;
+    }
+    const sourceName = this._vfs.basename(sourcePath, this._vfs.extname(sourcePath));
+    const defaultPath = this._vfs.join(this._vfs.dirname(sourcePath), `${sourceName}_bp.zmtl`);
+    const outputPath = await DlgSaveFile.saveFile(
+      'Convert To Blueprint Material',
+      this._vfs,
+      '/assets',
+      'Material (*.zmtl)|*.zmtl',
+      520,
+      420,
+      this._vfs.basename(defaultPath)
+    );
+    if (!outputPath) {
+      return;
+    }
+    const finalMaterialPath = outputPath.toLowerCase().endsWith('.zmtl') ? outputPath : `${outputPath}.zmtl`;
+    const blueprintPath = this._vfs.join(
+      this._vfs.dirname(finalMaterialPath),
+      `${this._vfs.basename(finalMaterialPath, '.zmtl')}.zbpt`
+    );
+    const blueprintMaterial = new PBRBluePrintMaterial();
+    blueprintMaterial.copyFrom(material as PBRMetallicRoughnessMaterial & PBRBluePrintMaterial);
+    // Vertex color on PBRM is an implicit backend multiply. Once we convert to an
+    // explicit blueprint surface graph, keeping that flag would cause PBRM to apply
+    // an extra vertex-color path on top of the blueprint output and may request a
+    // diffuse vertex stream that the preview mesh does not provide.
+    (blueprintMaterial as PBRBluePrintMaterial & { vertexColor?: boolean }).vertexColor = false;
+    // These texture-backed surface channels are re-expressed in the generated blueprint graph.
+    // Clearing the backend texture props avoids applying the same maps twice in the inherited PBRM path.
+    const blueprintMaterialPBR = blueprintMaterial as PBRBluePrintMaterial & {
+      albedoTexture: unknown;
+      metallicRoughnessTexture: unknown;
+      specularColorTexture: unknown;
+      specularTexture: unknown;
+      emissiveTexture: unknown;
+      normalTexture: unknown;
+      occlusionTexture: unknown;
+    };
+    blueprintMaterialPBR.albedoTexture = null;
+    blueprintMaterialPBR.metallicRoughnessTexture = null;
+    blueprintMaterialPBR.specularColorTexture = null;
+    blueprintMaterialPBR.specularTexture = null;
+    blueprintMaterialPBR.emissiveTexture = null;
+    blueprintMaterialPBR.normalTexture = null;
+    blueprintMaterialPBR.occlusionTexture = null;
+    const fragmentState = await this.createPBRBlueprintFragmentState(material);
+    const blueprintContent = {
+      type: 'PBRMaterial',
+      state: {
+        fragment: fragmentState,
+        vertex: blueprintMaterial.vertexIR.editorState
+      }
+    };
+    await this.runWithVFSBatchUpdate(async () => {
+      await this._vfs.writeFile(blueprintPath, JSON.stringify(blueprintContent, null, 2), {
+        encoding: 'utf8',
+        create: true
+      });
+      getEngine().resourceManager.invalidateBluePrint(blueprintPath);
+      const blueprints = await getEngine().resourceManager.loadBluePrint(blueprintPath);
+      const fragmentIR = blueprints?.fragment ?? blueprintMaterial.fragmentIR;
+      const vertexIR = blueprints?.vertex ?? blueprintMaterial.vertexIR;
+      blueprintMaterial.fragmentIR = fragmentIR;
+      blueprintMaterial.vertexIR = vertexIR;
+      const uniforms = this.collectBlueprintUniforms(fragmentIR, vertexIR);
+      const props = await getEngine().resourceManager.serializeObjectProps(blueprintMaterial);
+      const materialContent = {
+        type: 'PBRBluePrintMaterial',
+        props,
+        data: {
+          IR: blueprintPath,
+          uniformValues: uniforms.uniformValues,
+          uniformTextures: uniforms.uniformTextures
+        }
+      };
+      await this._vfs.writeFile(finalMaterialPath, JSON.stringify(materialContent, null, 2), {
+        encoding: 'utf8',
+        create: true
+      });
+    });
+    getEngine().resourceManager.invalidateBluePrint(blueprintPath);
+    const label = this._vfs.basename(finalMaterialPath, '.zmtl');
+    eventBus.dispatchEvent('edit_material', label, label, null, finalMaterialPath);
+  }
+
+  async exportSelectedItems() {
     if (this.selectedItems.size === 0) {
       return;
     }
     const items = Array.from(this.selectedItems);
-    if (items.length === 1 && !('subDir' in items[0])) {
+    const selectedPaths = items.map((item) => ('subDir' in item ? item.path : item.meta.path));
+    const preserveAssetsPath = selectedPaths.every(
+      (path) => path === '/assets' || this._vfs.isParentOf('/assets', path)
+    );
+    if (items.length === 1 && !('subDir' in items[0]) && !preserveAssetsPath) {
       const filename = this._vfs.basename(items[0].meta.path);
       this._vfs.readFile(items[0].meta.path, { encoding: 'binary' }).then((data) => {
         exportFile(data as ArrayBuffer, filename);
@@ -1203,7 +1777,71 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       const dirs = (items.filter((items) => 'subDir' in items) as DirectoryInfo[]).map(
         (item: DirectoryInfo) => item.path
       );
-      exportMultipleFilesAsZip(files, dirs, 'export.zip', this._vfs);
+      const dlgProgressBar = new DlgProgress('Export Assets##ExportProgress', 320);
+      dlgProgressBar.showModal();
+      dlgProgressBar.setProgress(0, 1);
+      const zipFilename =
+        items.length === 1
+          ? `${this._vfs.basename('subDir' in items[0] ? items[0].path : items[0].meta.path)}.zip`
+          : preserveAssetsPath
+            ? 'assets-export.zip'
+            : 'export.zip';
+      try {
+        if (preserveAssetsPath && isDesktopApp()) {
+          const desktop = getDesktopAPI();
+          const targetRoot = await desktop?.fs.pickDirectory({
+            title: 'Select Export Directory',
+            buttonLabel: 'Export Here'
+          });
+          if (!targetRoot) {
+            return;
+          }
+          const targetFS = new ElectronFS(`project:${targetRoot}`);
+          const resetPaths: string[] = [];
+          try {
+            if (await targetFS.exists('/assets')) {
+              const existingEntries = await targetFS.readDirectory('/assets', {
+                includeHidden: true,
+                recursive: false
+              });
+              if (existingEntries.length > 0) {
+                const action = await DlgMessageBoxEx.messageBoxEx(
+                  'Export Assets',
+                  'The target directory already contains an assets folder.\n\nReplace it, merge into it, or cancel?',
+                  ['Replace', 'Merge', 'Cancel'],
+                  420,
+                  0,
+                  true
+                );
+                if (action === 'Cancel' || !action) {
+                  return;
+                }
+                if (action === 'Replace') {
+                  resetPaths.push('/assets');
+                }
+              }
+            }
+          } finally {
+            await targetFS.close();
+          }
+          const exported = await exportMultipleFilesToDirectory(files, dirs, this._vfs, {
+            preserveProjectPaths: true,
+            targetRoot,
+            resetPaths,
+            onProgress: (current, total) => dlgProgressBar.setProgress(current, total)
+          });
+          if (!exported) {
+            return;
+          }
+        } else {
+          await exportMultipleFilesAsZip(files, dirs, zipFilename, this._vfs, {
+            preserveProjectPaths: preserveAssetsPath,
+            onProgress: (current, total) => dlgProgressBar.setProgress(current, total)
+          });
+        }
+      } finally {
+        dlgProgressBar.close();
+      }
     }
   }
 
