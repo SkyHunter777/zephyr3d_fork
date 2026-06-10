@@ -1199,6 +1199,12 @@ function renderSkyMotionVectors(
   device.popDeviceStates();
 }
 
+function blitToCurrentColorAttachment(ctx: DrawContext, source: Texture2D): void {
+  const framebuffer = ctx.device.getFramebuffer();
+  const destination = framebuffer?.getColorAttachment<Texture2D>(0) ?? null;
+  new CopyBlitter().blit(source, destination, fetchSampler('clamp_nearest_nomip'));
+}
+
 /** @internal */
 function renderMainLightPass(
   frame: FrameState,
@@ -1292,11 +1298,7 @@ function renderMainLightPass(
       ctx.compositor = compositor;
     }
     ctx.sceneColorTexture = sceneColorCopyTex;
-    new CopyBlitter().blit(
-      ctx.sceneColorTexture,
-      device.getFramebuffer() ?? null,
-      fetchSampler('clamp_nearest_nomip')
-    );
+    blitToCurrentColorAttachment(ctx, ctx.sceneColorTexture);
     _scenePass.transmission = true;
     _scenePass.clearColor = null;
     _scenePass.clearDepth = null;

@@ -11,6 +11,9 @@ import {
 } from '../../../libs/scene/src/render/rendergraph/forward_plus_builder';
 
 function createMockDrawContext(overrides: Record<string, unknown> = {}) {
+  const { camera: cameraOverrides, ...restOverrides } = overrides as {
+    camera?: Record<string, unknown>;
+  } & Record<string, unknown>;
   return {
     device: {
       type: 'webgpu',
@@ -26,7 +29,13 @@ function createMockDrawContext(overrides: Record<string, unknown> = {}) {
     renderWidth: 1920,
     renderHeight: 1080,
     finalFramebuffer: null,
-    ...overrides
+    camera: {
+      sssStrength: 1,
+      sssBlurScale: 1,
+      sssTransmissionStrength: 1,
+      ...cameraOverrides
+    },
+    ...restOverrides
   } as any;
 }
 
