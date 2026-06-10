@@ -41,7 +41,8 @@ import {
   PBRBluePrintMaterial,
   PBRMetallicRoughnessMaterial,
   SpriteBlueprintMaterial,
-  TextureSampleNode
+  TextureSampleNode,
+  VertexColorNode
 } from '@zephyr3d/scene';
 import { exportFile, exportMultipleFilesAsZip, exportMultipleFilesToDirectory } from '../helpers/downloader';
 import { matchesMimeType } from '../helpers/mimematch';
@@ -711,7 +712,44 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     node.filterMag = normalizeFilter(sampler?.magFilter, 'linear');
     node.filterMip = normalizeFilter(sampler?.mipFilter, 'nearest');
   }
-  private async createPBRBlueprintFragmentState(material: PBRMetallicRoughnessMaterial) {
+  private shouldExplicitizeVertexColor(sourcePath: string, material: PBRMetallicRoughnessMaterial) {
+    if (!(material as PBRMetallicRoughnessMaterial & { vertexColor?: boolean }).vertexColor) {
+      return false;
+    }
+    const controller = this._options.editor?.moduleManager.currentModule?.controller;
+    const scene = (controller as { model?: { scene?: { rootNode?: { iterate?: (fn: (node: any) => boolean | void) => boolean } } } })
+      ?.model?.scene;
+    const rootNode = scene?.rootNode;
+    if (!rootNode?.iterate) {
+      return false;
+    }
+    const normalizedPath = sourcePath.toLowerCase();
+    let matchedMeshCount = 0;
+    let hasMissingDiffuseStream = false;
+    rootNode.iterate((node) => {
+      if (!node?.isMesh?.()) {
+        return false;
+      }
+      const meshMaterial = node.material?.coreMaterial ?? node.material ?? null;
+      const materialAssetId = (getEngine().resourceManager.getAssetId(meshMaterial) ?? '').toLowerCase();
+      if (materialAssetId !== normalizedPath) {
+        return false;
+      }
+      matchedMeshCount++;
+      if (!node.primitive?.getVertexBuffer?.('diffuse')) {
+        hasMissingDiffuseStream = true;
+        return true;
+      }
+      return false;
+    });
+    return matchedMeshCount > 0 && !hasMissingDiffuseStream;
+  }
+  private async createPBRBlueprintFragmentState(
+    material: PBRMetallicRoughnessMaterial,
+    options?: {
+      explicitVertexColor?: boolean;
+    }
+  ) {
     let nextId = 1;
     const nodes: BlueprintNodeState[] = [];
     const links: BlueprintLinkState[] = [];
@@ -858,6 +896,14 @@ export class VFSRenderer extends makeObservable(Disposable)<{
         { nodeId: albedoTexNodeId, slotId: 1 },
         [470, -120]
         ),
+        slotId: 1
+      };
+    }
+    if (options?.explicitVertexColor) {
+      const vertexColorNodeId = nextId++;
+      nodes.push(await this.serializeBlueprintNode(vertexColorNodeId, new VertexColorNode(), [690, -120]));
+      baseColorSource = {
+        nodeId: await addMulNode(baseColorSource, { nodeId: vertexColorNodeId, slotId: 1 }, [910, -120]),
         slotId: 1
       };
     }
@@ -1716,7 +1762,10 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     blueprintMaterialPBR.emissiveTexture = null;
     blueprintMaterialPBR.normalTexture = null;
     blueprintMaterialPBR.occlusionTexture = null;
-    const fragmentState = await this.createPBRBlueprintFragmentState(material);
+    const explicitVertexColor = this.shouldExplicitizeVertexColor(sourcePath, material);
+    const fragmentState = await this.createPBRBlueprintFragmentState(material, {
+      explicitVertexColor
+    });
     const blueprintContent = {
       type: 'PBRMaterial',
       state: {
