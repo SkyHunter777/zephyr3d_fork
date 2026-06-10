@@ -35,12 +35,12 @@ import {
   CompSubNode,
   ConstantScalarNode,
   ConstantVec3Node,
-  ConstantVec4Node,
   getEngine,
   PBRBlockNode,
   PBRBluePrintMaterial,
   PBRMetallicRoughnessMaterial,
   SpriteBlueprintMaterial,
+  SwizzleNode,
   TextureSampleNode,
   VertexColorNode
 } from '@zephyr3d/scene';
@@ -806,23 +806,17 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       }
       return nodeId;
     };
-    const addVec4Node = async (
-      x: number,
-      y: number,
-      z: number,
-      w: number,
+    const addSwizzleNode = async (
+      input: { nodeId: number; slotId?: number },
+      swizzle: string,
       position: [number, number],
-      targetSlotId: number | null = null,
-      uniformName?: string | null
+      targetSlotId: number | null = null
     ) => {
       const nodeId = nextId++;
-      const node = new ConstantVec4Node();
-      node.x = x;
-      node.y = y;
-      node.z = z;
-      node.w = w;
-      setUniformName(node, uniformName);
+      const node = new SwizzleNode();
+      node.swizzle = swizzle;
       nodes.push(await this.serializeBlueprintNode(nodeId, node, position));
+      addLink(input.nodeId, input.slotId ?? 1, nodeId, 1);
       if (targetSlotId !== null) {
         connectRoot({ nodeId }, targetSlotId);
       }
@@ -888,15 +882,16 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       return nodeId;
     };
     const isVec3 = (x: number, y: number, z: number, value: number) => x === value && y === value && z === value;
-    const baseColorConstNodeId = await addVec4Node(
+    const baseColorConstNodeId = await addVec3Node(
       material.albedoColor.x,
       material.albedoColor.y,
       material.albedoColor.z,
-      material.albedoColor.w,
       [40, -120],
       null,
       'AlbedoColor'
     );
+    let opacitySource: { nodeId: number; slotId?: number } | null =
+      material.albedoColor.w !== 1 ? { nodeId: await addScalarNode(material.albedoColor.w, [40, -20]) } : null;
     let baseColorSource: { nodeId: number; slotId?: number } = { nodeId: baseColorConstNodeId, slotId: 1 };
     if (material.albedoTexture) {
       const albedoTexNodeId = await addTextureNode(material.albedoTexture, {
@@ -908,22 +903,43 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       });
       baseColorSource = {
         nodeId: await addMulNode(
-        { nodeId: baseColorConstNodeId, slotId: 1 },
-        { nodeId: albedoTexNodeId, slotId: 1 },
-        [470, -120]
+          { nodeId: baseColorConstNodeId, slotId: 1 },
+          { nodeId: albedoTexNodeId, slotId: 6 },
+          [470, -120]
         ),
         slotId: 1
       };
+      const textureAlphaSource = { nodeId: albedoTexNodeId, slotId: 5 };
+      opacitySource = opacitySource
+        ? {
+            nodeId: await addMulNode(opacitySource, textureAlphaSource, [470, -20]),
+            slotId: 1
+          }
+        : textureAlphaSource;
     }
     if (options?.explicitVertexColor) {
       const vertexColorNodeId = nextId++;
       nodes.push(await this.serializeBlueprintNode(vertexColorNodeId, new VertexColorNode(), [690, -120]));
       baseColorSource = {
-        nodeId: await addMulNode(baseColorSource, { nodeId: vertexColorNodeId, slotId: 1 }, [910, -120]),
+        nodeId: await addMulNode(
+          baseColorSource,
+          { nodeId: await addSwizzleNode({ nodeId: vertexColorNodeId, slotId: 1 }, 'rgb', [690, -60]), slotId: 1 },
+          [910, -120]
+        ),
         slotId: 1
       };
+      const vertexAlphaSource = { nodeId: await addSwizzleNode({ nodeId: vertexColorNodeId, slotId: 1 }, 'a', [690, 0]) };
+      opacitySource = opacitySource
+        ? {
+            nodeId: await addMulNode(opacitySource, vertexAlphaSource, [910, -20]),
+            slotId: 1
+          }
+        : vertexAlphaSource;
     }
     connectRoot(baseColorSource, 1);
+    if (opacitySource) {
+      connectRoot(opacitySource, 8);
+    }
     const metallicRoughnessTextureNodeId = material.metallicRoughnessTexture
       ? await addTextureNode(material.metallicRoughnessTexture, {
           sRGB: false,
