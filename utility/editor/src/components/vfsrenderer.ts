@@ -766,6 +766,16 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     const connectRoot = (source: { nodeId: number; slotId?: number }, targetSlotId: number) => {
       addLink(source.nodeId, source.slotId ?? 1, rootId, targetSlotId);
     };
+    const setUniformName = (
+      node: { isUniform: boolean; paramName: string },
+      uniformName: string | null | undefined
+    ) => {
+      if (!uniformName) {
+        return;
+      }
+      node.isUniform = true;
+      node.paramName = uniformName.startsWith('u_') ? uniformName : `u_${uniformName}`;
+    };
     const addScalarNode = async (value: number, position: [number, number], targetSlotId: number | null = null) => {
       const nodeId = nextId++;
       const node = new ConstantScalarNode();
@@ -781,13 +791,15 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       y: number,
       z: number,
       position: [number, number],
-      targetSlotId: number | null = null
+      targetSlotId: number | null = null,
+      uniformName?: string | null
     ) => {
       const nodeId = nextId++;
       const node = new ConstantVec3Node();
       node.x = x;
       node.y = y;
       node.z = z;
+      setUniformName(node, uniformName);
       nodes.push(await this.serializeBlueprintNode(nodeId, node, position));
       if (targetSlotId !== null) {
         connectRoot({ nodeId }, targetSlotId);
@@ -800,7 +812,8 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       z: number,
       w: number,
       position: [number, number],
-      targetSlotId: number | null = null
+      targetSlotId: number | null = null,
+      uniformName?: string | null
     ) => {
       const nodeId = nextId++;
       const node = new ConstantVec4Node();
@@ -808,6 +821,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       node.y = y;
       node.z = z;
       node.w = w;
+      setUniformName(node, uniformName);
       nodes.push(await this.serializeBlueprintNode(nodeId, node, position));
       if (targetSlotId !== null) {
         connectRoot({ nodeId }, targetSlotId);
@@ -879,7 +893,9 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       material.albedoColor.y,
       material.albedoColor.z,
       material.albedoColor.w,
-      [40, -120]
+      [40, -120],
+      null,
+      'AlbedoColor'
     );
     let baseColorSource: { nodeId: number; slotId?: number } = { nodeId: baseColorConstNodeId, slotId: 1 };
     if (material.albedoTexture) {
@@ -967,7 +983,9 @@ export class VFSRenderer extends makeObservable(Disposable)<{
           material.specularFactor.x,
           material.specularFactor.y,
           material.specularFactor.z,
-          [20, 320]
+          [20, 320],
+          null,
+          'SpecularFactor'
         );
         connectRoot(
           {
@@ -988,7 +1006,8 @@ export class VFSRenderer extends makeObservable(Disposable)<{
         material.specularFactor.y,
         material.specularFactor.z,
         [20, 260],
-        4
+        4,
+        'SpecularFactor'
       );
     }
     const specularTextureNodeId = material.specularTexture
@@ -1031,7 +1050,9 @@ export class VFSRenderer extends makeObservable(Disposable)<{
               material.emissiveColor.x * material.emissiveStrength,
               material.emissiveColor.y * material.emissiveStrength,
               material.emissiveColor.z * material.emissiveStrength,
-              [300, -20]
+              [300, -20],
+              null,
+              'Emissive'
             )
           }
         : !isVec3(material.emissiveColor.x, material.emissiveColor.y, material.emissiveColor.z, 0)
@@ -1040,7 +1061,9 @@ export class VFSRenderer extends makeObservable(Disposable)<{
                 material.emissiveColor.x,
                 material.emissiveColor.y,
                 material.emissiveColor.z,
-                [300, -20]
+                [300, -20],
+                null,
+                'Emissive'
               )
             }
           : null;
