@@ -100,7 +100,12 @@ export class PBRMetallicRoughnessMaterial
     scope.$outputs.worldPos = pb.mul(worldMatrix, pb.vec4(scope.oPos, 1)).xyz;
     scope.$l.csPos = pb.mul(ShaderHelper.getViewProjectionMatrix(scope), pb.vec4(scope.$outputs.worldPos, 1));
     ShaderHelper.setClipSpacePosition(scope, scope.csPos);
-    if (this.transmission) {
+    const needsVolumeTransmissionRay =
+      this.transmission ||
+      (!!this._subsurfaceProfile &&
+        this.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT &&
+        !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_TRANSMISSION));
+    if (needsVolumeTransmissionRay) {
       scope.$outputs.screenUV = pb.add(pb.mul(pb.div(scope.csPos.xy, scope.csPos.w), 0.5), pb.vec2(0.5));
       scope.$outputs.modelScale = pb.vec3(
         pb.length(worldMatrix[0].xyz),

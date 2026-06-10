@@ -172,6 +172,41 @@ function getSurfaceTextureFormat(ctx: DrawContext): TextureFormat {
   return caps?.textureCaps.supportHalfFloatColorBuffer ? 'rgba16f' : 'rgba8unorm';
 }
 
+function getTextureFormatBytes(ctx: DrawContext, format: TextureFormat): number {
+  return ctx.device.getDeviceCaps().textureCaps.getTextureFormatInfo(format).size;
+}
+
+function shouldStoreSSSDiffuse(ctx: DrawContext): boolean {
+  return ctx.camera.sssStrength > 0 && ctx.camera.sssBlurScale > 0;
+}
+
+function shouldStoreSSSTransmission(ctx: DrawContext): boolean {
+  return ctx.camera.sssStrength > 0 && ctx.camera.sssTransmissionStrength > 0;
+}
+
+function getSSSLightingTextureFormat(
+  ctx: DrawContext,
+  attachmentCount: number,
+  includeSSRSurfaceMRT: boolean
+): TextureFormat {
+  const colorFormat = ctx.colorFormat!;
+  if (!includeSSRSurfaceMRT || attachmentCount === 0) {
+    return colorFormat;
+  }
+  const caps = ctx.device.getDeviceCaps();
+  const roughnessFormat = ctx.SSRRoughnessTexture?.format ?? colorFormat;
+  const normalFormat = ctx.SSRNormalTexture?.format ?? colorFormat;
+  const colorBytes =
+    getTextureFormatBytes(ctx, colorFormat) +
+    getTextureFormatBytes(ctx, roughnessFormat) +
+    getTextureFormatBytes(ctx, normalFormat);
+  const fullPrecisionBytes = colorBytes + getTextureFormatBytes(ctx, colorFormat) * attachmentCount;
+  if (fullPrecisionBytes <= caps.framebufferCaps.maxColorAttachmentBytesPerSample) {
+    return colorFormat;
+  }
+  return 'rgba8unorm';
+}
+
 function getFullMipLevelCount(width: number, height: number): number {
   return Math.max(1, Math.floor(Math.log2(Math.max(1, width, height))) + 1);
 }
@@ -668,11 +703,29 @@ function buildForwardPlusGraphInternal(
         builder.read(sssProfileResult.normalHandle);
       }
     }
-    const sssDiffuseHandle = options.sss
-      ? builder.createTexture({ format: ctx.colorFormat!, label: 'sssDiffuse' })
+    const includeSSRSurfaceMRT = !!options.ssr && !options.needSceneColor;
+    const writeSSSDiffuse = options.sss && shouldStoreSSSDiffuse(ctx);
+    let writeSSSTransmission = options.sss && shouldStoreSSSTransmission(ctx);
+    if (
+      writeSSSDiffuse &&
+      writeSSSTransmission &&
+      includeSSRSurfaceMRT &&
+      getSSSLightingTextureFormat(ctx, 2, includeSSRSurfaceMRT) !== ctx.colorFormat
+    ) {
+      writeSSSTransmission = false;
+    }
+    const sssLightingAttachmentCount =
+      (writeSSSDiffuse ? 1 : 0) + (writeSSSTransmission ? 1 : 0);
+    const sssLightingFormat = getSSSLightingTextureFormat(
+      ctx,
+      sssLightingAttachmentCount,
+      includeSSRSurfaceMRT
+    );
+    const sssDiffuseHandle = writeSSSDiffuse
+      ? builder.createTexture({ format: sssLightingFormat, label: 'sssDiffuse' })
       : undefined;
-    const sssTransmissionHandle = options.sss
-      ? builder.createTexture({ format: ctx.colorFormat!, label: 'sssTransmission' })
+    const sssTransmissionHandle = writeSSSTransmission
+      ? builder.createTexture({ format: sssLightingFormat, label: 'sssTransmission' })
       : undefined;
     const useFinalFramebufferAsIntermediate =
       !!depthPassResult.externalDepthAttachment &&
@@ -1161,11 +1214,25 @@ function renderMainLightPass(
   // Use RenderGraph-allocated scene color texture
   const depthTex = frame.depthFramebuffer?.getDepthAttachment() as Texture2D;
 
+  ctx.materialFlags &=
+    ~(
+      MaterialVaryingFlags.SSR_STORE_ROUGHNESS |
+      MaterialVaryingFlags.SSS_STORE_PROFILE |
+      MaterialVaryingFlags.SSS_STORE_DIFFUSE |
+      MaterialVaryingFlags.SSS_STORE_NORMAL |
+      MaterialVaryingFlags.SSS_STORE_TRANSMISSION
+    );
+
   if (ctx.SSR && !renderQueue.needSceneColor()) {
     ctx.materialFlags |= MaterialVaryingFlags.SSR_STORE_ROUGHNESS;
   }
   if (ctx.SSS) {
-    ctx.materialFlags |= MaterialVaryingFlags.SSS_STORE_DIFFUSE | MaterialVaryingFlags.SSS_STORE_TRANSMISSION;
+    if (ctx.SSSDiffuseTexture) {
+      ctx.materialFlags |= MaterialVaryingFlags.SSS_STORE_DIFFUSE;
+    }
+    if (ctx.SSSTransmissionTexture) {
+      ctx.materialFlags |= MaterialVaryingFlags.SSS_STORE_TRANSMISSION;
+    }
   }
 
   if (depthTex === ctx.finalFramebuffer?.getDepthAttachment()) {
