@@ -13,6 +13,7 @@ import {
   SpriteBlueprintMaterial,
   UnlitMaterial
 } from '../../../material';
+import type { PBRBlueprintOutputName } from '../../../material/pbrblueprint';
 import { defineProps, type PropertyAccessor, type SerializableClass } from '../types';
 import type { Nullable } from '@zephyr3d/base';
 import { Vector2, Vector3, Vector4 } from '@zephyr3d/base';
@@ -26,6 +27,12 @@ import type { PBRReflectionMode } from '../../../material/mixins/lightmodel/pbrm
 type PBRMaterial = PBRMetallicRoughnessMaterial | PBRSpecularGlossinessMaterial;
 type LitPropTypes = LambertMaterial | BlinnMaterial | PBRMaterial;
 type UnlitPropTypes = UnlitMaterial | LitPropTypes;
+
+function createBlueprintOutputHiddenPredicate(_outputs: readonly PBRBlueprintOutputName[]) {
+  return function (this: any) {
+    return this instanceof PBRBluePrintMaterial;
+  };
+}
 
 export function getSubsurfaceProfileClass(): SerializableClass {
   return {
@@ -289,11 +296,12 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
       set(this: PBRMaterial, value) {
         this.occlusionStrength = value.num[0];
       },
-      isValid() {
+      isHidden: createBlueprintOutputHiddenPredicate(['AO']),
+      isValid(this: PBRMaterial) {
         return !this.$isInstance && !!this.occlusionTexture;
       }
     },
-    ...getTextureProps<PBRMaterial>(manager, 'occlusionTexture', '2D', false, 0),
+    ...getTextureProps<PBRMaterial>(manager, 'occlusionTexture', '2D', false, 0, undefined, ['AO']),
     {
       name: 'EmissiveColor',
       description: 'Base self-illumination color emitted by the material',
@@ -309,6 +317,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
       set(this: PBRMaterial, value) {
         this.emissiveColor = new Vector3(value.num[0], value.num[1], value.num[2]);
       },
+      isHidden: createBlueprintOutputHiddenPredicate(['Emissive']),
       getDefaultValue(this: PBRMaterial) {
         return this.$isInstance ? this.coreMaterial.emissiveColor : [0, 0, 0];
       }
@@ -328,6 +337,7 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
       set(this: PBRMaterial, value) {
         this.emissiveStrength = value.num[0];
       },
+      isHidden: createBlueprintOutputHiddenPredicate(['Emissive']),
       getDefaultValue(this: PBRMaterial) {
         return this.$isInstance ? this.coreMaterial.emissiveStrength : 1;
       }
@@ -351,8 +361,10 @@ function getPBRCommonProps(manager: ResourceManager): PropertyAccessor<PBRMateri
         return this.$isInstance ? this.coreMaterial.rectSpecularScale : 1;
       }
     },
-    ...getTextureProps<PBRMaterial>(manager, 'emissiveTexture', '2D', true, 0),
-    ...getTextureProps<PBRMaterial>(manager, 'specularTexture', '2D', false, 0),
+    ...getTextureProps<PBRMaterial>(manager, 'emissiveTexture', '2D', true, 0, undefined, ['Emissive']),
+    ...getTextureProps<PBRMaterial>(manager, 'specularTexture', '2D', false, 0, undefined, [
+      'SpecularWeight'
+    ]),
     {
       name: 'Transmission',
       description: 'If true, enables light transmission through the material',
@@ -727,7 +739,8 @@ function getLitMaterialProps(manager: ResourceManager): PropertyAccessor<LitProp
       set(this: LitPropTypes, value) {
         this.vertexNormal = value.bool[0];
       },
-      isValid() {
+      isHidden: createBlueprintOutputHiddenPredicate(['Normal']),
+      isValid(this: LitPropTypes) {
         return !this.$isInstance;
       }
     },
@@ -742,11 +755,12 @@ function getLitMaterialProps(manager: ResourceManager): PropertyAccessor<LitProp
       set(this: LitPropTypes, value) {
         this.vertexTangent = value.bool[0];
       },
-      isValid() {
+      isHidden: createBlueprintOutputHiddenPredicate(['Tangent']),
+      isValid(this: LitPropTypes) {
         return !this.$isInstance && !!this.vertexNormal;
       }
     },
-    ...getTextureProps<LitPropTypes>(manager, 'normalTexture', '2D', false, 0)
+    ...getTextureProps<LitPropTypes>(manager, 'normalTexture', '2D', false, 0, undefined, ['Normal'])
   ]);
 }
 
@@ -763,7 +777,8 @@ function getUnlitMaterialProps(manager: ResourceManager): PropertyAccessor<Unlit
       set(this: UnlitPropTypes, value) {
         this.vertexColor = value.bool[0];
       },
-      isValid() {
+      isHidden: createBlueprintOutputHiddenPredicate(['BaseColor']),
+      isValid(this: UnlitPropTypes) {
         return !this.$isInstance;
       }
     },
@@ -784,11 +799,15 @@ function getUnlitMaterialProps(manager: ResourceManager): PropertyAccessor<Unlit
       set(this: UnlitPropTypes, value) {
         this.albedoColor = new Vector4(value.num[0], value.num[1], value.num[2], value.num[3]);
       },
+      isHidden: createBlueprintOutputHiddenPredicate(['BaseColor', 'Opacity']),
       getDefaultValue(this: UnlitPropTypes) {
         return this.$isInstance ? this.coreMaterial.albedoColor : [1, 1, 1, 1];
       }
     },
-    ...getTextureProps<UnlitPropTypes>(manager, 'albedoTexture', '2D', true, 0)
+    ...getTextureProps<UnlitPropTypes>(manager, 'albedoTexture', '2D', true, 0, undefined, [
+      'BaseColor',
+      'Opacity'
+    ])
   ]);
 }
 
@@ -936,6 +955,7 @@ export function getMeshMaterialClass(): SerializableClass[] {
             set(this: MeshMaterial, value) {
               this.opacity = value.num[0];
             },
+            isHidden: createBlueprintOutputHiddenPredicate(['Opacity']),
             getDefaultValue(this: MeshMaterial) {
               return this.$isInstance ? this.coreMaterial.opacity : 1;
             }
@@ -1259,6 +1279,7 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
             set(this: PBRMetallicRoughnessMaterial, value) {
               this.metallic = value.num[0];
             },
+            isHidden: createBlueprintOutputHiddenPredicate(['Metallic']),
             getDefaultValue(this: PBRMetallicRoughnessMaterial) {
               return this.$isInstance ? this.coreMaterial.metallic : 1;
             }
@@ -1278,6 +1299,7 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
             set(this: PBRMetallicRoughnessMaterial, value) {
               this.roughness = value.num[0];
             },
+            isHidden: createBlueprintOutputHiddenPredicate(['Roughness']),
             getDefaultValue(this: PBRMetallicRoughnessMaterial) {
               return this.$isInstance ? this.coreMaterial.roughness : 1;
             }
@@ -1298,6 +1320,7 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
             set(this: PBRMetallicRoughnessMaterial, value) {
               this.specularFactor = new Vector4(value.num[0], value.num[1], value.num[2], value.num[3]);
             },
+            isHidden: createBlueprintOutputHiddenPredicate(['Specular', 'SpecularWeight']),
             getDefaultValue(this: PBRMetallicRoughnessMaterial) {
               return this.$isInstance ? this.coreMaterial.specularFactor : [1, 1, 1, 1];
             }
@@ -1442,9 +1465,19 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
             'metallicRoughnessTexture',
             '2D',
             false,
-            0
+            0,
+            undefined,
+            ['Metallic', 'Roughness']
           ),
-          ...getTextureProps<PBRMetallicRoughnessMaterial>(manager, 'specularColorTexture', '2D', true, 0),
+          ...getTextureProps<PBRMetallicRoughnessMaterial>(
+            manager,
+            'specularColorTexture',
+            '2D',
+            true,
+            0,
+            undefined,
+            ['Specular']
+          ),
           ...getPBRCommonProps(manager)
         ]);
       }
