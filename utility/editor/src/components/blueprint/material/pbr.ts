@@ -750,6 +750,9 @@ export class PBRMaterialEditor extends GraphEditor {
   }
   protected onPropChanged(): void {
     this.graphChanged();
+    if (this.propEditor.currentObject === this._editMaterial.get()) {
+      this.propEditor.refresh();
+    }
   }
   protected onSelectionChanged(object: Nullable<IGraphNode>): void {
     if (!object) {
