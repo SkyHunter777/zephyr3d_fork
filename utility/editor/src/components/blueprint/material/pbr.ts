@@ -798,6 +798,9 @@ export class PBRMaterialEditor extends GraphEditor {
     const mat = this._editMaterial.get();
     if (mat instanceof PBRBluePrintMaterial || mat instanceof SpriteBlueprintMaterial) {
       this._irChanged = true;
+      if (this.propEditor.currentObject === mat) {
+        this.propEditor.refresh();
+      }
     }
   }
   private markDirty() {

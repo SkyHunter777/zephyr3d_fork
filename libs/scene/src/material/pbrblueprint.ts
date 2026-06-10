@@ -12,7 +12,7 @@ type BlueprintOutputMap = Partial<Record<PBRBlueprintOutputName, number | boolea
 type VertexBlueprintOutputName = 'Position' | 'Normal' | 'Tangent' | 'Color' | 'UV';
 type VertexBlueprintOutputMap = Partial<Record<VertexBlueprintOutputName, number | boolean | PBShaderExp>>;
 
-type PBRBlueprintOutputName =
+export type PBRBlueprintOutputName =
   | 'BaseColor'
   | 'Metallic'
   | 'Roughness'
@@ -176,6 +176,10 @@ export class PBRBluePrintMaterial
       this._uniformTextures = newUniforms;
       this.uniformChanged();
     }
+  }
+
+  hasConnectedOutput(name: PBRBlueprintOutputName) {
+    return this._connectedOutputs.has(name);
   }
 
   clone() {
