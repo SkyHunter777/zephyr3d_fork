@@ -82,6 +82,12 @@ export class NodeEditor extends Observable<{
   private pendingSingleSelectNodeId: number | null;
   private dragStartedOnThisClick: boolean;
   private mouseDownPosWorld: ImGui.ImVec2 | null;
+  private isBoxSelecting: boolean;
+  private boxSelectStartWorld: ImGui.ImVec2 | null;
+  private boxSelectCurrentWorld: ImGui.ImVec2 | null;
+  private boxSelectInitialSelection: number[];
+  private boxSelectAdditive: boolean;
+  private boxSelectStartedOnThisClick: boolean;
   private justOpened: boolean;
   private nodeSearchBuf: [string];
   private filteredCategory: NodeCategory[];
@@ -126,6 +132,12 @@ export class NodeEditor extends Observable<{
     this.pendingSingleSelectNodeId = null;
     this.dragStartedOnThisClick = false;
     this.mouseDownPosWorld = null;
+    this.isBoxSelecting = false;
+    this.boxSelectStartWorld = null;
+    this.boxSelectCurrentWorld = null;
+    this.boxSelectInitialSelection = [];
+    this.boxSelectAdditive = false;
+    this.boxSelectStartedOnThisClick = false;
     this.justOpened = true;
     this.nodeSearchBuf = [''];
     this.filteredCategory = [];
@@ -918,6 +930,58 @@ export class NodeEditor extends Observable<{
     return false;
   }
 
+  private setSelection(nodeIds: number[]) {
+    const uniqueNodeIds = [...new Set(nodeIds)].filter((id) => this.nodes.has(id));
+    const selectedIdSet = new Set(uniqueNodeIds);
+    this.selectedNodes = uniqueNodeIds;
+    this.nodes.forEach((node) => {
+      node.selected = selectedIdSet.has(node.id);
+    });
+  }
+
+  private updateBoxSelection() {
+    if (!this.boxSelectStartWorld || !this.boxSelectCurrentWorld) {
+      return;
+    }
+    const rectMin = new ImGui.ImVec2(
+      Math.min(this.boxSelectStartWorld.x, this.boxSelectCurrentWorld.x),
+      Math.min(this.boxSelectStartWorld.y, this.boxSelectCurrentWorld.y)
+    );
+    const rectMax = new ImGui.ImVec2(
+      Math.max(this.boxSelectStartWorld.x, this.boxSelectCurrentWorld.x),
+      Math.max(this.boxSelectStartWorld.y, this.boxSelectCurrentWorld.y)
+    );
+    const selected = this.boxSelectAdditive ? [...this.boxSelectInitialSelection] : [];
+    for (const node of this.nodes.values()) {
+      const nodeMin = node.position;
+      const nodeMax = new ImGui.ImVec2(node.position.x + node.size.x, node.position.y + node.size.y);
+      if (this.rectIntersects(rectMin, rectMax, nodeMin, nodeMax)) {
+        selected.push(node.id);
+      }
+    }
+    this.setSelection(selected);
+  }
+
+  private drawBoxSelection(drawList: ImGui.DrawList, canvasPos: ImGui.ImVec2) {
+    if (!this.isBoxSelecting || !this.boxSelectStartWorld || !this.boxSelectCurrentWorld) {
+      return;
+    }
+    const startCanvas = this.worldToCanvas(this.boxSelectStartWorld);
+    const currentCanvas = this.worldToCanvas(this.boxSelectCurrentWorld);
+    const min = new ImGui.ImVec2(
+      canvasPos.x + Math.min(startCanvas.x, currentCanvas.x),
+      canvasPos.y + Math.min(startCanvas.y, currentCanvas.y)
+    );
+    const max = new ImGui.ImVec2(
+      canvasPos.x + Math.max(startCanvas.x, currentCanvas.x),
+      canvasPos.y + Math.max(startCanvas.y, currentCanvas.y)
+    );
+    const fill = ImGui.ColorConvertFloat4ToU32(new ImGui.ImVec4(0.25, 0.5, 1.0, 0.18));
+    const border = ImGui.ColorConvertFloat4ToU32(new ImGui.ImVec4(0.45, 0.7, 1.0, 0.95));
+    drawList.AddRectFilled(min, max, fill);
+    drawList.AddRect(min, max, border, 0, 0, 1.5);
+  }
+
   private handleInput(canvasPos: ImGui.ImVec2, isCanvasHovered: boolean, isCanvasFocused: boolean) {
     const io = ImGui.GetIO();
     const mousePos = ImGui.GetMousePos();
@@ -925,7 +989,11 @@ export class NodeEditor extends Observable<{
     const worldMousePos = this.canvasToWorld(relativeMousePos);
 
     const canProcessThisFrame =
-      isCanvasHovered || this.isDraggingCanvas || this.draggingNode !== null || this.isCreatingLink;
+      isCanvasHovered ||
+      this.isDraggingCanvas ||
+      this.draggingNode !== null ||
+      this.isCreatingLink ||
+      this.isBoxSelecting;
 
     if (!canProcessThisFrame) {
       return;
@@ -1079,10 +1147,13 @@ export class NodeEditor extends Observable<{
             this.nodes.delete(nodeId);
             this.nodes.set(nodeId, nodeObj);
           } else {
-            this.selectedNodes = [];
-            this.nodes.forEach((n) => (n.selected = false));
-            this.isDraggingCanvas = true;
-
+            this.isBoxSelecting = true;
+            this.boxSelectStartWorld = new ImGui.ImVec2(worldMousePos.x, worldMousePos.y);
+            this.boxSelectCurrentWorld = new ImGui.ImVec2(worldMousePos.x, worldMousePos.y);
+            this.boxSelectInitialSelection = [...this.selectedNodes];
+            this.boxSelectAdditive = io.KeyCtrl;
+            this.boxSelectStartedOnThisClick = false;
+            this.mouseDownPosWorld = worldMousePos;
             if (!this.canvasContextClickLocal) {
               this.isCreatingLink = false;
               this.linkStartSlot = null;
@@ -1092,17 +1163,40 @@ export class NodeEditor extends Observable<{
       }
     }
 
-    if (ImGui.IsMouseDown(0)) {
-      /*
-      if (isCanvasHovered && !this.draggingNode && !this.isCreatingLink) {
-        this.isDraggingCanvas = this.isDraggingCanvas || true;
-      }
-      */
+    if (isCanvasHovered && ImGui.IsMouseClicked(ImGui.MouseButton.Middle)) {
+      this.isDraggingCanvas = true;
+    }
+
+    if (ImGui.IsMouseDown(ImGui.MouseButton.Middle)) {
       if (this.isDraggingCanvas) {
-        const mouseDelta = ImGui.GetMouseDragDelta(0);
+        const mouseDelta = ImGui.GetMouseDragDelta(ImGui.MouseButton.Middle);
         this.canvasOffset.x += mouseDelta.x / this.canvasScale;
         this.canvasOffset.y += mouseDelta.y / this.canvasScale;
-        ImGui.ResetMouseDragDelta(0);
+        ImGui.ResetMouseDragDelta(ImGui.MouseButton.Middle);
+      }
+    } else {
+      this.isDraggingCanvas = false;
+    }
+
+    if (ImGui.IsMouseDown(0)) {
+      if (this.isBoxSelecting) {
+        this.boxSelectCurrentWorld = new ImGui.ImVec2(worldMousePos.x, worldMousePos.y);
+        if (!this.boxSelectStartedOnThisClick && this.mouseDownPosWorld) {
+          const downScreen = new ImGui.ImVec2(
+            (this.mouseDownPosWorld.x + this.canvasOffset.x) * this.canvasScale + canvasPos.x,
+            (this.mouseDownPosWorld.y + this.canvasOffset.y) * this.canvasScale + canvasPos.y
+          );
+          const dx = mousePos.x - downScreen.x;
+          const dy = mousePos.y - downScreen.y;
+          const dist2 = dx * dx + dy * dy;
+          const startDragThresholdPx = 4;
+          if (dist2 >= startDragThresholdPx * startDragThresholdPx) {
+            this.boxSelectStartedOnThisClick = true;
+          }
+        }
+        if (this.boxSelectStartedOnThisClick) {
+          this.updateBoxSelection();
+        }
       } else if (this.draggingNode !== null) {
         if (!this.dragStartedOnThisClick && this.mouseDownPosWorld) {
           const downScreen = new ImGui.ImVec2(
@@ -1133,7 +1227,17 @@ export class NodeEditor extends Observable<{
         }
       }
     } else {
-      if (!this.dragStartedOnThisClick && this.pendingSingleSelectNodeId !== null) {
+      if (this.isBoxSelecting) {
+        if (!this.boxSelectStartedOnThisClick && !this.boxSelectAdditive) {
+          this.setSelection([]);
+        }
+        this.isBoxSelecting = false;
+        this.boxSelectStartWorld = null;
+        this.boxSelectCurrentWorld = null;
+        this.boxSelectInitialSelection = [];
+        this.boxSelectAdditive = false;
+        this.boxSelectStartedOnThisClick = false;
+      } else if (!this.dragStartedOnThisClick && this.pendingSingleSelectNodeId !== null) {
         const keepId = this.pendingSingleSelectNodeId;
         this.nodes.forEach((n) => (n.selected = false));
         this.selectedNodes = [keepId];
@@ -1144,7 +1248,6 @@ export class NodeEditor extends Observable<{
       }
 
       this.draggingNode = null;
-      this.isDraggingCanvas = false;
       this.dragOffsetsForSelection.clear();
       this.pendingSingleSelectNodeId = null;
       this.dragStartedOnThisClick = false;
@@ -1353,6 +1456,12 @@ export class NodeEditor extends Observable<{
     this.pendingSingleSelectNodeId = null;
     this.dragStartedOnThisClick = false;
     this.mouseDownPosWorld = null;
+    this.isBoxSelecting = false;
+    this.boxSelectStartWorld = null;
+    this.boxSelectCurrentWorld = null;
+    this.boxSelectInitialSelection = [];
+    this.boxSelectAdditive = false;
+    this.boxSelectStartedOnThisClick = false;
   }
 
   public render() {
@@ -1444,6 +1553,7 @@ export class NodeEditor extends Observable<{
         }
       }
     }
+    this.drawBoxSelection(drawList, canvasPos);
     drawList.PopClipRect();
 
     ImGui.SetCursorScreenPos(canvasPos);
