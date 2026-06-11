@@ -594,6 +594,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   private _reloadingFileSystem = false;
   private _vfsBatchDepth = 0;
   private _vfsBatchReloadPending = false;
+  private _selectedDirPath: string | null = null;
   private readonly _options: VFSRendererOptions = null;
 
   constructor(vfs: VFS, fileFilter: string[] = [], treePanelWidth = 200, options?: VFSRendererOptions) {
@@ -2263,16 +2264,20 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   }
 
   async loadFileSystem() {
+    const previousSelectedDirPath =
+      this._selectedDirPath ??
+      (this.selectedDir ? this._vfs.normalizePath(this.selectedDir.path) : this._options.rootDir);
     const rootDir = await this.loadDirectoryInfo(this._options.rootDir, 1);
     this._filesystem = rootDir;
     this._forceNavRefresh = true;
 
-    if (this.selectedDir) {
-      const newSelectedDir = this.findDirectoryByPath(this._filesystem, this.selectedDir.path);
-      this._nav.selectNode(newSelectedDir ?? null);
-    } else {
-      this._nav.selectNode(this._filesystem);
+    let selectedDir: DirectoryInfo | null = this._filesystem;
+    if (previousSelectedDirPath) {
+      await this.ensureDirectoryChainLoaded(previousSelectedDirPath);
+      selectedDir = this.findDirectoryByPath(this._filesystem, previousSelectedDirPath) ?? this._filesystem;
     }
+    this._nav.selectNode(selectedDir);
+    this._selectedDirPath = this._vfs.normalizePath(selectedDir?.path ?? this._options.rootDir);
     if (this._pendingRevealAssetPath) {
       const path = this._pendingRevealAssetPath;
       this._pendingRevealAssetPath = null;
@@ -2619,6 +2624,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
   }
 
   emitSelectedChanged() {
+    this._selectedDirPath = this.selectedDir ? this._vfs.normalizePath(this.selectedDir.path) : null;
     this.dispatchEvent('selection_changed', this.selectedDir ?? null, this.selectedFiles, [
       ...this.selectedItems
     ]);
