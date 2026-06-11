@@ -17,27 +17,25 @@ export abstract class Command<T = void> {
 export class CommandManager {
   private _undoStack: Command<any>[];
   private _current: number;
-  private _executing: boolean;
+  private _pending: Promise<void>;
   constructor() {
     this._undoStack = [];
     this._current = 0;
-    this._executing = false;
+    this._pending = Promise.resolve();
   }
   clear() {
     this._undoStack = [];
     this._current = 0;
+    this._pending = Promise.resolve();
   }
   async execute<T>(command: Command<T>): Promise<T> {
-    if (!this._executing) {
-      this._executing = true;
+    return this.enqueue(async () => {
       const result = await command.execute();
       this._undoStack.splice(this._current);
       this._undoStack.push(command);
       this._current++;
-      this._executing = false;
       return result;
-    }
-    return null;
+    });
   }
   getUndoCommand(): Command {
     return this._current > 0 ? this._undoStack[this._current - 1] : null;
@@ -46,18 +44,32 @@ export class CommandManager {
     return this._current < this._undoStack.length ? this._undoStack[this._current] : null;
   }
   async undo() {
-    if (!this._executing && this._current > 0) {
-      this._executing = true;
+    return this.enqueue(async () => {
+      if (this._current <= 0) {
+        return;
+      }
       await this._undoStack[--this._current].undo();
-      this._executing = false;
-    }
+    });
   }
   async redo() {
-    if (!this._executing && this._current < this._undoStack.length) {
-      this._executing = true;
+    return this.enqueue(async () => {
+      if (this._current >= this._undoStack.length) {
+        return;
+      }
       await this._undoStack[this._current++].execute();
-      this._executing = false;
-    }
+    });
+  }
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+    let run: Promise<T> | null = null;
+    const next = this._pending.then(() => {
+      run = task();
+      return run.then(
+        () => undefined,
+        () => undefined
+      );
+    });
+    this._pending = next;
+    return next.then(() => run!);
   }
 }
 
