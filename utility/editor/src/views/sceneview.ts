@@ -1566,6 +1566,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     eventBus.on('workspace_drag_end', this.handleWorkspaceDragEnd, this);
     eventBus.on('workspace_dragging', this.handleWorkspaceDragging, this);
     eventBus.on('workspace_drag_drop', this.handleWorkspaceDragDrop, this);
+    eventBus.on('assets_deleting', this.handleAssetsDeleting, this);
     eventBus.on('edit_material', this.editMaterial, this);
     eventBus.on('edit_material_function', this.editMaterialFunction, this);
     this.reset();
@@ -1597,6 +1598,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     eventBus.off('workspace_drag_end', this.handleWorkspaceDragEnd, this);
     eventBus.off('workspace_dragging', this.handleWorkspaceDragging, this);
     eventBus.off('workspace_drag_drop', this.handleWorkspaceDragDrop, this);
+    eventBus.off('assets_deleting', this.handleAssetsDeleting, this);
     eventBus.off('edit_material', this.editMaterial, this);
     eventBus.off('edit_material_function', this.editMaterialFunction, this);
     this.endEditAll();
@@ -2651,6 +2653,63 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   private handleNodeDeselected(_node: SceneNode) {}
   private handleAssetSelectionChanged() {
     this._lastDuplicateTarget = 'asset';
+  }
+  private handleAssetsDeleting(paths: string[]) {
+    const scene = this.controller.model.scene;
+    if (!scene || !paths?.length) {
+      return;
+    }
+    const normalizedPaths = paths.map((path) => ProjectService.VFS.normalizePath(path)).filter(Boolean);
+    if (normalizedPaths.length === 0) {
+      return;
+    }
+    const matchedNodes: SceneNode[] = [];
+    scene.rootNode.iterateBottomToTop((node) => {
+      if (node === scene.rootNode) {
+        return false;
+      }
+      const prefabNode = node.getPrefabNode();
+      const prefabPath = prefabNode?.prefabId?.startsWith('/')
+        ? ProjectService.VFS.normalizePath(prefabNode.prefabId)
+        : '';
+      const assetId = getEngine().resourceManager.getAssetId(node);
+      const assetPath =
+        typeof assetId === 'string' && assetId.startsWith('/') ? ProjectService.VFS.normalizePath(assetId) : '';
+      const matched = normalizedPaths.some(
+        (path) =>
+          prefabPath === path ||
+          assetPath === path ||
+          (ProjectService.VFS.isParentOf(path, prefabPath) && prefabPath !== path) ||
+          (ProjectService.VFS.isParentOf(path, assetPath) && assetPath !== path)
+      );
+      if (matched) {
+        matchedNodes.push(node);
+      }
+      return false;
+    });
+    const removedNodes = matchedNodes.filter(
+      (node) => !matchedNodes.some((other) => other !== node && other.isParentOf(node))
+    );
+    if (removedNodes.length > 0) {
+      for (const node of removedNodes) {
+        node.remove();
+      }
+      this._sceneHierarchy?.refreshStructure();
+      if (
+        this._propGrid.object instanceof SceneNode &&
+        removedNodes.some((node) => node.isParentOf(this._propGrid.object))
+      ) {
+        this._propGrid.object = scene;
+      }
+      if (removedNodes.some((node) => node.isParentOf(this._postGizmoRenderer?.node))) {
+        this._postGizmoRenderer!.node = null;
+      }
+      const selectedNodes = this.getSelectedSceneNodes();
+      if (removedNodes.some((node) => selectedNodes.some((selected) => node.isParentOf(selected)))) {
+        this._sceneHierarchy?.selectNode(null);
+      }
+      eventBus.dispatchEvent('scene_changed');
+    }
   }
   private handleDuplicateShortcut(): boolean {
     const selectedNodes = this.getSelectedSceneNodes();
