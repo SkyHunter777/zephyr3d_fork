@@ -1245,6 +1245,8 @@ export class VFSRenderer extends makeObservable(Disposable)<{
     }
 
     const items = Array.from(this.selectedItems);
+    const deletedPaths = items.map((item) => ('subDir' in item ? item.path : item.meta.path));
+    eventBus.dispatchEvent('assets_deleting', deletedPaths);
     const deletePromises = items.map((item) => {
       const isDir = 'subDir' in item;
       if (isDir) {
@@ -1256,7 +1258,6 @@ export class VFSRenderer extends makeObservable(Disposable)<{
 
     Promise.all(deletePromises)
       .then(() => {
-        const deletedPaths = items.map((item) => ('subDir' in item ? item.path : item.meta.path));
         this.removePathsFromFileSystem(deletedPaths);
         this._contentView.deselectAll();
         this.refreshFileView();
