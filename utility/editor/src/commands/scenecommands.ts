@@ -6,6 +6,12 @@ import { Command } from '../core/command';
 import type { Nullable, RequireOptionals } from '@zephyr3d/base';
 import { ASSERT, DRef, Matrix4x4, Quaternion, Vector3 } from '@zephyr3d/base';
 import type { TRS } from '../types';
+import {
+  ensureNodeDefaultName,
+  getDefaultNodeNameFromAssetPath,
+  getDefaultNodeNameFromCtor,
+  getDefaultShapeNodeName
+} from '../helpers/defaultnodename';
 
 export type CommandExecuteResult<T> = T extends AddAssetCommand ? SceneNode : void;
 
@@ -91,6 +97,7 @@ export class AddPrefabCommand extends Command<Nullable<SceneNode>> {
     if (prefab) {
       prefab.parent = this._scene.rootNode;
       prefab.position.set(this._position);
+      ensureNodeDefaultName(prefab, getDefaultNodeNameFromAssetPath(this._prefab));
       prefab.iterate((node) => {
         node.gpuPickable = true;
         return false;
@@ -147,6 +154,7 @@ export class AddAssetCommand extends Command<Nullable<SceneNode>> {
     if (asset) {
       asset.parent = this._scene.rootNode;
       asset.position.set(this._position);
+      ensureNodeDefaultName(asset, getDefaultNodeNameFromAssetPath(this._asset));
       asset.iterate((node) => {
         node.gpuPickable = true;
         return false;
@@ -179,13 +187,15 @@ export class AddChildCommand<T extends SceneNode = SceneNode> extends Command<Nu
   private readonly _scene: Scene;
   private _nodeId: string;
   private readonly _ctor: { new (scene: Scene): T };
-  constructor(parentNode: SceneNode, ctor: { new (scene: Scene): T }, position?: Vector3) {
+  private readonly _name: string;
+  constructor(parentNode: SceneNode, ctor: { new (scene: Scene): T }, position?: Vector3, name?: string) {
     super('Add child node');
     this._scene = parentNode.scene!;
     this._parentId = getNodePath(parentNode);
     this._nodeId = '';
     this._ctor = ctor;
     this._position = position ?? null;
+    this._name = name?.trim() ?? '';
   }
   async execute() {
     const parent = findNodeByPath(this._scene.rootNode, this._parentId);
@@ -198,6 +208,11 @@ export class AddChildCommand<T extends SceneNode = SceneNode> extends Command<Nu
     node.parent = parent;
     if (this._position) {
       node.position.set(this._position);
+    }
+    if (this._name) {
+      node.name = this._name;
+    } else {
+      ensureNodeDefaultName(node, getDefaultNodeNameFromCtor(this._ctor));
     }
     if (this._nodeId) {
       node.persistentId = this._nodeId.split('/').at(-1)!;
@@ -284,6 +299,8 @@ export class AddShapeCommand extends Command<Mesh> {
     mesh.parent = parent;
     if (this._name) {
       mesh.name = this._name;
+    } else {
+      ensureNodeDefaultName(mesh, getDefaultShapeNodeName(this._shapeCls));
     }
     mesh.position.set(this._position);
     if (this._scale) {
