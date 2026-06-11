@@ -69,6 +69,12 @@ import { NodeProxy } from '../helpers/proxy';
 import { clearScriptPropertyAccessorCache } from '../helpers/scriptprops';
 import { getMorphTargetGroupPropertyAccessors } from '../helpers/morphtargetprops';
 import { shapePrimitivePaths, type ShapePrimitiveType } from '../helpers/shapeprimitives';
+import {
+  ensureNodeDefaultName,
+  getDefaultNodeNameFromAssetPath,
+  getDefaultNodeNameFromCtor,
+  getDefaultShapeNodeName
+} from '../helpers/defaultnodename';
 import type { EditTool, EditToolContext } from './edittools/edittool';
 import { createEditTool, isObjectEditable } from './edittools/edittool';
 import { calcHierarchyBoundingBoxWorld } from '../helpers/misc';
@@ -2706,6 +2712,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     );
     const mesh = new Mesh(this.controller.model.scene, shape!, material!);
     mesh.gpuPickable = false;
+    ensureNodeDefaultName(mesh, getDefaultShapeNodeName(shapeCls));
     this._nodeToBePlaced.set(mesh);
     this._shapeToBeAdded = {
       cls: shapeCls
@@ -2723,6 +2730,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     const node = new ctor(this.controller.model.scene);
     node.parent = null;
     node.gpuPickable = false;
+    ensureNodeDefaultName(node, getDefaultNodeNameFromCtor(ctor));
     this._proxy!.createProxy(node);
     this._nodeToBePlaced.set(node);
     this._typeToBePlaced = 'node';
@@ -2741,6 +2749,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       .resourceManager.instantiatePrefab(this.controller.model.scene.rootNode, prefab)
       .then((node) => {
         node!.parent = null;
+        ensureNodeDefaultName(node, getDefaultNodeNameFromAssetPath(prefab));
         node!.iterate((node) => {
           node.gpuPickable = false;
         });
@@ -2765,6 +2774,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       .resourceManager.fetchModel(asset, this.controller.model.scene)
       .then((node) => {
         node.parent = null;
+        ensureNodeDefaultName(node, getDefaultNodeNameFromAssetPath(asset));
         node.iterate((node) => {
           node.gpuPickable = false;
         });
