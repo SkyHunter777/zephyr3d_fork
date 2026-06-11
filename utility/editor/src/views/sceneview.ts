@@ -2787,6 +2787,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     });
   }
   private handleNodeRemoved(node: SceneNode) {
+    this._sceneHierarchy?.refreshStructure();
     if (node.isParentOf(this._postGizmoRenderer!.node!)) {
       this._postGizmoRenderer!.node = null;
     }
@@ -2796,6 +2797,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     }
   }
   private handleNodeAttached(node: SceneNode) {
+    this._sceneHierarchy?.refreshStructure();
     queueMicrotask(() => {
       this.syncNodeProxyTree(node);
     });

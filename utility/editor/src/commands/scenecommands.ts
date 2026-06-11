@@ -39,6 +39,16 @@ function getNodePath(node: SceneNode) {
   return parts.join('/');
 }
 
+function waitForNextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve());
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
 export class CustomCommand<T> extends Command<T> {
   private readonly _execute: () => T | Promise<T>;
   private readonly _undo: () => void | Promise<void>;
@@ -285,8 +295,19 @@ export class NodeDeleteCommand extends Command {
   }
   async execute(): Promise<void> {
     const node = findNodeByPath(this._scene.rootNode, this._nodeId);
-    this._archive = await getEngine().resourceManager.serializeObject(node, null, null);
+    if (this._archive) {
+      node.remove();
+      return;
+    }
+    const parent = node.parent;
     node.remove();
+    try {
+      await waitForNextFrame();
+      this._archive = await getEngine().resourceManager.serializeObject(node, null, null);
+    } catch (err) {
+      node.parent = parent;
+      throw err;
+    }
   }
   async undo() {
     if (this._archive) {
