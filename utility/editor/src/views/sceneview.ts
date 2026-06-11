@@ -1311,19 +1311,17 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
             switch (this._typeToBePlaced) {
               case 'asset':
                 this._cmdManager
-                  .execute(new AddAssetCommand(this.controller.model.scene, this._assetToBeAdded!, pos))
+                  .execute(new AddAssetCommand(this.controller.model.scene, this._assetToBeAdded!, pos, placeNode))
                   .then((node) => {
                     this._sceneHierarchy!.selectNode(node);
-                    placeNode.parent = null;
                     eventBus.dispatchEvent('scene_changed');
                   });
                 break;
               case 'prefab':
                 this._cmdManager
-                  .execute(new AddPrefabCommand(this.controller.model.scene, this._assetToBeAdded!, pos))
+                  .execute(new AddPrefabCommand(this.controller.model.scene, this._assetToBeAdded!, pos, placeNode))
                   .then((node) => {
                     this._sceneHierarchy!.selectNode(node);
-                    placeNode.parent = null;
                     eventBus.dispatchEvent('scene_changed');
                   });
                 break;
@@ -2476,8 +2474,8 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       this._nodeToBePlaced.dispose();
       const command =
         this._typeToBePlaced === 'asset'
-          ? new AddAssetCommand(this.controller.model.scene, this._assetToBeAdded!, pos)
-          : new AddPrefabCommand(this.controller.model.scene, this._assetToBeAdded!, pos);
+          ? new AddAssetCommand(this.controller.model.scene, this._assetToBeAdded!, pos, placeNode)
+          : new AddPrefabCommand(this.controller.model.scene, this._assetToBeAdded!, pos, placeNode);
       this._cmdManager.execute(command).then((node) => {
         this._sceneHierarchy!.selectNode(node);
         eventBus.dispatchEvent('scene_changed');

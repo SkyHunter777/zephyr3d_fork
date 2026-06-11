@@ -4,7 +4,7 @@ import { ParticleSystem } from '@zephyr3d/scene';
 import { Mesh } from '@zephyr3d/scene';
 import { Command } from '../core/command';
 import type { Nullable, RequireOptionals } from '@zephyr3d/base';
-import { ASSERT, Matrix4x4, Quaternion, Vector3 } from '@zephyr3d/base';
+import { ASSERT, DRef, Matrix4x4, Quaternion, Vector3 } from '@zephyr3d/base';
 import type { TRS } from '../types';
 
 export type CommandExecuteResult<T> = T extends AddAssetCommand ? SceneNode : void;
@@ -70,31 +70,44 @@ export class AddPrefabCommand extends Command<Nullable<SceneNode>> {
   private readonly _prefab: string;
   private _nodeId: string;
   private readonly _position: Vector3;
-  constructor(scene: Scene, prefab: string, position: Vector3) {
+  private _previewNodeRef: Nullable<DRef<SceneNode>>;
+  constructor(scene: Scene, prefab: string, position: Vector3, previewNode?: Nullable<SceneNode>) {
     super('Add Prefab');
     this._scene = scene;
     this._nodeId = '';
     this._prefab = prefab;
     this._position = new Vector3(position);
+    this._previewNodeRef = previewNode ? new DRef(previewNode) : null;
   }
   async execute() {
-    let prefab: Nullable<SceneNode> = null;
-    try {
-      prefab = await getEngine().resourceManager.instantiatePrefab(this._scene.rootNode, this._prefab);
-    } catch (err) {
-      console.error(`Load prefab failed: ${this._prefab}: ${err}`);
+    let prefab: Nullable<SceneNode> = this._previewNodeRef?.get() ?? null;
+    if (!prefab) {
+      try {
+        prefab = await getEngine().resourceManager.instantiatePrefab(this._scene.rootNode, this._prefab);
+      } catch (err) {
+        console.error(`Load prefab failed: ${this._prefab}: ${err}`);
+      }
     }
     if (prefab) {
+      prefab.parent = this._scene.rootNode;
       prefab.position.set(this._position);
+      prefab.iterate((node) => {
+        node.gpuPickable = true;
+        return false;
+      });
       if (this._nodeId) {
         // Restore persistent id if redo
         prefab.persistentId = this._nodeId.split('/').at(-1)!;
       } else {
         this._nodeId = getNodePath(prefab);
       }
+      this._previewNodeRef?.dispose();
+      this._previewNodeRef = null;
       return prefab;
     } else {
       this._nodeId = '';
+      this._previewNodeRef?.dispose();
+      this._previewNodeRef = null;
       return null;
     }
   }
@@ -111,32 +124,45 @@ export class AddAssetCommand extends Command<Nullable<SceneNode>> {
   private readonly _asset: string;
   private _nodeId: string;
   private readonly _position: Vector3;
-  constructor(scene: Scene, asset: string, position: Vector3) {
+  private _previewNodeRef: Nullable<DRef<SceneNode>>;
+  constructor(scene: Scene, asset: string, position: Vector3, previewNode?: Nullable<SceneNode>) {
     super('Add asset');
     this._scene = scene;
     this._nodeId = '';
     this._asset = asset;
     this._position = new Vector3(position);
+    this._previewNodeRef = previewNode ? new DRef(previewNode) : null;
   }
   async execute() {
-    let asset: Nullable<SceneNode> = null;
-    try {
-      //const model = await importModel(this._asset);
-      //asset = await model.createSceneNode(ProjectService.resourceManager, this._scene, false);
-      asset = await getEngine().resourceManager.fetchModel(this._asset, this._scene);
-    } catch (err) {
-      console.error(`Load asset failed: ${this._asset}: ${err}`);
+    let asset: Nullable<SceneNode> = this._previewNodeRef?.get() ?? null;
+    if (!asset) {
+      try {
+        //const model = await importModel(this._asset);
+        //asset = await model.createSceneNode(ProjectService.resourceManager, this._scene, false);
+        asset = await getEngine().resourceManager.fetchModel(this._asset, this._scene);
+      } catch (err) {
+        console.error(`Load asset failed: ${this._asset}: ${err}`);
+      }
     }
     if (asset) {
+      asset.parent = this._scene.rootNode;
       asset.position.set(this._position);
+      asset.iterate((node) => {
+        node.gpuPickable = true;
+        return false;
+      });
       if (this._nodeId) {
         asset.persistentId = this._nodeId.split('/').at(-1)!;
       } else {
         this._nodeId = getNodePath(asset);
       }
+      this._previewNodeRef?.dispose();
+      this._previewNodeRef = null;
       return asset;
     } else {
       this._nodeId = '';
+      this._previewNodeRef?.dispose();
+      this._previewNodeRef = null;
       return null;
     }
   }
