@@ -5053,6 +5053,9 @@ export class Mesh extends MeshBase implements BatchDrawable {
     set skinBindingName(name: string);
     update(frameId: number, elapsedInSeconds: number, deltaInSeconds: number): void;
     updateMorphWeights(weight: number[]): void;
+    // (undocumented)
+    get useRenderBundle(): boolean;
+    set useRenderBundle(val: boolean);
 }
 
 // @public

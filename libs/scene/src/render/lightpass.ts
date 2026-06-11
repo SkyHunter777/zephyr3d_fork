@@ -307,5 +307,6 @@ export class LightPass extends RenderPass {
     if (tmpFramebuffer) {
       ctx.device.pool.releaseFrameBuffer(tmpFramebuffer);
     }
+    ctx.oit = null;
   }
 }

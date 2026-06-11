@@ -148,6 +148,12 @@ export class Mesh extends MeshBase implements BatchDrawable {
   setPickTarget(node: SceneNode, label?: string) {
     this._pickTarget = { node, label };
   }
+  get useRenderBundle() {
+    return this._useRenderBundle;
+  }
+  set useRenderBundle(val) {
+    this._useRenderBundle = val;
+  }
   get skeletonName() {
     return this._skinBindingName;
   }

@@ -22,6 +22,11 @@ import {
 
 export type MToonOutlineWidthMode = 'none' | 'worldCoordinates' | 'screenCoordinates';
 
+type RuntimeMaterialPassMethods = {
+  bind(device: DrawContext['device'], pass: number): boolean;
+  draw(primitive: Primitive, ctx: DrawContext, numInstances?: number): void;
+};
+
 const ToonMaterialBase = applyMaterialMixins(
   MeshMaterial,
   mixinAlbedoColor,
@@ -307,13 +312,30 @@ export class ToonMaterial extends ToonMaterialBase {
     if (pass > 0) {
       stateSet.useRasterizerState().cullMode = 'front';
       stateSet.defaultBlendingState();
-      stateSet.useDepthState().enableTest(true).enableWrite(false);
+      stateSet.useDepthState().enableTest(true).enableWrite(false).setCompareFunc('lt');
     } else if (this._transparentWithZWrite && this.isTransparentPass(pass, ctx)) {
       stateSet.useDepthState().enableTest(true).enableWrite(true);
     }
   }
+  draw(primitive: Primitive, ctx: DrawContext, numInstances = 0): void {
+    const material = this as unknown as RuntimeMaterialPassMethods;
+    if (this.numPasses > 1 && ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT && !ctx.lightBlending) {
+      // Draw the inflated hull first so the regular pass hides interior outline fragments.
+      material.bind(ctx.device, 1);
+      this.drawPrimitive(1, primitive, ctx, numInstances);
+      material.bind(ctx.device, 0);
+      this.drawPrimitive(0, primitive, ctx, numInstances);
+    } else {
+      (MeshMaterial.prototype as unknown as RuntimeMaterialPassMethods).draw.call(
+        this,
+        primitive,
+        ctx,
+        numInstances
+      );
+    }
+  }
   drawPrimitive(pass: number, primitive: Primitive, ctx: DrawContext, numInstances: number): void {
-    if (pass > 0 && ctx.renderPass!.type !== RENDER_PASS_TYPE_LIGHT) {
+    if (pass > 0 && (ctx.renderPass!.type !== RENDER_PASS_TYPE_LIGHT || ctx.lightBlending)) {
       return;
     }
     super.drawPrimitive(pass, primitive, ctx, numInstances);

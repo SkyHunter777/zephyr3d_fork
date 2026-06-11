@@ -127,6 +127,7 @@ myApp.ready().then(async function () {
     if (node.isMesh()) {
       toonMaterial.albedoTexture = (node.material as PBRMetallicRoughnessMaterial).albedoTexture;
       node.material = toonMaterial;
+      node.useRenderBundle = false;
     }
   });
   meshes.push({ node: toonMesh, material: toonMaterial, name: 'Cartoon' });

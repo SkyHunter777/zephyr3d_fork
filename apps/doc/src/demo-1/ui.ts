@@ -344,7 +344,7 @@ export class Panel {
         material.outlineWidthMode = value;
       });
     outline
-      .add(this._toonParams, 'outlineWidthFactor', 0, 0.05, 0.0005)
+      .add(this._toonParams, 'outlineWidthFactor', 0, 1, 0.0005)
       .name('Width factor')
       .onChange((value) => {
         material.outlineWidthFactor = value;
