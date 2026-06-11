@@ -151,6 +151,33 @@ describe('Forward+ render graph builder', () => {
     expect(passNames.indexOf('TransmissionDepthForSSR')).toBeLessThan(passNames.indexOf('LightPass'));
   });
 
+  test('isolates scene color copy depth when SSR pre-inserts transmission depth', () => {
+    const { graph } = buildForwardPlusGraphForTest(
+      createOptions({
+        needSceneColor: true,
+        ssr: true,
+        needsTransmissionDepthForSSR: true
+      })
+    );
+    const resourceNames = [...graph.resources.values()].map((resource) => resource.name);
+
+    expect(resourceNames).toContain('sceneColorCopy');
+    expect(resourceNames).not.toContain('SceneColorCopyFramebuffer');
+  });
+
+  test('reuses scene color copy depth when no SSR transmission depth prepass is needed', () => {
+    const { graph } = buildForwardPlusGraphForTest(
+      createOptions({
+        needSceneColor: true,
+        needsTransmissionDepthForSSR: false
+      })
+    );
+    const resourceNames = [...graph.resources.values()].map((resource) => resource.name);
+
+    expect(resourceNames).toContain('sceneColorCopy');
+    expect(resourceNames).toContain('SceneColorCopyFramebuffer');
+  });
+
   test('keeps TransmissionDepth after LightPass when SSR scene-color materials also need depth', () => {
     const passNames = compileForwardPlusPassNames(
       createOptions({

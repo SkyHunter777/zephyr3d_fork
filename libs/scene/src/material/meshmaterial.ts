@@ -727,7 +727,11 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
       !isObjectColorPass &&
       this.featureUsed<boolean>(FEATURE_ALPHATOCOVERAGE) &&
       !this.useTransparentShadowCaster(ctx, pass);
-    const ztestEq = ctx.queue === QUEUE_OPAQUE && !!ctx.depthTexture && !ctx.sceneColorTexture;
+    const ztestEq =
+      ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT &&
+      ctx.queue === QUEUE_OPAQUE &&
+      !!ctx.depthPrepassAttachment &&
+      !ctx.sceneColorTexture;
     if (blending || a2c) {
       const blendingState = stateSet.useBlendingState();
       if (blending) {

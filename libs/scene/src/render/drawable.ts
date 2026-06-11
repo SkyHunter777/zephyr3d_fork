@@ -94,6 +94,8 @@ export interface DrawContext {
   depthTexture?: Texture2D;
   /** Linearized depth texture bound for sampling. */
   linearDepthTexture?: Texture2D;
+  /** Depth attachment populated by the scene depth prepass, when current target reuses it. */
+  depthPrepassAttachment?: Texture2D;
   /** Scene color texture bound for sampling (previous pass or resolved color). */
   sceneColorTexture?: Texture2D;
   /** Default depth buffer format for targets created in this pass. */
