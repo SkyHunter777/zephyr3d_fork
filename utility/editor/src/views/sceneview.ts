@@ -163,6 +163,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   private _springBoneColliderGizmo: ShapeGizmo;
   private _springBone: JointDynamicsModifier;
   private _propGridScrollTopFrames: number;
+  private _assetPlacementLoadingCount: number;
   constructor(controller: SceneController) {
     super(controller);
     this._cmdManager = new CommandManager();
@@ -189,6 +190,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     this._springBoneColliderGizmo = null;
     this._springBone = null;
     this._propGridScrollTopFrames = 0;
+    this._assetPlacementLoadingCount = 0;
     this._currentEditTool = new DRef();
     this._cameraAnimationEyeFrom = new Vector3();
     this._cameraAnimationTargetFrom = new Vector3();
@@ -268,6 +270,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   }
   get cmdManager() {
     return this._cmdManager;
+  }
+  get busy() {
+    return this._cmdManager.busy || this._assetPlacementLoadingCount > 0;
   }
   get editToolContext() {
     return this._editToolContext;
@@ -2711,6 +2716,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       this._nodeToBePlaced.dispose();
       this._typeToBePlaced = 'none';
     }
+    this._assetPlacementLoadingCount++;
     getEngine()
       .resourceManager.instantiatePrefab(this.controller.model.scene.rootNode, prefab)
       .then((node) => {
@@ -2722,6 +2728,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
         this._assetToBeAdded = prefab;
         this._typeToBePlaced = 'prefab';
         this._ctorToBePlaced = null;
+      })
+      .finally(() => {
+        this._assetPlacementLoadingCount = Math.max(0, this._assetPlacementLoadingCount - 1);
       });
   }
   private handleAddAsset(asset: string) {
@@ -2731,6 +2740,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       this._nodeToBePlaced.dispose();
       this._typeToBePlaced = 'none';
     }
+    this._assetPlacementLoadingCount++;
     getEngine()
       .resourceManager.fetchModel(asset, this.controller.model.scene)
       .then((node) => {
@@ -2745,6 +2755,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       })
       .catch((err) => {
         Dialog.messageBox('Error', `${err}`);
+      })
+      .finally(() => {
+        this._assetPlacementLoadingCount = Math.max(0, this._assetPlacementLoadingCount - 1);
       });
   }
   private handleAddChild(parent: SceneNode, ctor: { new (scene: Scene): SceneNode }) {

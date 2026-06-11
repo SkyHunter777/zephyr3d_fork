@@ -18,15 +18,21 @@ export class CommandManager {
   private _undoStack: Command<any>[];
   private _current: number;
   private _pending: Promise<void>;
+  private _activeTaskCount: number;
   constructor() {
     this._undoStack = [];
     this._current = 0;
     this._pending = Promise.resolve();
+    this._activeTaskCount = 0;
   }
   clear() {
     this._undoStack = [];
     this._current = 0;
     this._pending = Promise.resolve();
+    this._activeTaskCount = 0;
+  }
+  get busy() {
+    return this._activeTaskCount > 0;
   }
   async execute<T>(command: Command<T>): Promise<T> {
     return this.enqueue(async () => {
@@ -62,7 +68,10 @@ export class CommandManager {
   private enqueue<T>(task: () => Promise<T>): Promise<T> {
     let run: Promise<T> | null = null;
     const next = this._pending.then(() => {
-      run = task();
+      this._activeTaskCount++;
+      run = task().finally(() => {
+        this._activeTaskCount = Math.max(0, this._activeTaskCount - 1);
+      });
       return run.then(
         () => undefined,
         () => undefined
