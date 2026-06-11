@@ -6,7 +6,7 @@ import type { ParallaxMappingMode } from './materials/parallax';
 import { ParallaxMapMaterial } from './materials/parallax';
 import { WoodMaterial } from './materials/wood';
 import { AABB, Vector3 } from '@zephyr3d/base';
-import { ToonMaterial } from './materials/toon';
+import { ToonMaterial, type MToonOutlineWidthMode } from './materials/toon';
 
 interface GUIParams {
   deviceType: string;
@@ -36,8 +36,27 @@ interface WoodParams {
 }
 
 interface ToonParams {
-  bands: number;
-  edgeThickness: number;
+  shadeColorFactor: string;
+  shadingShiftFactor: number;
+  shadingShiftTextureScale: number;
+  shadingToonyFactor: number;
+  giEqualizationFactor: number;
+  matcapFactor: string;
+  parametricRimColorFactor: string;
+  parametricRimFresnelPowerFactor: number;
+  parametricRimLiftFactor: number;
+  rimLightingMixFactor: number;
+  outlineWidthMode: MToonOutlineWidthMode;
+  outlineWidthFactor: number;
+  outlineColorFactor: string;
+  outlineLightingMixFactor: number;
+  transparentWithZWrite: boolean;
+  renderQueueOffsetNumber: number;
+  uvAnimationScrollXSpeedFactor: number;
+  uvAnimationScrollYSpeedFactor: number;
+  uvAnimationRotationSpeedFactor: number;
+  emissiveColor: string;
+  emissiveStrength: number;
 }
 
 export class Panel {
@@ -133,6 +152,12 @@ export class Panel {
       return new Vector3(parseInt(rgb[0]) / 255, parseInt(rgb[1]) / 255, parseInt(rgb[2]) / 255);
     }
   }
+  rgb2css(color: { x: number; y: number; z: number }): string {
+    const r = Math.round(Math.min(Math.max(color.x, 0), 1) * 255);
+    const g = Math.round(Math.min(Math.max(color.y, 0), 1) * 255);
+    const b = Math.round(Math.min(Math.max(color.z, 0), 1) * 255);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
   editWoodMaterial(material: WoodMaterial) {
     this._woodParams = {
       distoredX: material.distored.x,
@@ -220,20 +245,169 @@ export class Panel {
   }
   editToonMaterial(material: ToonMaterial) {
     this._toonParams = {
-      bands: material.bands,
-      edgeThickness: material.edgeThickness
+      shadeColorFactor: this.rgb2css(material.shadeColorFactor),
+      shadingShiftFactor: material.shadingShiftFactor,
+      shadingShiftTextureScale: material.shadingShiftTextureScale,
+      shadingToonyFactor: material.shadingToonyFactor,
+      giEqualizationFactor: material.giEqualizationFactor,
+      matcapFactor: this.rgb2css(material.matcapFactor),
+      parametricRimColorFactor: this.rgb2css(material.parametricRimColorFactor),
+      parametricRimFresnelPowerFactor: material.parametricRimFresnelPowerFactor,
+      parametricRimLiftFactor: material.parametricRimLiftFactor,
+      rimLightingMixFactor: material.rimLightingMixFactor,
+      outlineWidthMode: material.outlineWidthMode,
+      outlineWidthFactor: material.outlineWidthFactor,
+      outlineColorFactor: this.rgb2css(material.outlineColorFactor),
+      outlineLightingMixFactor: material.outlineLightingMixFactor,
+      transparentWithZWrite: material.transparentWithZWrite,
+      renderQueueOffsetNumber: material.renderQueueOffsetNumber,
+      uvAnimationScrollXSpeedFactor: material.uvAnimationScrollXSpeedFactor,
+      uvAnimationScrollYSpeedFactor: material.uvAnimationScrollYSpeedFactor,
+      uvAnimationRotationSpeedFactor: material.uvAnimationRotationSpeedFactor,
+      emissiveColor: this.rgb2css(material.emissiveColor),
+      emissiveStrength: material.emissiveStrength
     };
-    this._materialGroup
-      .add(this._toonParams, 'bands', 1, 8, 1)
-      .name('Bands')
+
+    const shading = this._materialGroup.addFolder('MToon Shading');
+    shading
+      .addColor(this._toonParams, 'shadeColorFactor')
+      .name('Shade color')
       .onChange((value) => {
-        material.bands = value;
+        material.shadeColorFactor = this.css2rgb(value);
       });
-    this._materialGroup
-      .add(this._toonParams, 'edgeThickness', 0, 2, 0.005)
-      .name('Edge thickness')
+    shading
+      .add(this._toonParams, 'shadingShiftFactor', -1, 1, 0.01)
+      .name('Shading shift')
       .onChange((value) => {
-        material.edgeThickness = value;
+        material.shadingShiftFactor = value;
+      });
+    shading
+      .add(this._toonParams, 'shadingShiftTextureScale', -1, 1, 0.01)
+      .name('Shift tex scale')
+      .onChange((value) => {
+        material.shadingShiftTextureScale = value;
+      });
+    shading
+      .add(this._toonParams, 'shadingToonyFactor', 0, 0.99, 0.01)
+      .name('Shading toony')
+      .onChange((value) => {
+        material.shadingToonyFactor = value;
+      });
+    shading
+      .add(this._toonParams, 'giEqualizationFactor', 0, 1, 0.01)
+      .name('GI equalization')
+      .onChange((value) => {
+        material.giEqualizationFactor = value;
+      });
+
+    const rim = this._materialGroup.addFolder('MToon Rim');
+    rim
+      .addColor(this._toonParams, 'matcapFactor')
+      .name('MatCap factor')
+      .onChange((value) => {
+        material.matcapFactor = this.css2rgb(value);
+      });
+    rim
+      .addColor(this._toonParams, 'parametricRimColorFactor')
+      .name('Rim color')
+      .onChange((value) => {
+        material.parametricRimColorFactor = this.css2rgb(value);
+      });
+    rim
+      .add(this._toonParams, 'parametricRimFresnelPowerFactor', 0, 20, 0.1)
+      .name('Rim power')
+      .onChange((value) => {
+        material.parametricRimFresnelPowerFactor = value;
+      });
+    rim
+      .add(this._toonParams, 'parametricRimLiftFactor', -1, 1, 0.01)
+      .name('Rim lift')
+      .onChange((value) => {
+        material.parametricRimLiftFactor = value;
+      });
+    rim
+      .add(this._toonParams, 'rimLightingMixFactor', 0, 1, 0.01)
+      .name('Rim lighting mix')
+      .onChange((value) => {
+        material.rimLightingMixFactor = value;
+      });
+
+    const outline = this._materialGroup.addFolder('MToon Outline');
+    outline
+      .add(this._toonParams, 'outlineWidthMode', [
+        'none',
+        'worldCoordinates',
+        'screenCoordinates'
+      ] satisfies MToonOutlineWidthMode[])
+      .name('Width mode')
+      .onChange((value: MToonOutlineWidthMode) => {
+        material.outlineWidthMode = value;
+      });
+    outline
+      .add(this._toonParams, 'outlineWidthFactor', 0, 0.05, 0.0005)
+      .name('Width factor')
+      .onChange((value) => {
+        material.outlineWidthFactor = value;
+      });
+    outline
+      .addColor(this._toonParams, 'outlineColorFactor')
+      .name('Outline color')
+      .onChange((value) => {
+        material.outlineColorFactor = this.css2rgb(value);
+      });
+    outline
+      .add(this._toonParams, 'outlineLightingMixFactor', 0, 1, 0.01)
+      .name('Lighting mix')
+      .onChange((value) => {
+        material.outlineLightingMixFactor = value;
+      });
+
+    const uvAnimation = this._materialGroup.addFolder('MToon UV Animation');
+    uvAnimation
+      .add(this._toonParams, 'uvAnimationScrollXSpeedFactor', -2, 2, 0.01)
+      .name('Scroll X')
+      .onChange((value) => {
+        material.uvAnimationScrollXSpeedFactor = value;
+      });
+    uvAnimation
+      .add(this._toonParams, 'uvAnimationScrollYSpeedFactor', -2, 2, 0.01)
+      .name('Scroll Y')
+      .onChange((value) => {
+        material.uvAnimationScrollYSpeedFactor = value;
+      });
+    uvAnimation
+      .add(this._toonParams, 'uvAnimationRotationSpeedFactor', -6.28, 6.28, 0.01)
+      .name('Rotation speed')
+      .onChange((value) => {
+        material.uvAnimationRotationSpeedFactor = value;
+      });
+
+    const emission = this._materialGroup.addFolder('MToon Emission');
+    emission
+      .addColor(this._toonParams, 'emissiveColor')
+      .name('Color')
+      .onChange((value) => {
+        material.emissiveColor = this.css2rgb(value);
+      });
+    emission
+      .add(this._toonParams, 'emissiveStrength', 0, 10, 0.01)
+      .name('Strength')
+      .onChange((value) => {
+        material.emissiveStrength = value;
+      });
+
+    const rendering = this._materialGroup.addFolder('MToon Rendering');
+    rendering
+      .add(this._toonParams, 'transparentWithZWrite')
+      .name('Transparent z write')
+      .onChange((value) => {
+        material.transparentWithZWrite = value;
+      });
+    rendering
+      .add(this._toonParams, 'renderQueueOffsetNumber', -9, 9, 1)
+      .name('Queue offset')
+      .onChange((value) => {
+        material.renderQueueOffsetNumber = value;
       });
   }
   editFurMaterial(material: FurMaterial) {

@@ -12,7 +12,6 @@ import { BindGroupLayout } from '@zephyr3d/device';
 import { Clonable } from '@zephyr3d/base';
 import { ColorState } from '@zephyr3d/device';
 import { CubeFace } from '@zephyr3d/base';
-import { DecoderModule } from 'draco3d';
 import { DeepPartial } from '@zephyr3d/base';
 import { DeepRequireOptionals } from '@zephyr3d/base';
 import { DeviceBackend } from '@zephyr3d/device';
@@ -33,7 +32,6 @@ import { InterpolationMode } from '@zephyr3d/base';
 import { Interpolator } from '@zephyr3d/base';
 import { InterpolatorScalar } from '@zephyr3d/base';
 import { Matrix4x4 } from '@zephyr3d/base';
-import { Metadata as Metadata_2 } from 'draco3d';
 import { Nullable } from '@zephyr3d/base';
 import { Observable } from '@zephyr3d/base';
 import { PBFunctionScope } from '@zephyr3d/device';
@@ -274,7 +272,7 @@ export function applyAngleLimits(pointsR: readonly PointR[], pointsRW: PointRW[]
 export function applyMaterialMixins<M extends ((target: any) => any)[], T>(target: T, ...mixins: M): T & _zephyr3d_base.ExtractMixinType<M>;
 
 // @public
-export function applyResult(pointsR: readonly PointR[], pointsRW: PointRW[], positionsToTransform: readonly Vector3[], blendRatio: number, transformRotations: readonly Quaternion[], transformLocalRotations: readonly Quaternion[], preserveTwist: boolean): ApplyResultOutput[];
+export function applyResult(pointsR: readonly PointR[], pointsRW: PointRW[], positionsToTransform: readonly Vector3[], blendRatio: number, transformRotations: readonly Quaternion[], transformLocalRotations: readonly Quaternion[], preserveTwist: boolean, sceneParentRotations?: readonly (Quaternion | undefined)[]): ApplyResultOutput[];
 
 // @public
 export interface ApplyResultOutput {
@@ -470,6 +468,8 @@ export interface AssetImageInfo {
     // (undocumented)
     mimeType?: string;
     // (undocumented)
+    name?: string;
+    // (undocumented)
     uri?: string;
 }
 
@@ -572,6 +572,8 @@ export interface AssetMaterial {
     common: AssetMaterialCommon;
     // (undocumented)
     material?: DRef<MeshMaterial>;
+    // (undocumented)
+    name?: string;
     // (undocumented)
     path?: string;
     // (undocumented)
@@ -780,6 +782,8 @@ export interface AssetPrimitiveInfo {
     // (undocumented)
     indices: Nullable<Uint16Array<ArrayBuffer> | Uint32Array<ArrayBuffer>>;
     // (undocumented)
+    name?: string;
+    // (undocumented)
     path?: string;
     // (undocumented)
     type: PrimitiveType;
@@ -951,6 +955,8 @@ export interface AssetSubMeshData {
 export interface AssetTextureInfo {
     // (undocumented)
     image: Nullable<AssetImageInfo>;
+    // (undocumented)
+    name?: string;
     // (undocumented)
     sampler: Nullable<AssetSamplerInfo>;
     // (undocumented)
@@ -1491,9 +1497,6 @@ export class BoxShape extends Shape<BoxCreationOptions> implements Clonable<BoxS
 export function buildConstraints(rootPoints: BoneNode[], options: ConstraintBuildOptions): Constraint[];
 
 // @public
-export function buildForwardPlusGraph(graph: RenderGraph, ctx: DrawContext, renderQueue: RenderQueue, options: ForwardPlusOptions): RGHandle;
-
-// @public
 export function buildMSDFShape(contours: GlyphContour[]): MSDFShape;
 
 // @public
@@ -1552,7 +1555,7 @@ export class Camera extends SceneNode {
     get commandBufferReuse(): boolean;
     set commandBufferReuse(val: boolean);
     get compositor(): Compositor;
-    constructRay(x: number, y: number, viewportWidth?: number, viewportHeight?: number): Ray;
+    constructRay(x: number, y: number): Ray;
     get controller(): Nullable<BaseCameraController>;
     set controller(controller: Nullable<BaseCameraController>);
     get depthPrePass(): boolean;
@@ -1565,6 +1568,7 @@ export class Camera extends SceneNode {
     getAspect(): number;
     getFarPlane(): number;
     getFOV(): number;
+    getHistoryData(): CameraHistoryData;
     getHistoryResourceManager(): Nullable<HistoryResourceManager>;
     getInvProjectionMatrix(): Immutable<Matrix4x4>;
     getNearPlane(): number;
@@ -1601,6 +1605,8 @@ export class Camera extends SceneNode {
     // (undocumented)
     get relativeViewport(): Nullable<Immutable<number[]>>;
     render(scene: Scene): void;
+    get renderPath(): RenderPath;
+    set renderPath(_val: RenderPath);
     resetController(): void;
     get scissor(): Nullable<Immutable<number[]>>;
     set scissor(rect: Nullable<Immutable<number[]>>);
@@ -1611,6 +1617,8 @@ export class Camera extends SceneNode {
     setOrtho(left: number, right: number, bottom: number, top: number, near: number, far: number): this;
     setPerspective(fovY: number, aspect: number, zNear: number, zFar: number): this;
     setProjectionMatrix(matrix: Matrix4x4): void;
+    get shadowDebugCascades(): boolean;
+    set shadowDebugCascades(val: boolean);
     get SSAO(): boolean;
     set SSAO(val: boolean);
     get SSAOBias(): number;
@@ -1645,8 +1653,29 @@ export class Camera extends SceneNode {
     set ssrRoughnessFactor(val: number);
     get ssrStride(): number;
     set ssrStride(val: number);
+    get ssrTemporal(): boolean;
+    set ssrTemporal(val: boolean);
+    get ssrTemporalWeight(): number;
+    set ssrTemporalWeight(val: number);
     get ssrThickness(): number;
     set ssrThickness(val: number);
+    get SSS(): boolean;
+    set SSS(val: boolean);
+    get sssBlurScale(): number;
+    set sssBlurScale(val: number);
+    get sssDebugView(): SSSDebugView;
+    set sssDebugView(val: SSSDebugView);
+    get sssMultiScatter(): number;
+    set sssMultiScatter(val: number);
+    get sssQualityPreset(): SSSQualityPreset;
+    set sssQualityPreset(val: SSSQualityPreset);
+    get sssResolvedSettings(): Readonly<SSSResolvedSettings>;
+    get sssStrength(): number;
+    set sssStrength(val: number);
+    get sssTransmissionPower(): number;
+    set sssTransmissionPower(val: number);
+    get sssTransmissionStrength(): number;
+    set sssTransmissionStrength(val: number);
     get TAA(): boolean;
     set TAA(val: boolean);
     get TAADebug(): number;
@@ -1664,6 +1693,14 @@ export class Camera extends SceneNode {
 }
 
 // @public
+export type CameraHistoryData = {
+    prevColorTex: Nullable<BaseTexture>;
+    prevMotionVectorTex: Nullable<BaseTexture>;
+    prevSSRReflectTex: Nullable<BaseTexture>;
+    prevSSRMotionVectorTex: Nullable<BaseTexture>;
+};
+
+// @public
 export class CameraNearFarNode extends BaseGraphNode {
     constructor();
     static getSerializationCls(): {
@@ -1676,7 +1713,7 @@ export class CameraNearFarNode extends BaseGraphNode {
     protected validate(): string;
 }
 
-// @public
+// @public (undocumented)
 export type CameraOITMode = 'none' | 'weighted' | 'abuffer';
 
 // @public
@@ -2059,13 +2096,6 @@ export class CompDivNode extends GenericMathNode {
         name: string;
         getProps(): never[];
     };
-}
-
-// @public
-export interface CompiledRenderGraph {
-    readonly lifetimes: ReadonlyMap<number, RGResourceLifetime>;
-    // Warning: (ae-forgotten-export) The symbol "RGPass" needs to be exported by the entry point index.d.ts
-    readonly orderedPasses: ReadonlyArray<RGPass>;
 }
 
 // @public
@@ -2784,14 +2814,6 @@ export class DepthPass extends RenderPass {
 }
 
 // @public
-export class DevicePoolAllocator implements RGTextureAllocator<Texture2D, FrameBuffer> {
-    allocate(desc: RGTextureDesc, size: RGResolvedSize): Texture2D;
-    allocateFramebuffer(desc: RGFramebufferDesc): FrameBuffer;
-    release(texture: Texture2D): void;
-    releaseFramebuffer(framebuffer: FrameBuffer): void;
-}
-
-// @public
 export class DirectionalLight extends PunctualLight {
     constructor(scene: Scene);
     // (undocumented)
@@ -2828,6 +2850,7 @@ export class DotProductNode extends GenericMathNode {
 
 // @public (undocumented)
 export class DracoMeshDecoder {
+    // Warning: (ae-forgotten-export) The symbol "DecoderModule" needs to be exported by the entry point index.d.ts
     constructor(data: Int8Array<ArrayBuffer>, decoderModule: DecoderModule);
     // (undocumented)
     getAttributeBuffer(id: number, buffer: TypedArray): TypedArray | null;
@@ -2845,6 +2868,7 @@ export interface Drawable {
     getMaterial(): Nullable<MeshMaterial>;
     getMorphData(): Nullable<MorphData>;
     getMorphInfo(): Nullable<MorphInfo>;
+    getName(): string;
     getNode(): SceneNode;
     getObjectColor(): Vector4;
     getPickTarget(): PickTarget;
@@ -2875,6 +2899,7 @@ export interface DrawContext {
     readonly colorFormat: TextureFormat;
     compositor?: Nullable<Compositor>;
     readonly depthFormat: TextureFormat;
+    depthPrepassAttachment?: Texture2D;
     depthTexture?: Texture2D;
     readonly device: AbstractDevice;
     drawEnvLight: boolean;
@@ -2895,6 +2920,8 @@ export interface DrawContext {
     readonly motionVectors: boolean;
     motionVectorTexture?: Nullable<Texture2D>;
     oit: Nullable<OIT>;
+    primaryDirectionalLight?: Nullable<DirectionalLight>;
+    primaryTransmissionLight?: Nullable<PunctualLight>;
     queue: number;
     readonly renderHeight: number;
     renderPass: Nullable<RenderPass>;
@@ -2904,8 +2931,15 @@ export interface DrawContext {
     sceneColorTexture?: Texture2D;
     readonly SSR: boolean;
     SSRCalcThickness: boolean;
-    SSRNormalTexture: Texture2D;
-    SSRRoughnessTexture: Texture2D;
+    SSRNormalTexture: Nullable<Texture2D>;
+    SSRRoughnessTexture: Nullable<Texture2D>;
+    ssrSDFBoxBuffer: Nullable<GPUDataBuffer>;
+    ssrSDFBoxCount: number;
+    SSS: boolean;
+    SSSDiffuseTexture: Nullable<Texture2D>;
+    SSSParamTexture: Nullable<Texture2D>;
+    SSSProfileTexture: Nullable<Texture2D>;
+    SSSTransmissionTexture: Nullable<Texture2D>;
     sunLight?: Nullable<DirectionalLight>;
 }
 
@@ -3075,6 +3109,8 @@ export class EnvLightWrapper extends Disposable {
     set radianceMap(tex: Nullable<TextureCube<unknown>>);
     get sheenRadianceMap(): Nullable<TextureCube<unknown>>;
     set sheenRadianceMap(tex: Nullable<TextureCube<unknown>>);
+    get specularStrength(): number;
+    set specularStrength(val: number);
     get strength(): number;
     set strength(val: number);
     get type(): EnvLightType;
@@ -3129,9 +3165,6 @@ export class EqualNode extends GenericMathNode {
         getProps(): never[];
     };
 }
-
-// @public
-export function executeForwardPlusGraph(ctx: DrawContext): void;
 
 // @public
 export class Exp2Node extends GenericMathNode {
@@ -3369,17 +3402,6 @@ export type FontMetrics = {
     lineGap: number;
     glyphCount: number;
 };
-
-// @public
-export interface ForwardPlusOptions {
-    depthPrepass: boolean;
-    gpuPicking: boolean;
-    hiZ: boolean;
-    motionVectors: boolean;
-    needSceneColor: boolean;
-    ssr: boolean;
-    ssrCalcThickness: boolean;
-}
 
 // @public
 export class FPSCameraController extends BaseCameraController {
@@ -3953,22 +3975,33 @@ export const HEIGHT_FOG_BIT: number;
 
 // @public
 export class HistoryResourceManager<TTexture = Texture2D> {
+    // Warning: (ae-forgotten-export) The symbol "RGTextureAllocator" needs to be exported by the entry point index.d.ts
     constructor(allocator: RGTextureAllocator<TTexture>);
     beginFrame(): void;
     beginReadScope(bindings: Array<{
         name: string;
         texture: TTexture;
     }>): void;
+    // Warning: (ae-forgotten-export) The symbol "RenderGraphExecutor" needs to be exported by the entry point index.d.ts
     bindImportedTextures(executor: Pick<RenderGraphExecutor<TTexture>, 'setImportedTexture'>): void;
     commitFrame(): void;
     discardFrame(): void;
     dispose(): void;
     endReadScope(): void;
+    get frameActive(): boolean;
     getPrevious(name: string): TTexture;
+    // Warning: (ae-forgotten-export) The symbol "RenderGraph" needs to be exported by the entry point index.d.ts
+    // Warning: (ae-forgotten-export) The symbol "RGHandle" needs to be exported by the entry point index.d.ts
     importPrevious(graph: RenderGraph, name: string): RGHandle | null;
     importPreviousIfCompatible(graph: RenderGraph, name: string, desc: RGTextureDesc, size: RGResolvedSize): RGHandle | null;
+    // Warning: (ae-forgotten-export) The symbol "RGTextureDesc" needs to be exported by the entry point index.d.ts
+    // Warning: (ae-forgotten-export) The symbol "RGResolvedSize" needs to be exported by the entry point index.d.ts
     isCompatible(name: string, desc: RGTextureDesc, size: RGResolvedSize): boolean;
     queueCommit(name: string, desc: RGTextureDesc, size: RGResolvedSize, texture: TTexture, ownsTexture?: boolean): void;
+    // Warning: (ae-forgotten-export) The symbol "RGExecuteContext" needs to be exported by the entry point index.d.ts
+    queueCommitFromGraph(name: string, desc: RGTextureDesc, size: RGResolvedSize, ctx: Pick<RGExecuteContext, 'getTexture'>, handle: RGHandle): TTexture;
+    queueRetainedCommit(name: string, desc: RGTextureDesc, size: RGResolvedSize, texture: TTexture): void;
+    tryGetPrevious(name: string): TTexture | null;
 }
 
 // @public
@@ -4301,12 +4334,12 @@ export type IMixinLight = {
 //
 // @public
 export type IMixinPBRBluePrint = {
-    PBRLight(scope: PBInsideFunctionScope, worldPos: PBShaderExp, viewVec: PBShaderExp, commonData: PBShaderExp, outRoughness?: PBShaderExp): PBShaderExp;
+    PBRLight(scope: PBInsideFunctionScope, worldPos: PBShaderExp, viewVec: PBShaderExp, commonData: PBShaderExp, outRoughness?: PBShaderExp, outSSSDiffuse?: PBShaderExp): PBShaderExp;
     getCommonDatasStruct(scope: PBInsideFunctionScope): ShaderTypeFunc;
     getCommonData(scope: PBInsideFunctionScope, data: PBShaderExp, viewVec: PBShaderExp, worldPos: PBShaderExp, worldNorm: PBShaderExp, worldTangent: PBShaderExp, worldBinormal: PBShaderExp, vertexColor: PBShaderExp, vertexUV: PBShaderExp, ir: MaterialBlueprintIR): void;
     calculateCommonData(scope: PBInsideFunctionScope, ir: MaterialBlueprintIR, viewVec: PBShaderExp, worldPos: PBShaderExp, worldNorm: PBShaderExp, worldTangent: PBShaderExp, worldBinormal: PBShaderExp, vertexColor: PBShaderExp, vertexUV: PBShaderExp, data: PBShaderExp): void;
-    directLighting(scope: PBInsideFunctionScope, lightDir: PBShaderExp, lightColor: PBShaderExp, viewVec: PBShaderExp, commonData: PBShaderExp, diffuseScale: PBShaderExp, specularScale: PBShaderExp, sourceRadiusFactor: PBShaderExp, outColor: PBShaderExp): void;
-    indirectLighting(scope: PBInsideFunctionScope, viewVec: PBShaderExp, commonData: PBShaderExp, outColor: PBShaderExp, outRoughness?: PBShaderExp): void;
+    directLighting(scope: PBInsideFunctionScope, lightDir: PBShaderExp, lightColor: PBShaderExp, viewVec: PBShaderExp, commonData: PBShaderExp, diffuseScale: PBShaderExp, specularScale: PBShaderExp, sourceRadiusFactor: PBShaderExp, outColor: PBShaderExp, outDiffuseColor?: PBShaderExp): void;
+    indirectLighting(scope: PBInsideFunctionScope, viewVec: PBShaderExp, commonData: PBShaderExp, outColor: PBShaderExp, outRoughness?: PBShaderExp, outDiffuseColor?: PBShaderExp): void;
 } & IMixinPBRBRDF & IMixinLight;
 
 // @public
@@ -4315,6 +4348,7 @@ export type IMixinPBRCommon = {
     emissiveColor: Vector3;
     emissiveStrength: number;
     occlusionStrength: number;
+    rectSpecularScale: number;
     transmission: boolean;
     transmissionFactor: number;
     thicknessFactor: number;
@@ -4340,7 +4374,7 @@ export type IMixinPBRCommon = {
     getSheenAlbedoScalingForDirect(scope: PBInsideFunctionScope, NoV: PBShaderExp, NoL: PBShaderExp, sheenColor: PBShaderExp, sheenRoughness: PBShaderExp): PBShaderExp;
     directLighting(scope: PBInsideFunctionScope, lightDir: PBShaderExp, lightColor: PBShaderExp, normal: PBShaderExp, viewVec: PBShaderExp, commonData: PBShaderExp, diffuseScale: PBShaderExp, specularScale: PBShaderExp, sourceRadiusFactor: PBShaderExp, outColor: PBShaderExp): void;
     directRectLight(scope: PBInsideFunctionScope, worldPos: PBShaderExp, normal: PBShaderExp, viewVec: PBShaderExp, commonData: PBShaderExp, posRange: PBShaderExp, axisX: PBShaderExp, axisY: PBShaderExp, colorIntensity: PBShaderExp, outColor: PBShaderExp): void;
-    indirectLighting(scope: PBInsideFunctionScope, normal: PBShaderExp, viewVec: PBShaderExp, commonData: PBShaderExp, outColor: PBShaderExp, outRoughness?: PBShaderExp): void;
+    indirectLighting(scope: PBInsideFunctionScope, normal: PBShaderExp, viewVec: PBShaderExp, commonData: PBShaderExp, outColor: PBShaderExp, outRoughness?: PBShaderExp, outDiffuseColor?: PBShaderExp): void;
 } & TextureMixinInstanceTypes<[
 'occlusion',
 'emissive',
@@ -4364,7 +4398,7 @@ export type IMixinPBRMetallicRoughness = {
     anisotropy: number;
     anisotropyDirection: number;
     anisotropyDirectionScaleBias: Vector2;
-    PBRLight(scope: PBInsideFunctionScope, worldPos: PBShaderExp, normal: PBShaderExp, viewVec: PBShaderExp, albedo: PBShaderExp, TBN: PBShaderExp, outRoughness?: PBShaderExp): PBShaderExp;
+    PBRLight(scope: PBInsideFunctionScope, worldPos: PBShaderExp, normal: PBShaderExp, viewVec: PBShaderExp, albedo: PBShaderExp, TBN: PBShaderExp, outRoughness?: PBShaderExp, outSSSDiffuse?: PBShaderExp, outSSSTransmission?: PBShaderExp): PBShaderExp;
     calculateMetallic(scope: PBInsideFunctionScope, albedo: PBShaderExp, normal: PBShaderExp): PBShaderExp;
     calculateRoughness(scope: PBInsideFunctionScope, albedo: PBShaderExp, normal: PBShaderExp): PBShaderExp;
     calculateSpecularFactor(scope: PBInsideFunctionScope, albedo: PBShaderExp, normal: PBShaderExp): PBShaderExp;
@@ -4626,7 +4660,7 @@ export class JointDynamicsModifier extends SkeletonModifier {
     reset(): void;
     // (undocumented)
     protected _setWeight(value: number): void;
-    // (undocumented)
+    // @deprecated (undocumented)
     warp(): void;
 }
 
@@ -4721,6 +4755,7 @@ export class JointDynamicsSystemController {
     setWindForce(wind: Vector3): void;
     step(deltaTime: number): void;
     updateConfig(config: ControllerConfigUpdate): void;
+    // @deprecated
     warp(): void;
 }
 
@@ -4929,8 +4964,19 @@ export const enum MaterialVaryingFlags {
     // (undocumented)
     SKIN_ANIMATION = 2,
     // (undocumented)
-    SSR_STORE_ROUGHNESS = 8
+    SSR_STORE_ROUGHNESS = 8,
+    // (undocumented)
+    SSS_STORE_DIFFUSE = 64,
+    // (undocumented)
+    SSS_STORE_NORMAL = 128,
+    // (undocumented)
+    SSS_STORE_PROFILE = 32,
+    // (undocumented)
+    SSS_STORE_TRANSMISSION = 256
 }
+
+// @public
+export const MAX_CLUSTERED_LIGHTS = 255;
 
 // @public (undocumented)
 export const MAX_GERSTNER_WAVE_COUNT = 16;
@@ -5031,6 +5077,8 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
     get drawContext(): DrawContext;
     featureUsed<T = unknown>(feature: number): T;
     fragmentShader(scope: PBFunctionScope): void;
+    protected getActiveAlphaCutoff(ctx?: DrawContext, pass?: number): number;
+    protected getEffectiveBlendMode(pass: number, ctx?: DrawContext): BlendMode;
     getInstancedUniform(scope: PBInsideFunctionScope, uniformIndex: number): PBShaderExp;
     getInstancedUniforms(): {
         prop: string;
@@ -5039,22 +5087,30 @@ export class MeshMaterial extends Material implements Clonable<MeshMaterial> {
         name: string;
     }[];
     getQueueType(): number;
-    isTransparentPass(_pass: number): boolean;
+    isTransparentPass(pass: number, ctx?: DrawContext): boolean;
     needFragmentColor(ctx?: DrawContext): boolean;
+    needFragmentColorInput(ctx?: DrawContext): boolean;
     get objectColor(): Immutable<Vector4>;
     set objectColor(val: Immutable<Vector4>);
     get opacity(): number;
     set opacity(val: number);
-    outputFragmentColor(scope: PBInsideFunctionScope, worldPos: PBShaderExp, color: Nullable<PBShaderExp>, ssrRoughness?: PBShaderExp, ssrNormal?: PBShaderExp): void;
+    outputFragmentColor(scope: PBInsideFunctionScope, worldPos: PBShaderExp, color: Nullable<PBShaderExp>, ssrRoughness?: PBShaderExp, ssrNormal?: PBShaderExp, sssProfile?: PBShaderExp, sssParams?: PBShaderExp, sssDiffuse?: PBShaderExp, sssTransmission?: PBShaderExp, sssProfileEnabled?: boolean): void;
     get pass(): number;
+    get shadowAlphaCutoff(): number;
+    set shadowAlphaCutoff(val: number);
     supportLighting(): boolean;
     get TAADisabled(): boolean;
     set TAADisabled(val: boolean);
     get TAAStrength(): number;
     set TAAStrength(val: number);
+    get transparentShadowCaster(): boolean;
+    set transparentShadowCaster(val: boolean);
     uniformChanged(): void;
     protected updateRenderStates(pass: number, stateSet: RenderStateSet, ctx: DrawContext): void;
     useFeature(feature: number, use: unknown): void;
+    protected usesAlphaCutoff(ctx?: DrawContext, pass?: number): boolean;
+    useTransparentShadowCaster(ctx?: DrawContext, _pass?: number): boolean;
+    useTransparentShadowCasterForPass(renderPassType?: number): boolean;
     vertexShader(scope: PBFunctionScope): void;
 }
 
@@ -5283,6 +5339,7 @@ export class MSDFText extends GraphNode {
     get anchorY(): number;
     set anchorY(value: number);
     // Warning: (ae-forgotten-export) The symbol "MeshDrawable" needs to be exported by the entry point index.d.ts
+    // Warning: (ae-forgotten-export) The symbol "MSDFTextMaterial" needs to be exported by the entry point index.d.ts
     //
     // (undocumented)
     get batches(): MeshDrawable<MSDFTextMaterial>[];
@@ -5339,43 +5396,6 @@ export class MSDFTextAtlasManager {
 }
 
 // @public
-export class MSDFTextMaterial extends MeshMaterial implements Clonable<MSDFTextMaterial> {
-    constructor();
-    // (undocumented)
-    applyUniformValues(bindGroup: BindGroup, ctx: DrawContext, pass: number): void;
-    // (undocumented)
-    get atlasTexture(): _zephyr3d_base.Nullable<Texture2D<unknown>>;
-    set atlasTexture(tex: _zephyr3d_base.Nullable<Texture2D<unknown>>);
-    // (undocumented)
-    clone(): MSDFTextMaterial;
-    // (undocumented)
-    copyFrom(other: this): void;
-    // (undocumented)
-    get distanceRange(): number;
-    set distanceRange(value: number);
-    // (undocumented)
-    static FEATURE_TEXT_ATLAS: number;
-    // (undocumented)
-    fragmentShader(scope: PBFunctionScope): void;
-    // (undocumented)
-    protected onDispose(): void;
-    // (undocumented)
-    get outlineColor(): Immutable<Vector3>;
-    set outlineColor(value: Immutable<Vector3>);
-    // (undocumented)
-    get outlineWidth(): number;
-    set outlineWidth(value: number);
-    // (undocumented)
-    get smallGlyphThreshold(): number;
-    set smallGlyphThreshold(value: number);
-    // (undocumented)
-    get textColor(): Immutable<Vector3>;
-    set textColor(value: Immutable<Vector3>);
-    // (undocumented)
-    vertexShader(scope: PBFunctionScope): void;
-}
-
-// @public
 export class MSDFTextSprite extends GraphNode {
     constructor(scene: Scene);
     // (undocumented)
@@ -5387,6 +5407,8 @@ export class MSDFTextSprite extends GraphNode {
     // (undocumented)
     get anchorY(): number;
     set anchorY(value: number);
+    // Warning: (ae-forgotten-export) The symbol "MSDFTextSpriteMaterial" needs to be exported by the entry point index.d.ts
+    //
     // (undocumented)
     get batches(): MeshDrawable<MSDFTextSpriteMaterial>[];
     // (undocumented)
@@ -5423,22 +5445,6 @@ export class MSDFTextSprite extends GraphNode {
     set textColor(value: Immutable<Vector3>);
     // (undocumented)
     update(): void;
-}
-
-// @public
-export class MSDFTextSpriteMaterial extends MSDFTextMaterial implements Clonable<MSDFTextSpriteMaterial> {
-    constructor();
-    // (undocumented)
-    applyUniformValues(bindGroup: BindGroup, ctx: DrawContext, pass: number): void;
-    // (undocumented)
-    clone(): MSDFTextSpriteMaterial;
-    // (undocumented)
-    copyFrom(other: this): void;
-    // (undocumented)
-    get rotation(): number;
-    set rotation(value: number);
-    // (undocumented)
-    vertexShader(scope: PBFunctionScope): void;
 }
 
 // @public @deprecated
@@ -5992,20 +5998,8 @@ export class PBRBluePrintMaterial extends PBRBluePrintMaterial_base implements C
     get reflectionMode(): PBRReflectionMode;
     set reflectionMode(val: PBRReflectionMode);
     // (undocumented)
-    get subsurfaceColor(): Immutable<Vector3>;
-    set subsurfaceColor(val: Immutable<Vector3>);
-    // (undocumented)
-    get subsurfaceIntensity(): number;
-    set subsurfaceIntensity(val: number);
-    // (undocumented)
-    get subsurfacePower(): number;
-    set subsurfacePower(val: number);
-    // (undocumented)
-    get subsurfaceScale(): number;
-    set subsurfaceScale(val: number);
-    // (undocumented)
-    get subsurfaceScattering(): boolean;
-    set subsurfaceScattering(val: boolean);
+    get subsurfaceProfile(): SubsurfaceProfile | null;
+    set subsurfaceProfile(val: SubsurfaceProfile | null);
     get uniformTextures(): BluePrintUniformTexture[];
     set uniformTextures(val: BluePrintUniformTexture[]);
     get uniformValues(): BluePrintUniformValue[];
@@ -6027,17 +6021,11 @@ export class PBRMetallicRoughnessMaterial extends PBRMetallicRoughnessMaterial_b
     // (undocumented)
     copyFrom(other: this): void;
     // (undocumented)
+    protected _createHash(): string;
+    // (undocumented)
     fragmentShader(scope: PBFunctionScope): void;
-    get subsurfaceColor(): Immutable<Vector3>;
-    set subsurfaceColor(val: Immutable<Vector3>);
-    get subsurfaceIntensity(): number;
-    set subsurfaceIntensity(val: number);
-    get subsurfacePower(): number;
-    set subsurfacePower(val: number);
-    get subsurfaceScale(): number;
-    set subsurfaceScale(val: number);
-    get subsurfaceScattering(): boolean;
-    set subsurfaceScattering(val: boolean);
+    get subsurfaceProfile(): SubsurfaceProfile | null;
+    set subsurfaceProfile(val: SubsurfaceProfile | null);
     get vertexNormal(): boolean;
     set vertexNormal(val: boolean);
     // (undocumented)
@@ -6046,7 +6034,7 @@ export class PBRMetallicRoughnessMaterial extends PBRMetallicRoughnessMaterial_b
     set vertexTangent(val: boolean);
 }
 
-// @public
+// @public (undocumented)
 export type PBRReflectionMode = 'none' | 'ggx' | 'anisotropic' | 'glint';
 
 // Warning: (ae-forgotten-export) The symbol "PBRSpecularGlossinessMaterial_base" needs to be exported by the entry point index.d.ts
@@ -6683,7 +6671,7 @@ export const RENDER_PASS_TYPE_OBJECT_COLOR = 3;
 // @public
 export const RENDER_PASS_TYPE_SHADOWMAP = 1;
 
-// @public
+// @public (undocumented)
 export class RenderContext {
     constructor(_camera: Camera, w: number, h: number);
     // (undocumented)
@@ -6696,24 +6684,6 @@ export class RenderContext {
 
 // @public (undocumented)
 export type RenderFunc = () => void;
-
-// @public
-export class RenderGraph {
-    addPass<T = void>(name: string, setup: (builder: RGPassBuilder) => T): T;
-    compile(outputs: RGHandle[]): CompiledRenderGraph;
-    execute(compiled: CompiledRenderGraph): void;
-    importTexture(name: string): RGHandle;
-    reset(): void;
-}
-
-// @public
-export class RenderGraphExecutor<TTexture = unknown, TFramebuffer = unknown> {
-    constructor(allocator: RGTextureAllocator<TTexture, TFramebuffer>, backbufferWidth: number, backbufferHeight: number);
-    execute(compiled: CompiledRenderGraph): void;
-    reset(): void;
-    setBackbufferSize(width: number, height: number): void;
-    setImportedTexture(handle: RGHandle, texture: TTexture): void;
-}
 
 // @public
 export interface RenderItemList {
@@ -6783,6 +6753,9 @@ export abstract class RenderPass extends Disposable {
 }
 
 // @public
+export type RenderPath = 'forward';
+
+// @public
 export class RenderQueue extends Disposable {
     constructor(renderPass: RenderPass, bindGroupAllocator?: InstanceBindGroupAllocator);
     // (undocumented)
@@ -6791,6 +6764,10 @@ export class RenderQueue extends Disposable {
     getInstanceInfo(drawable: Drawable): DrawableInstanceInfo | undefined;
     get itemList(): Nullable<RenderItemList>;
     protected onDispose(): void;
+    get primaryDirectionalLight(): Nullable<DirectionalLight>;
+    set primaryDirectionalLight(light: Nullable<DirectionalLight>);
+    get primaryTransmissionLight(): Nullable<PunctualLight>;
+    set primaryTransmissionLight(light: Nullable<PunctualLight>);
     push(camera: Camera, drawable: Drawable): void;
     pushLight(light: PunctualLight): void;
     pushRenderQueue(queue: RenderQueue): void;
@@ -6910,12 +6887,16 @@ export class ResourceManager {
     deserializeObject<T extends object>(ctx: any, json: Record<string, unknown>): Promise<Nullable<T>>;
     deserializeObjectProps(obj: any, json: any, info?: SerializableClass): Promise<void>;
     get editorMode(): boolean;
-    fetchBinary(path: string, options?: BaseFetchOptions): Promise<Nullable<ArrayBuffer>>;
+    fetchBinary(id: string): Promise<Nullable<ArrayBuffer>>;
     fetchFontAsset(path: string, options?: FontAssetFetchOptions): Promise<Nullable<FontAsset>>;
-    fetchMaterial<T extends Material = MeshMaterial>(path: string, options?: BaseFetchOptions): Promise<Nullable<T>>;
+    fetchMaterial<T extends Material = MeshMaterial>(id: string, options?: {
+        overrideVFS?: VFS;
+    }): Promise<Nullable<T>>;
     fetchModel(path: string, scene: Scene, options?: ModelFetchOptions): Promise<SceneNode | undefined>;
-    fetchPrimitive<T extends Primitive = Primitive>(path: string, options?: BaseFetchOptions): Promise<Nullable<T>>;
-    fetchTexture<T extends Texture2D | TextureCube | Texture2DArray>(path: string, options?: TextureFetchOptions<T>): Promise<T>;
+    fetchPrimitive<T extends Primitive = Primitive>(id: string, options?: {
+        overrideVFS?: VFS;
+    }): Promise<Nullable<T>>;
+    fetchTexture<T extends Texture2D | TextureCube | Texture2DArray>(id: string, options?: TextureFetchOptions<T>): Promise<T>;
     findAnimationTarget(node: SceneNode, track: PropertyTrack): object | null;
     getAllPropertiesByClass(cls: Nullable<SerializableClass>): PropertyAccessor[];
     getAssetId(asset: unknown): string | null;
@@ -6940,7 +6921,7 @@ export class ResourceManager {
     loadScene(filename: string): Promise<Nullable<Scene>>;
     loadTextureFromBuffer<T extends BaseTexture>(arrayBuffer: ArrayBuffer | TypedArray, mimeType: string, srgb?: boolean, samplerOptions?: SamplerOptions, texture?: BaseTexture): Promise<T>;
     registerClass(cls: SerializableClass): void;
-    releaseFontAsset(asset: FontAsset | string): boolean;
+    releaseFontAsset(asset: unknown | string): boolean;
     reloadBluePrintMaterials(filter?: (m: PBRBluePrintMaterial) => boolean): Promise<void>;
     saveScene(scene: Scene, filename: string): Promise<void>;
     serializeObject(obj: any, json?: any, asyncTasks?: Nullable<Promise<unknown>[]>): Promise<any>;
@@ -6953,101 +6934,6 @@ export class ResourceManager {
 
 // @public
 export function restoreGeometryCacheMeshBinding(mesh: Mesh): Promise<boolean>;
-
-// @public
-export interface RGExecuteContext {
-    createFramebuffer<TFramebuffer = unknown>(desc: RGFramebufferDesc): TFramebuffer;
-    deferCleanup(callback: () => void): void;
-    getFramebuffer<TFramebuffer = unknown>(handle: RGHandle): TFramebuffer;
-    getTexture<TTexture = unknown>(handle: RGHandle): TTexture;
-}
-
-// @public
-export type RGExecuteFn<T = void> = (ctx: RGExecuteContext, data: T) => void;
-
-// @public
-export interface RGFramebufferDesc {
-    attachmentCubeface?: number;
-    attachmentLayer?: number;
-    attachmentMipLevel?: number;
-    colorAttachments: unknown | unknown[] | null;
-    depthAttachment?: unknown | null;
-    height?: number;
-    ignoreDepthStencil?: boolean;
-    label?: string;
-    mipmapping?: boolean;
-    sampleCount?: number;
-    width?: number;
-}
-
-// @public
-export class RGHandle {
-    get name(): string;
-}
-
-// @public
-export const RGHistoryResources: {
-    readonly TAA_COLOR: "taaColor";
-    readonly TAA_MOTION_VECTOR: "taaMotionVector";
-};
-
-// @public
-export interface RGPassBuilder {
-    addSubpass<D>(name: string, fn: RGExecuteFn<D>): void;
-    createFramebuffer(desc: RGFramebufferDesc): RGHandle;
-    createTexture(desc: RGTextureDesc): RGHandle;
-    createToken(name?: string): RGHandle;
-    read(handle: RGHandle): void;
-    setExecute<D>(fn: RGExecuteFn<D>): void;
-    sideEffect(): void;
-    write(handle: RGHandle): RGHandle;
-}
-
-// @public
-export interface RGResolvedSize {
-    // (undocumented)
-    height: number;
-    // (undocumented)
-    width: number;
-}
-
-// @public
-export interface RGResourceLifetime {
-    readonly firstUse: number;
-    readonly lastUse: number;
-    // Warning: (ae-forgotten-export) The symbol "RGResource" needs to be exported by the entry point index.d.ts
-    readonly resource: RGResource;
-}
-
-// @public
-export type RGSizeMode = 'absolute' | 'backbuffer-relative';
-
-// @public
-export class RGSubpass<T = unknown> {
-    constructor(name: string, executeFn: RGExecuteFn<T>);
-    // (undocumented)
-    readonly executeFn: RGExecuteFn<T>;
-    // (undocumented)
-    readonly name: string;
-}
-
-// @public
-export interface RGTextureAllocator<TTexture = unknown, TFramebuffer = unknown> {
-    allocate(desc: RGTextureDesc, size: RGResolvedSize): TTexture;
-    allocateFramebuffer?(desc: RGFramebufferDesc): TFramebuffer;
-    release(texture: TTexture): void;
-    releaseFramebuffer?(framebuffer: TFramebuffer): void;
-}
-
-// @public
-export interface RGTextureDesc {
-    format: TextureFormat;
-    height?: number;
-    label?: string;
-    mipLevels?: number;
-    sizeMode?: RGSizeMode;
-    width?: number;
-}
 
 // @public
 export class RotateAboutAxisNode extends BaseGraphNode {
@@ -7178,6 +7064,7 @@ export type SaveOptions = {
     importMeshes: boolean;
     importSkeletons: boolean;
     importAnimations: boolean;
+    rebuildMaterial?: boolean;
 };
 
 // Warning: (ae-forgotten-export) The symbol "Scene_base" needs to be exported by the entry point index.d.ts
@@ -7195,6 +7082,7 @@ export class Scene extends Scene_base implements IRenderable {
     get id(): number;
     get mainCamera(): Nullable<Camera>;
     set mainCamera(camera: Nullable<Camera>);
+    // Warning: (ae-forgotten-export) The symbol "Metadata_2" needs to be exported by the entry point index.d.ts
     get metaData(): Nullable<Metadata_2>;
     set metaData(val: Nullable<Metadata_2>);
     get name(): string;
@@ -7604,6 +7492,7 @@ export class ShaderHelper {
     static getDrawableBindGroupLayout(skinning: boolean, morphing: boolean, instancing: boolean): BindGroupLayout;
     static getElapsedTime(scope: PBInsideFunctionScope): PBShaderExp;
     static getElapsedTimeFrame(scope: PBInsideFunctionScope): PBShaderExp;
+    static getEnvLightSpecularStrength(scope: PBInsideFunctionScope): PBShaderExp;
     static getEnvLightStrength(scope: PBInsideFunctionScope): PBShaderExp;
     static getFramestamp(scope: PBInsideFunctionScope): PBShaderExp;
     static getHiZDepthTexture(scope: PBInsideFunctionScope): PBShaderExp;
@@ -7624,8 +7513,6 @@ export class ShaderHelper {
     static getLightBufferUniformName(): string;
     static getLinearDepthTexture(scope: PBInsideFunctionScope): PBShaderExp;
     static getLinearDepthTextureSize(scope: PBInsideFunctionScope): PBShaderExp;
-    // (undocumented)
-    static getMaxClusteredLightCount(): 255 | 127;
     // (undocumented)
     static getMorphDataUniformName(): string;
     // (undocumented)
@@ -7716,6 +7603,8 @@ export class ShadowMapper {
     set shadowMapSize(num: number);
     get shadowRegion(): Nullable<AABB>;
     set shadowRegion(region: Nullable<AABB>);
+    get shadowStrength(): number;
+    set shadowStrength(val: number);
     get splitLambda(): number;
     set splitLambda(val: number);
     get vsmBlurKernelSize(): number;
@@ -8425,6 +8314,21 @@ export class SqrtNode extends GenericMathNode {
     };
 }
 
+// @public (undocumented)
+export type SSSDebugView = 'none' | 'scatter_mask' | 'scatter_softness' | 'scatter_radius' | 'scatter_falloff' | 'profile_energy' | 'profile_transmission' | 'profile_boundary' | 'diffuse' | 'blur' | 'screen_thinness' | 'thin_transmission_mask' | 'thin_lighting' | 'transmission_shadow';
+
+// @public (undocumented)
+export type SSSQualityPreset = 'quality' | 'balanced' | 'performance';
+
+// @public (undocumented)
+export type SSSResolvedSettings = {
+    halfRes: boolean;
+    blurKernelSize: number;
+    blurStdDev: number;
+    blurDepthCutoff: number;
+    normalCutoff: number;
+};
+
 // @public
 export class StandardSpriteMaterial extends SpriteMaterial implements Clonable<StandardSpriteMaterial> {
     constructor();
@@ -8457,6 +8361,73 @@ export class StepNode extends GenericMathNode {
 export type StopAnimationOptions = {
     fadeOut?: number;
 };
+
+// @public
+export class SubsurfaceProfile {
+    constructor();
+    // (undocumented)
+    addChangeListener(listener: () => void): void;
+    // (undocumented)
+    get boundaryColorBleed(): number;
+    set boundaryColorBleed(val: number);
+    // (undocumented)
+    get extinctionScale(): number;
+    set extinctionScale(val: number);
+    // (undocumented)
+    get falloffColor(): Immutable<Vector3>;
+    set falloffColor(val: Immutable<Vector3>);
+    // (undocumented)
+    static getDefaultSkinProfile(): SubsurfaceProfile;
+    // (undocumented)
+    getDerivedTintBias(): [number, number, number];
+    // (undocumented)
+    getDerivedTransmissionResponse(): [number, number, number, number];
+    // (undocumented)
+    static getPresetResponseByIndex(index: number): [number, number, number, number];
+    // (undocumented)
+    static getPresetTintBiasByIndex(index: number): [number, number, number];
+    // (undocumented)
+    static getProfileBySlot(slot: number): SubsurfaceProfile | null;
+    get meanFreePathColor(): Immutable<Vector3>;
+    set meanFreePathColor(val: Immutable<Vector3>);
+    get meanFreePathDistance(): number;
+    set meanFreePathDistance(val: number);
+    // (undocumented)
+    get normalScale(): number;
+    set normalScale(val: number);
+    // (undocumented)
+    get preset(): SubsurfaceProfilePreset;
+    set preset(val: SubsurfaceProfilePreset);
+    // (undocumented)
+    get presetIndex(): number;
+    // (undocumented)
+    removeChangeListener(listener: () => void): void;
+    // (undocumented)
+    get scale(): number;
+    set scale(val: number);
+    // (undocumented)
+    get scatteringDistribution(): number;
+    set scatteringDistribution(val: number);
+    // (undocumented)
+    get scatterRadius(): Immutable<Vector3>;
+    set scatterRadius(val: Immutable<Vector3>);
+    // (undocumented)
+    get slot(): number;
+    // (undocumented)
+    get strength(): number;
+    set strength(val: number);
+    // (undocumented)
+    get transmissionTintColor(): Immutable<Vector3>;
+    set transmissionTintColor(val: Immutable<Vector3>);
+    // (undocumented)
+    static get version(): number;
+    // (undocumented)
+    get worldUnitScale(): number;
+    set worldUnitScale(val: number);
+}
+
+// @public (undocumented)
+export type SubsurfaceProfilePreset = 'skin' | 'skin_thin' | 'skin_default' | 'skin_heavy_makeup' | 'wax' | 'wax_backlit' | 'wax_soft' | 'jade' | 'jade_backlit' | 'jade_soft';
 
 // @public (undocumented)
 export interface SurfaceCheckResult {

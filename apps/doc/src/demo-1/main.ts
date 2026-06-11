@@ -119,8 +119,9 @@ myApp.ready().then(async function () {
 
   // Toon material
   const toonMaterial = new ToonMaterial();
-  toonMaterial.bands = 2;
-  toonMaterial.edgeThickness = 1;
+  toonMaterial.shadingToonyFactor = 0.9;
+  toonMaterial.outlineWidthMode = 'worldCoordinates';
+  toonMaterial.outlineWidthFactor = 0.01;
   const toonMesh = await fetchModel(scene, 'https://cdn.zephyr3d.org/doc/assets/models/Duck.glb');
   toonMesh.iterate((node) => {
     if (node.isMesh()) {

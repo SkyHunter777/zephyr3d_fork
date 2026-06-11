@@ -974,6 +974,9 @@ export class MemoryFS extends VFS {
 }
 
 // @public
+export function mimeTypeOf(ext: string): string;
+
+// @public
 export interface MoveOptions {
     // (undocumented)
     overwrite?: boolean;
