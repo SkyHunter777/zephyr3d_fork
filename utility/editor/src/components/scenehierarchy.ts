@@ -143,6 +143,12 @@ export class SceneHierarchy extends TreeView<
   protected onGetContextMenuId(node: SceneNode): string {
     return `context_${node.runtimeId}`;
   }
+  protected onGetContentContextMenuId(): string {
+    return 'scene_hierarchy_content_context';
+  }
+  protected onDrawContentContextMenu(_menuId: string) {
+    this.drawCreateNodeActions(this._scene.rootNode);
+  }
   protected onDrawContextMenu(node: SceneNode, _menuId: string) {
     const pluginCtx = this._getPluginContext(node);
     const pluginItems =
@@ -162,13 +168,7 @@ export class SceneHierarchy extends TreeView<
       }
       ImGui.Separator();
     }
-    if (ImGui.MenuItem('Create Batch Group')) {
-      this.dispatchEvent('request_add_child', node, BatchGroup);
-    }
-    ImGui.Separator();
-    if (ImGui.MenuItem('Create Empty Node')) {
-      this.dispatchEvent('request_add_child', node, SceneNode);
-    }
+    this.drawCreateNodeActions(node);
     ImGui.Separator();
     if (ImGui.MenuItem('Create Prefab...')) {
       this.dispatchEvent('request_save_prefab', node);
@@ -210,6 +210,15 @@ export class SceneHierarchy extends TreeView<
       if (ImGui.MenuItem('Make Active')) {
         this.dispatchEvent('set_main_camera', node);
       }
+    }
+  }
+  private drawCreateNodeActions(target: SceneNode) {
+    if (ImGui.MenuItem('Create Batch Group')) {
+      this.dispatchEvent('request_add_child', target, BatchGroup);
+    }
+    ImGui.Separator();
+    if (ImGui.MenuItem('Create Empty Node')) {
+      this.dispatchEvent('request_add_child', target, SceneNode);
     }
   }
   protected onDragDrop(node: SceneNode, _type: string, payload: unknown) {
