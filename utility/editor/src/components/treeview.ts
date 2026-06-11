@@ -43,6 +43,7 @@ export class TreeView<P extends EventMap, T = unknown> extends Observable<P> {
   private _pendingClickRowIndex: number;
   private _pendingClickCtrl: boolean;
   private _pendingClickShift: boolean;
+  private _rowHoveredThisFrame: boolean;
 
   constructor(id: string, data: TreeViewData<T>, multiSelect = false) {
     super();
@@ -61,6 +62,7 @@ export class TreeView<P extends EventMap, T = unknown> extends Observable<P> {
     this._pendingClickRowIndex = -1;
     this._pendingClickCtrl = false;
     this._pendingClickShift = false;
+    this._rowHoveredThisFrame = false;
     this._clipper = new ImGui.ListClipper();
   }
 
@@ -98,6 +100,7 @@ export class TreeView<P extends EventMap, T = unknown> extends Observable<P> {
     const flags = this._draggingItem ? ImGui.WindowFlags.NoScrollbar : 0;
     ImGui.BeginChild(this._id, ImGui.GetContentRegionAvail(), false, flags);
     ImGui.PushID(this._id);
+    this._rowHoveredThisFrame = false;
     if (!ImGui.GetIO().MouseDown[0]) {
       this._draggingItem = false;
     }
@@ -114,6 +117,7 @@ export class TreeView<P extends EventMap, T = unknown> extends Observable<P> {
     this.flushPendingClick();
     this.handleAutoScrollWhileDragging();
     this.ensureSelectionVisible();
+    this.handleContentContextMenu();
     ImGui.PopID();
     ImGui.EndChild();
   }
@@ -190,6 +194,9 @@ export class TreeView<P extends EventMap, T = unknown> extends Observable<P> {
     }
     if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGui.MouseButton.Left)) {
       this.onNodeDblClicked(node);
+    }
+    if (ImGui.IsItemHovered(ImGui.HoveredFlags.AllowWhenBlockedByPopup)) {
+      this._rowHoveredThisFrame = true;
     }
 
     const menuId = this.onGetContextMenuId(node);
@@ -300,11 +307,32 @@ export class TreeView<P extends EventMap, T = unknown> extends Observable<P> {
   protected onGetNodeTextColor(_node: T): Nullable<ImGui.ImVec4> {
     return null;
   }
+  protected onGetContentContextMenuId(): string {
+    return '';
+  }
   protected onGetContextMenuId(_node: T): string {
     return '';
   }
+  protected onDrawContentContextMenu(_menuId: string) {}
   protected onDrawContextMenu(_node: T, _menuId: string) {}
   protected onDragDrop(_node: T, _type: string, _payload: unknown) {}
+  private handleContentContextMenu() {
+    const menuId = this.onGetContentContextMenuId();
+    if (!menuId) {
+      return;
+    }
+    if (
+      ImGui.IsWindowHovered(ImGui.HoveredFlags.AllowWhenBlockedByPopup) &&
+      ImGui.IsMouseClicked(ImGui.MouseButton.Right) &&
+      !this._rowHoveredThisFrame
+    ) {
+      ImGui.OpenPopup(menuId);
+    }
+    if (ImGui.BeginPopup(menuId)) {
+      this.onDrawContentContextMenu(menuId);
+      ImGui.EndPopup();
+    }
+  }
   private expandAncestors(node: T) {
     let cur = node;
     for (;;) {

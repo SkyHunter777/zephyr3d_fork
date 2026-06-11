@@ -2201,6 +2201,16 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   private getTopLevelSelection(nodes: SceneNode[]) {
     return nodes.filter((node) => !nodes.some((other) => other !== node && other.isParentOf(node)));
   }
+  private getHierarchyDragSelection(src: SceneNode, dst: SceneNode) {
+    const selectedNodes = this.getTopLevelSelection(this.getSelectedSceneNodes()).filter(
+      (node) => node && node !== this.controller.model.scene.rootNode
+    );
+    const dragNodes = selectedNodes.includes(src) ? selectedNodes : [src];
+    if (dragNodes.some((node) => node === dst || node.isParentOf(dst))) {
+      return [];
+    }
+    return dragNodes.filter((node) => node.parent !== dst);
+  }
   private ensureMultiTransformPivot() {
     if (!this._multiTransformPivot) {
       this._multiTransformPivot = new SceneNode(this.controller.model.scene);
@@ -2660,10 +2670,20 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     return false;
   }
   private handleNodeDragDrop(src: SceneNode, dst: SceneNode) {
-    if (src.parent !== dst && !src.isParentOf(dst)) {
-      this._cmdManager.execute(new NodeReparentCommand(src, dst)).then(() => {
-        eventBus.dispatchEvent('scene_changed');
-      });
+    const dragNodes = this.getHierarchyDragSelection(src, dst);
+    if (dragNodes.length === 0) {
+      return;
+    }
+    const commands = dragNodes.map((node) => new NodeReparentCommand(node, dst));
+    const activeNode = dragNodes.includes(src) ? src : dragNodes[dragNodes.length - 1];
+    const onDone = () => {
+      this._sceneHierarchy?.selectNodes(dragNodes, activeNode);
+      eventBus.dispatchEvent('scene_changed');
+    };
+    if (commands.length === 1) {
+      this._cmdManager.execute(commands[0]).then(onDone);
+    } else {
+      this._cmdManager.execute(new CompositeCommand('Reparent objects', commands)).then(onDone);
     }
   }
   private handleNodePickerDrop(payload: SceneHierarchyNodePickerPayload, dst: SceneNode) {
