@@ -2303,6 +2303,8 @@ export interface RenderProgramConstructParams {
   vs: string;
   /** The fragment shader source code */
   fs: string;
+  /** Number of fragment color outputs declared by the shader */
+  fragmentOutputCount?: number;
   /** Bind group layouts for the program */
   bindGroupLayouts: BindGroupLayout[];
   /** Vertex attributes used in the program */

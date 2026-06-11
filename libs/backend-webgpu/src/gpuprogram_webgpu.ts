@@ -19,6 +19,7 @@ export class WebGPUProgram extends WebGPUObject<unknown> implements GPUProgram {
   private readonly _cs!: string;
   private readonly _label: string;
   private readonly _hash: string;
+  private readonly _fragmentOutputCount: number;
   private _error: string;
   private readonly _bindGroupLayouts: BindGroupLayout[];
   private readonly _vertexAttributes!: string;
@@ -36,10 +37,13 @@ export class WebGPUProgram extends WebGPUObject<unknown> implements GPUProgram {
       const renderParams = params.params as RenderProgramConstructParams;
       this._vs = renderParams.vs;
       this._fs = renderParams.fs;
+      this._fragmentOutputCount =
+        renderParams.fragmentOutputCount ?? WebGPUProgram.countFragmentOutputs(this._fs);
       this._vertexAttributes = renderParams.vertexAttributes ? renderParams.vertexAttributes.join(':') : '';
     } else {
       const computeParams = params.params as ComputeProgramConstructParams;
       this._cs = computeParams.source;
+      this._fragmentOutputCount = 0;
     }
     this._load();
     this._hash = String(++WebGPUProgram._hashCounter);
@@ -87,6 +91,9 @@ export class WebGPUProgram extends WebGPUObject<unknown> implements GPUProgram {
   }
   get vertexAttributes() {
     return this._vertexAttributes;
+  }
+  get fragmentOutputCount() {
+    return this._fragmentOutputCount;
   }
   get hash() {
     return this._hash;
@@ -177,6 +184,19 @@ export class WebGPUProgram extends WebGPUObject<unknown> implements GPUProgram {
       });
     }
     return sm;
+  }
+  private static countFragmentOutputs(source: string) {
+    const outputStruct = /struct\s+zFSOutput\s*\{([\s\S]*?)\};/.exec(source);
+    if (!outputStruct) {
+      return 0;
+    }
+    let count = 0;
+    const re = /@location\((\d+)\)/g;
+    let match: Nullable<RegExpExecArray>;
+    while ((match = re.exec(outputStruct[1]))) {
+      count = Math.max(count, Number(match[1]) + 1);
+    }
+    return count;
   }
   use() {
     this._device.setProgram(this);

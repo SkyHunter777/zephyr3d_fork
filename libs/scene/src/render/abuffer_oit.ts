@@ -2,6 +2,7 @@ import type {
   AbstractDevice,
   BindGroup,
   DeviceViewport,
+  FrameBuffer,
   GPUDataBuffer,
   GPUProgram,
   PBGlobalScope,
@@ -46,6 +47,7 @@ export class ABufferOIT extends Disposable implements OIT {
   private _scissorHeight: number;
   private _currentPass: number;
   private _savedScissor: Nullable<DeviceViewport>;
+  private _singleColorFramebuffer: Nullable<FrameBuffer>;
   /**
    * Creates an instance of ABufferOIT class
    *
@@ -65,6 +67,7 @@ export class ABufferOIT extends Disposable implements OIT {
     this._scissorHeight = 0;
     this._savedScissor = null;
     this._currentPass = 0;
+    this._singleColorFramebuffer = null;
   }
   /**
    * {@inheritDoc OIT.getType}
@@ -160,6 +163,27 @@ export class ABufferOIT extends Disposable implements OIT {
   beginPass(ctx: DrawContext, pass: number) {
     this._currentPass = pass;
     const device = ctx.device;
+    const currentFramebuffer = device.getFramebuffer();
+    const colorAttachment = currentFramebuffer?.getColorAttachments()[0] ?? null;
+    this._singleColorFramebuffer =
+      currentFramebuffer && currentFramebuffer.getColorAttachments().length > 1 && colorAttachment
+        ? device.pool.fetchTemporalFramebuffer(
+            false,
+            0,
+            0,
+            colorAttachment,
+            currentFramebuffer.getDepthAttachment(),
+            false
+          )
+        : null;
+    if (this._singleColorFramebuffer) {
+      const viewport = device.getViewport();
+      const scissor = device.getScissor();
+      device.pushDeviceStates();
+      device.setFramebuffer(this._singleColorFramebuffer);
+      device.setViewport(viewport);
+      device.setScissor(scissor);
+    }
     const scissorY = pass * this._scissorHeight;
     const scissorH =
       Math.min((pass + 1) * this._scissorHeight, this._screenSize[1]) - pass * this._scissorHeight;
@@ -198,24 +222,60 @@ export class ABufferOIT extends Disposable implements OIT {
     const device = ctx.device;
     ABufferOIT.getCompositeProgram(device);
     const lastBindGroup = device.getBindGroup(0);
-    device.setProgram(ABufferOIT.getCompositeProgram(device));
-    const bindGroup = ABufferOIT._compositeBindGroup!;
-    bindGroup.setBuffer(
-      'scissorOffset',
-      this._scissorOffsetBuffer!,
-      0,
-      pass * ABufferOIT._ubAlignment,
-      ABufferOIT._ubAlignment
-    );
-    bindGroup.setBuffer('headBuffer', this._headBuffer!);
-    bindGroup.setBuffer('nodeBuffer', this._nodeBuffer!);
-    bindGroup.setValue('screenWidth', this._screenSize[0]);
-    bindGroup.setValue('additiveOnly', ctx.lightBlending ? 1 : 0);
-    device.setBindGroup(0, bindGroup);
-    drawFullscreenQuad(
-      ctx.lightBlending ? ABufferOIT._compositeAdditiveRenderStates! : ABufferOIT._compositeRenderStates!
-    );
-    device.setBindGroup(0, lastBindGroup[0], lastBindGroup[1]);
+    const currentFramebuffer = device.getFramebuffer();
+    const colorAttachment = currentFramebuffer?.getColorAttachments()[0] ?? null;
+    const singleColorFramebuffer =
+      !this._singleColorFramebuffer &&
+      currentFramebuffer &&
+      currentFramebuffer.getColorAttachments().length > 1 &&
+      colorAttachment
+        ? device.pool.fetchTemporalFramebuffer(
+            false,
+            0,
+            0,
+            colorAttachment,
+            currentFramebuffer.getDepthAttachment(),
+            false
+          )
+        : null;
+    if (singleColorFramebuffer) {
+      const viewport = device.getViewport();
+      const scissor = device.getScissor();
+      device.pushDeviceStates();
+      device.setFramebuffer(singleColorFramebuffer);
+      device.setViewport(viewport);
+      device.setScissor(scissor);
+    }
+    try {
+      device.setProgram(ABufferOIT.getCompositeProgram(device));
+      const bindGroup = ABufferOIT._compositeBindGroup!;
+      bindGroup.setBuffer(
+        'scissorOffset',
+        this._scissorOffsetBuffer!,
+        0,
+        pass * ABufferOIT._ubAlignment,
+        ABufferOIT._ubAlignment
+      );
+      bindGroup.setBuffer('headBuffer', this._headBuffer!);
+      bindGroup.setBuffer('nodeBuffer', this._nodeBuffer!);
+      bindGroup.setValue('screenWidth', this._screenSize[0]);
+      bindGroup.setValue('additiveOnly', ctx.lightBlending ? 1 : 0);
+      device.setBindGroup(0, bindGroup);
+      drawFullscreenQuad(
+        ctx.lightBlending ? ABufferOIT._compositeAdditiveRenderStates! : ABufferOIT._compositeRenderStates!
+      );
+    } finally {
+      if (singleColorFramebuffer) {
+        device.popDeviceStates();
+        device.pool.releaseFrameBuffer(singleColorFramebuffer);
+      } else if (this._singleColorFramebuffer) {
+        device.popDeviceStates();
+        device.pool.releaseFrameBuffer(this._singleColorFramebuffer);
+        this._singleColorFramebuffer = null;
+      } else {
+        device.setBindGroup(0, lastBindGroup[0], lastBindGroup[1]);
+      }
+    }
   }
   /**
    * {@inheritDoc OIT.calculateHash}

@@ -45,6 +45,12 @@ const _clusters: ClusteredLight[] = [];
 const _devicePoolAllocator = new DevicePoolAllocator();
 let _backDepthColorState: Nullable<ColorState> = null;
 let _frontDepthColorState: Nullable<ColorState> = null;
+const SURFACE_MRT_FLAGS =
+  MaterialVaryingFlags.SSR_STORE_ROUGHNESS |
+  MaterialVaryingFlags.SSS_STORE_PROFILE |
+  MaterialVaryingFlags.SSS_STORE_DIFFUSE |
+  MaterialVaryingFlags.SSS_STORE_NORMAL |
+  MaterialVaryingFlags.SSS_STORE_TRANSMISSION;
 
 function getClusteredLight(): ClusteredLight {
   return _clusters.length > 0 ? _clusters.pop()! : new ClusteredLight();
@@ -212,14 +218,7 @@ function getFullMipLevelCount(width: number, height: number): number {
 }
 
 function hasSurfaceMRT(ctx: DrawContext): boolean {
-  return !!(
-    ctx.materialFlags &
-    (MaterialVaryingFlags.SSR_STORE_ROUGHNESS |
-      MaterialVaryingFlags.SSS_STORE_PROFILE |
-      MaterialVaryingFlags.SSS_STORE_DIFFUSE |
-      MaterialVaryingFlags.SSS_STORE_NORMAL |
-      MaterialVaryingFlags.SSS_STORE_TRANSMISSION)
-  );
+  return !!(ctx.materialFlags & SURFACE_MRT_FLAGS);
 }
 
 function getLightPassColorAttachments(
@@ -1279,15 +1278,17 @@ function renderMainLightPass(
     const savedDepthPrepassAttachment = ctx.depthPrepassAttachment;
     const savedClearDepth = _scenePass.clearDepth;
     const savedClearStencil = _scenePass.clearStencil;
+    const savedMaterialFlags = ctx.materialFlags;
 
     // Use RenderGraph-allocated sceneColorCopy texture
+    const sceneColorMaterialFlags = ctx.materialFlags & ~SURFACE_MRT_FLAGS;
     const sceneColorFramebuffer =
-      sceneColorCopyFramebufferHandle && !hasSurfaceMRT(ctx)
+      sceneColorCopyFramebufferHandle
         ? rgCtx.getFramebuffer<FrameBuffer>(sceneColorCopyFramebufferHandle)
         : rgCtx.createFramebuffer<FrameBuffer>({
             width: sceneColorCopyTex.width,
             height: sceneColorCopyTex.height,
-            colorAttachments: getLightPassColorAttachments(ctx, sceneColorCopyTex),
+            colorAttachments: sceneColorCopyTex,
             depthAttachment: isolateSceneColorDepth ? ctx.depthFormat : depthTex,
             ignoreDepthStencil: false
           });
@@ -1302,8 +1303,10 @@ function renderMainLightPass(
         _scenePass.clearDepth = 1;
         _scenePass.clearStencil = 0;
       }
+      ctx.materialFlags = sceneColorMaterialFlags;
       _scenePass.render(ctx, null, null, renderQueue);
     } finally {
+      ctx.materialFlags = savedMaterialFlags;
       if (isolateSceneColorDepth) {
         ctx.depthPrepassAttachment = savedDepthPrepassAttachment;
         _scenePass.clearDepth = savedClearDepth;

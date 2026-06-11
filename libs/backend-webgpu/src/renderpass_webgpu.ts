@@ -195,7 +195,15 @@ export class WebGPURenderPass {
     count: number,
     numInstances: number
   ) {
-    const validation = this.validateDraw(program, bindGroups);
+    const validation = this.validateDraw(
+      program,
+      bindGroups,
+      stateSet,
+      primitiveType,
+      first,
+      count,
+      numInstances
+    );
     if (validation & VALIDATION_FAILED) {
       return;
     }
@@ -391,6 +399,18 @@ export class WebGPURenderPass {
     count: number,
     numInstances: number
   ) {
+    const validation = this.validateDraw(
+      program,
+      bindGroups,
+      stateSet,
+      primitiveType,
+      first,
+      count,
+      numInstances
+    );
+    if (validation & VALIDATION_FAILED) {
+      return;
+    }
     this.drawInternal(
       this._renderPassEncoder!,
       program,
@@ -470,8 +490,52 @@ export class WebGPURenderPass {
       }
     }
   }
-  private validateDraw(program: WebGPUProgram, bindGroups: WebGPUBindGroup[]) {
+  private validateDraw(
+    program: WebGPUProgram,
+    bindGroups: WebGPUBindGroup[],
+    stateSet: WebGPURenderStateSet,
+    primitiveType: PrimitiveType,
+    first: number,
+    count: number,
+    numInstances: number
+  ) {
     let validation = 0;
+    const colorTargetCount = this._frameBufferInfo.colorFormats.length;
+    if (colorTargetCount !== 0 && program.fragmentOutputCount !== colorTargetCount) {
+      if (
+        !stateSet?.colorState ||
+        stateSet.colorState.redMask ||
+        stateSet.colorState.greenMask ||
+        stateSet.colorState.blueMask ||
+        stateSet.colorState.alphaMask
+      ) {
+        const framebuffer = this._frameBufferInfo.frameBuffer;
+        const colorAttachments = framebuffer?.getColorAttachments().map((texture, index) => ({
+          index,
+          name: texture?.name,
+          uid: texture?.uid,
+          format: texture?.format
+        })) ?? [{ index: 0, name: '<backbuffer>', uid: 0, format: this._frameBufferInfo.colorFormats[0] }];
+        console.error('WebGPU draw validation failed: fragment color output count mismatch', {
+          programName: program.name,
+          programLabel: program.label,
+          programHash: program.hash,
+          fragmentOutputCount: program.fragmentOutputCount,
+          colorTargetCount,
+          colorFormats: this._frameBufferInfo.colorFormats,
+          depthFormat: this._frameBufferInfo.depthFormat,
+          framebufferName: framebuffer?.name ?? '<backbuffer>',
+          framebufferHash: this._frameBufferInfo.hash,
+          colorAttachments,
+          primitiveType,
+          first,
+          count,
+          numInstances,
+          stack: new Error().stack
+        });
+        validation |= VALIDATION_FAILED;
+      }
+    }
     if (bindGroups) {
       for (let i = 0; i < program.bindGroupLayouts.length; i++) {
         const bindGroup = bindGroups[i];

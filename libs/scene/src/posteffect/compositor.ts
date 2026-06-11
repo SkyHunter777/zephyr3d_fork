@@ -173,8 +173,14 @@ export class Compositor {
         }
         const isLast = this.isLastPostEffect(layer, i);
         const finalEffect = isLast && (!postEffect.requireDepthAttachment(ctx) || !!this._finalFramebuffer);
+        let singleColorFramebuffer: Nullable<FrameBuffer> = null;
         if (finalEffect) {
-          device.setFramebuffer(this._finalFramebuffer);
+          singleColorFramebuffer = this.createSingleColorFramebuffer(
+            device,
+            this._finalFramebuffer,
+            postEffect.requireDepthAttachment(ctx)
+          );
+          device.setFramebuffer(singleColorFramebuffer ?? this._finalFramebuffer);
         } else {
           this._prevFrameBuffer = device.pool.fetchTemporalFramebuffer(
             false,
@@ -186,7 +192,14 @@ export class Compositor {
           device.setFramebuffer(this._prevFrameBuffer);
         }
         const inputColorTexture = tmpTexture ?? inputTexture;
-        postEffect.apply(ctx, inputColorTexture, sceneDepthTexture, !device.getFramebuffer());
+        try {
+          postEffect.apply(ctx, inputColorTexture, sceneDepthTexture, !device.getFramebuffer());
+        } finally {
+          if (singleColorFramebuffer) {
+            device.setFramebuffer(this._finalFramebuffer);
+            device.pool.releaseFrameBuffer(singleColorFramebuffer);
+          }
+        }
         if (this._prevInputTexture) {
           device.pool.releaseTexture(this._prevInputTexture);
           this._prevInputTexture = null;
@@ -204,10 +217,18 @@ export class Compositor {
     const device = ctx.device;
     if (device.getFramebuffer() !== this._finalFramebuffer) {
       const srcTex = device.getFramebuffer()!.getColorAttachments()[0] as Texture2D;
-      device.setFramebuffer(this._finalFramebuffer);
+      const singleColorFramebuffer = this.createSingleColorFramebuffer(device, this._finalFramebuffer, false);
+      device.setFramebuffer(singleColorFramebuffer ?? this._finalFramebuffer);
       device.setViewport(null);
       device.setScissor(null);
-      Compositor._blit(device, srcTex, !this._finalFramebuffer);
+      try {
+        Compositor._blit(device, srcTex, !this._finalFramebuffer);
+      } finally {
+        if (singleColorFramebuffer) {
+          device.setFramebuffer(this._finalFramebuffer);
+          device.pool.releaseFrameBuffer(singleColorFramebuffer);
+        }
+      }
     }
     if (this._prevInputTexture) {
       device.pool.releaseTexture(this._prevInputTexture);
@@ -229,6 +250,25 @@ export class Compositor {
       }
     }
     return true;
+  }
+  /** @internal */
+  private createSingleColorFramebuffer(
+    device: AbstractDevice,
+    framebuffer: Nullable<FrameBuffer>,
+    withDepth: boolean
+  ) {
+    const colorAttachment = framebuffer?.getColorAttachments()[0] ?? null;
+    if (!framebuffer || framebuffer.getColorAttachments().length <= 1 || !colorAttachment) {
+      return null;
+    }
+    return device.pool.fetchTemporalFramebuffer(
+      false,
+      0,
+      0,
+      colorAttachment,
+      withDepth ? framebuffer.getDepthAttachment() : null,
+      false
+    );
   }
   /** @internal */
   static _blit(device: AbstractDevice, srcTex: Texture2D, srgbOutput: boolean) {

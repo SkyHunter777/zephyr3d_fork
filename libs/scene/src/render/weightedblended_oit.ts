@@ -145,11 +145,39 @@ export class WeightedBlendedOIT extends Disposable implements OIT {
   }
   /** @internal */
   private composite(ctx: DrawContext, device: AbstractDevice, accumColor: Texture2D, accumAlpha: Texture2D) {
-    device.setProgram(WeightedBlendedOIT.getCompositeProgram(device));
-    WeightedBlendedOIT._compositeBindGroup.setTexture('accumColorTex', accumColor);
-    WeightedBlendedOIT._compositeBindGroup.setTexture('accumAlphaTex', accumAlpha);
-    device.setBindGroup(0, WeightedBlendedOIT._compositeBindGroup);
-    drawFullscreenQuad(WeightedBlendedOIT._compositeRenderStates);
+    const currentFramebuffer = device.getFramebuffer();
+    const colorAttachment = currentFramebuffer?.getColorAttachments()[0] ?? null;
+    const singleColorFramebuffer =
+      currentFramebuffer && currentFramebuffer.getColorAttachments().length > 1 && colorAttachment
+        ? device.pool.fetchTemporalFramebuffer(
+            false,
+            0,
+            0,
+            colorAttachment,
+            currentFramebuffer.getDepthAttachment(),
+            false
+          )
+        : null;
+    if (singleColorFramebuffer) {
+      const viewport = device.getViewport();
+      const scissor = device.getScissor();
+      device.pushDeviceStates();
+      device.setFramebuffer(singleColorFramebuffer);
+      device.setViewport(viewport);
+      device.setScissor(scissor);
+    }
+    try {
+      device.setProgram(WeightedBlendedOIT.getCompositeProgram(device));
+      WeightedBlendedOIT._compositeBindGroup.setTexture('accumColorTex', accumColor);
+      WeightedBlendedOIT._compositeBindGroup.setTexture('accumAlphaTex', accumAlpha);
+      device.setBindGroup(0, WeightedBlendedOIT._compositeBindGroup);
+      drawFullscreenQuad(WeightedBlendedOIT._compositeRenderStates);
+    } finally {
+      if (singleColorFramebuffer) {
+        device.popDeviceStates();
+        device.pool.releaseFrameBuffer(singleColorFramebuffer);
+      }
+    }
   }
   /** @internal */
   private getAccumFramebuffer(ctx: DrawContext, device: AbstractDevice) {

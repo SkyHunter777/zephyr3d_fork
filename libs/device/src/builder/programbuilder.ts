@@ -143,7 +143,7 @@ export interface ProgramBuilder {
    * @param options - The build options
    * @returns a tuple made by vertex shader source, fragment shader source, bind group layouts and vertex attributes used, or null if build faild
    */
-  buildRender(options: PBRenderOptions): readonly [string, string, BindGroupLayout[], number[]];
+  buildRender(options: PBRenderOptions): readonly [string, string, BindGroupLayout[], number[], number];
   /**
    * Generates shader code for a compute program
    * @param options - The build programs
@@ -1171,7 +1171,7 @@ export class ProgramBuilder {
    * @param options - The build options
    * @returns a tuple made by vertex shader source, fragment shader source, bind group layouts and vertex attributes used, or null if build faild
    */
-  buildRender(options: PBRenderOptions): Nullable<readonly [string, string, BindGroupLayout[], number[]]> {
+  buildRender(options: PBRenderOptions): Nullable<readonly [string, string, BindGroupLayout[], number[], number]> {
     setCurrentProgramBuilder(this);
     this._lastError = null;
     this.defineInternalStructs();
@@ -1209,6 +1209,7 @@ export class ProgramBuilder {
           params: {
             vs: ret[0],
             fs: ret[1],
+            fragmentOutputCount: ret[4],
             bindGroupLayouts: ret[2],
             vertexAttributes: ret[3]
           }
@@ -2018,7 +2019,8 @@ export class ProgramBuilder {
           fragOutputs.map((val) => val[1])
         )!,
         this.createBindGroupLayouts(options.label),
-        this._vertexAttributes
+        this._vertexAttributes,
+        fragOutputs.length
       ] as const;
     } catch (err) {
       if (err instanceof errors.PBError) {
