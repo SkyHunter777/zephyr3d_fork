@@ -87,6 +87,9 @@ export class TreeView<P extends EventMap, T = unknown> extends Observable<P> {
     this._openState.clear();
     this._visibleDirty = true;
   }
+  refreshStructure() {
+    this._visibleDirty = true;
+  }
   render(forceUpdate: boolean) {
     if (this._visibleDirty || forceUpdate) {
       this.rebuildVisible();
