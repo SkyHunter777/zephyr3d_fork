@@ -1171,7 +1171,9 @@ export class ProgramBuilder {
    * @param options - The build options
    * @returns a tuple made by vertex shader source, fragment shader source, bind group layouts and vertex attributes used, or null if build faild
    */
-  buildRender(options: PBRenderOptions): Nullable<readonly [string, string, BindGroupLayout[], number[], number]> {
+  buildRender(
+    options: PBRenderOptions
+  ): Nullable<readonly [string, string, BindGroupLayout[], number[], number]> {
     setCurrentProgramBuilder(this);
     this._lastError = null;
     this.defineInternalStructs();

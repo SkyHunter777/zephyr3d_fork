@@ -907,27 +907,6 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
     }
   }
 
-  private async linkPlugin() {
-    const desktop = getDesktopAPI();
-    if (!desktop?.fs?.pickDirectory) {
-      return;
-    }
-    this._busy = true;
-    try {
-      const directory = await desktop.fs.pickDirectory({
-        title: 'Select Plugin Dist Directory',
-        buttonLabel: 'Link Plugin'
-      });
-      if (directory) {
-        await this._editor.linkSystemPlugin(directory, 'index.js');
-        await this.reload();
-      }
-    } catch {
-    } finally {
-      this._busy = false;
-    }
-  }
-
   private async createTemplatePlugin() {
     this._busy = true;
     try {

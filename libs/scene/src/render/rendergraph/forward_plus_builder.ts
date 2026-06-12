@@ -1282,16 +1282,15 @@ function renderMainLightPass(
 
     // Use RenderGraph-allocated sceneColorCopy texture
     const sceneColorMaterialFlags = ctx.materialFlags & ~SURFACE_MRT_FLAGS;
-    const sceneColorFramebuffer =
-      sceneColorCopyFramebufferHandle
-        ? rgCtx.getFramebuffer<FrameBuffer>(sceneColorCopyFramebufferHandle)
-        : rgCtx.createFramebuffer<FrameBuffer>({
-            width: sceneColorCopyTex.width,
-            height: sceneColorCopyTex.height,
-            colorAttachments: sceneColorCopyTex,
-            depthAttachment: isolateSceneColorDepth ? ctx.depthFormat : depthTex,
-            ignoreDepthStencil: false
-          });
+    const sceneColorFramebuffer = sceneColorCopyFramebufferHandle
+      ? rgCtx.getFramebuffer<FrameBuffer>(sceneColorCopyFramebufferHandle)
+      : rgCtx.createFramebuffer<FrameBuffer>({
+          width: sceneColorCopyTex.width,
+          height: sceneColorCopyTex.height,
+          colorAttachments: sceneColorCopyTex,
+          depthAttachment: isolateSceneColorDepth ? ctx.depthFormat : depthTex,
+          ignoreDepthStencil: false
+        });
     let sceneColorStatePushed = false;
     try {
       device.pushDeviceStates();

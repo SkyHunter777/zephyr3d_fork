@@ -1348,7 +1348,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
             switch (this._typeToBePlaced) {
               case 'asset':
                 this._cmdManager
-                  .execute(new AddAssetCommand(this.controller.model.scene, this._assetToBeAdded!, pos, placeNode))
+                  .execute(
+                    new AddAssetCommand(this.controller.model.scene, this._assetToBeAdded!, pos, placeNode)
+                  )
                   .then((node) => {
                     this._sceneHierarchy!.selectNode(node);
                     eventBus.dispatchEvent('scene_changed');
@@ -1356,7 +1358,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
                 break;
               case 'prefab':
                 this._cmdManager
-                  .execute(new AddPrefabCommand(this.controller.model.scene, this._assetToBeAdded!, pos, placeNode))
+                  .execute(
+                    new AddPrefabCommand(this.controller.model.scene, this._assetToBeAdded!, pos, placeNode)
+                  )
                   .then((node) => {
                     this._sceneHierarchy!.selectNode(node);
                     eventBus.dispatchEvent('scene_changed');
@@ -2674,7 +2678,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
         : '';
       const assetId = getEngine().resourceManager.getAssetId(node);
       const assetPath =
-        typeof assetId === 'string' && assetId.startsWith('/') ? ProjectService.VFS.normalizePath(assetId) : '';
+        typeof assetId === 'string' && assetId.startsWith('/')
+          ? ProjectService.VFS.normalizePath(assetId)
+          : '';
       const matched = normalizedPaths.some(
         (path) =>
           prefabPath === path ||
