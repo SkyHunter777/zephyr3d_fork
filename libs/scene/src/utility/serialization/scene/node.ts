@@ -109,7 +109,12 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
     ) {
       const scene = ctx instanceof Scene ? ctx : ctx.scene;
       if (init?.prefabId) {
-        const prefabData = (await manager.loadPrefabContent(init.prefabId))!.data as DiffValue;
+        const prefabContent = await manager.loadPrefabContent(init.prefabId);
+        if (!prefabContent?.data) {
+          console.warn(`Skip scene node because prefab asset is missing: ${init.prefabId}`);
+          return { obj: null, loadProps: false };
+        }
+        const prefabData = prefabContent.data as DiffValue;
         const nodeData = normalizeSerializedSceneNodeData(
           applyPatch(prefabData, init.patch ?? []) as DiffValue
         );
@@ -125,7 +130,13 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
         return { obj: sceneNode, loadProps: false };
       }
       if (init?.assetId) {
-        const fetchedModel = await manager.fetchModel(init.assetId, scene!);
+        let fetchedModel: SceneNode | null = null;
+        try {
+          fetchedModel = (await manager.fetchModel(init.assetId, scene!)) ?? null;
+        } catch (err) {
+          console.warn(`Skip scene node because model asset failed to load: ${init.assetId}: ${err}`);
+          fetchedModel = null;
+        }
         const sceneNode = fetchedModel ?? null;
         if (sceneNode) {
           const originalAssetId = manager.getAssetId(sceneNode);
@@ -140,6 +151,8 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
             manager.setAssetId(sceneNode, originalAssetId ?? init.assetId);
           }
           sceneNode.parent = ctx instanceof SceneNode ? ctx : ctx.rootNode;
+        } else {
+          console.warn(`Skip scene node because model asset is missing: ${init.assetId}`);
         }
         return { obj: sceneNode, loadProps: false };
       }

@@ -4,8 +4,14 @@ import { ParticleSystem } from '@zephyr3d/scene';
 import { Mesh } from '@zephyr3d/scene';
 import { Command } from '../core/command';
 import type { Nullable, RequireOptionals } from '@zephyr3d/base';
-import { ASSERT, Matrix4x4, Quaternion, Vector3 } from '@zephyr3d/base';
+import { ASSERT, DRef, Matrix4x4, Quaternion, Vector3 } from '@zephyr3d/base';
 import type { TRS } from '../types';
+import {
+  ensureNodeDefaultName,
+  getDefaultNodeNameFromAssetPath,
+  getDefaultNodeNameFromCtor,
+  getDefaultShapeNodeName
+} from '../helpers/defaultnodename';
 
 export type CommandExecuteResult<T> = T extends AddAssetCommand ? SceneNode : void;
 
@@ -39,6 +45,16 @@ function getNodePath(node: SceneNode) {
   return parts.join('/');
 }
 
+function waitForNextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve());
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
 export class CustomCommand<T> extends Command<T> {
   private readonly _execute: () => T | Promise<T>;
   private readonly _undo: () => void | Promise<void>;
@@ -60,31 +76,45 @@ export class AddPrefabCommand extends Command<Nullable<SceneNode>> {
   private readonly _prefab: string;
   private _nodeId: string;
   private readonly _position: Vector3;
-  constructor(scene: Scene, prefab: string, position: Vector3) {
+  private _previewNodeRef: Nullable<DRef<SceneNode>>;
+  constructor(scene: Scene, prefab: string, position: Vector3, previewNode?: Nullable<SceneNode>) {
     super('Add Prefab');
     this._scene = scene;
     this._nodeId = '';
     this._prefab = prefab;
     this._position = new Vector3(position);
+    this._previewNodeRef = previewNode ? new DRef(previewNode) : null;
   }
   async execute() {
-    let prefab: Nullable<SceneNode> = null;
-    try {
-      prefab = await getEngine().resourceManager.instantiatePrefab(this._scene.rootNode, this._prefab);
-    } catch (err) {
-      console.error(`Load prefab failed: ${this._prefab}: ${err}`);
+    let prefab: Nullable<SceneNode> = this._previewNodeRef?.get() ?? null;
+    if (!prefab) {
+      try {
+        prefab = await getEngine().resourceManager.instantiatePrefab(this._scene.rootNode, this._prefab);
+      } catch (err) {
+        console.error(`Load prefab failed: ${this._prefab}: ${err}`);
+      }
     }
     if (prefab) {
+      prefab.parent = this._scene.rootNode;
       prefab.position.set(this._position);
+      ensureNodeDefaultName(prefab, getDefaultNodeNameFromAssetPath(this._prefab));
+      prefab.iterate((node) => {
+        node.gpuPickable = true;
+        return false;
+      });
       if (this._nodeId) {
         // Restore persistent id if redo
         prefab.persistentId = this._nodeId.split('/').at(-1)!;
       } else {
         this._nodeId = getNodePath(prefab);
       }
+      this._previewNodeRef?.dispose();
+      this._previewNodeRef = null;
       return prefab;
     } else {
       this._nodeId = '';
+      this._previewNodeRef?.dispose();
+      this._previewNodeRef = null;
       return null;
     }
   }
@@ -101,32 +131,46 @@ export class AddAssetCommand extends Command<Nullable<SceneNode>> {
   private readonly _asset: string;
   private _nodeId: string;
   private readonly _position: Vector3;
-  constructor(scene: Scene, asset: string, position: Vector3) {
+  private _previewNodeRef: Nullable<DRef<SceneNode>>;
+  constructor(scene: Scene, asset: string, position: Vector3, previewNode?: Nullable<SceneNode>) {
     super('Add asset');
     this._scene = scene;
     this._nodeId = '';
     this._asset = asset;
     this._position = new Vector3(position);
+    this._previewNodeRef = previewNode ? new DRef(previewNode) : null;
   }
   async execute() {
-    let asset: Nullable<SceneNode> = null;
-    try {
-      //const model = await importModel(this._asset);
-      //asset = await model.createSceneNode(ProjectService.resourceManager, this._scene, false);
-      asset = await getEngine().resourceManager.fetchModel(this._asset, this._scene);
-    } catch (err) {
-      console.error(`Load asset failed: ${this._asset}: ${err}`);
+    let asset: Nullable<SceneNode> = this._previewNodeRef?.get() ?? null;
+    if (!asset) {
+      try {
+        //const model = await importModel(this._asset);
+        //asset = await model.createSceneNode(ProjectService.resourceManager, this._scene, false);
+        asset = await getEngine().resourceManager.fetchModel(this._asset, this._scene);
+      } catch (err) {
+        console.error(`Load asset failed: ${this._asset}: ${err}`);
+      }
     }
     if (asset) {
+      asset.parent = this._scene.rootNode;
       asset.position.set(this._position);
+      ensureNodeDefaultName(asset, getDefaultNodeNameFromAssetPath(this._asset));
+      asset.iterate((node) => {
+        node.gpuPickable = true;
+        return false;
+      });
       if (this._nodeId) {
         asset.persistentId = this._nodeId.split('/').at(-1)!;
       } else {
         this._nodeId = getNodePath(asset);
       }
+      this._previewNodeRef?.dispose();
+      this._previewNodeRef = null;
       return asset;
     } else {
       this._nodeId = '';
+      this._previewNodeRef?.dispose();
+      this._previewNodeRef = null;
       return null;
     }
   }
@@ -143,13 +187,15 @@ export class AddChildCommand<T extends SceneNode = SceneNode> extends Command<Nu
   private readonly _scene: Scene;
   private _nodeId: string;
   private readonly _ctor: { new (scene: Scene): T };
-  constructor(parentNode: SceneNode, ctor: { new (scene: Scene): T }, position?: Vector3) {
+  private readonly _name: string;
+  constructor(parentNode: SceneNode, ctor: { new (scene: Scene): T }, position?: Vector3, name?: string) {
     super('Add child node');
     this._scene = parentNode.scene!;
     this._parentId = getNodePath(parentNode);
     this._nodeId = '';
     this._ctor = ctor;
     this._position = position ?? null;
+    this._name = name?.trim() ?? '';
   }
   async execute() {
     const parent = findNodeByPath(this._scene.rootNode, this._parentId);
@@ -162,6 +208,11 @@ export class AddChildCommand<T extends SceneNode = SceneNode> extends Command<Nu
     node.parent = parent;
     if (this._position) {
       node.position.set(this._position);
+    }
+    if (this._name) {
+      node.name = this._name;
+    } else {
+      ensureNodeDefaultName(node, getDefaultNodeNameFromCtor(this._ctor));
     }
     if (this._nodeId) {
       node.persistentId = this._nodeId.split('/').at(-1)!;
@@ -248,6 +299,8 @@ export class AddShapeCommand extends Command<Mesh> {
     mesh.parent = parent;
     if (this._name) {
       mesh.name = this._name;
+    } else {
+      ensureNodeDefaultName(mesh, getDefaultShapeNodeName(this._shapeCls));
     }
     mesh.position.set(this._position);
     if (this._scale) {
@@ -285,8 +338,19 @@ export class NodeDeleteCommand extends Command {
   }
   async execute(): Promise<void> {
     const node = findNodeByPath(this._scene.rootNode, this._nodeId);
-    this._archive = await getEngine().resourceManager.serializeObject(node, null, null);
+    if (this._archive) {
+      node.remove();
+      return;
+    }
+    const parent = node.parent;
     node.remove();
+    try {
+      await waitForNextFrame();
+      this._archive = await getEngine().resourceManager.serializeObject(node, null, null);
+    } catch (err) {
+      node.parent = parent;
+      throw err;
+    }
   }
   async undo() {
     if (this._archive) {

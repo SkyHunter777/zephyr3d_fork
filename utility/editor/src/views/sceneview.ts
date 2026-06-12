@@ -69,6 +69,12 @@ import { NodeProxy } from '../helpers/proxy';
 import { clearScriptPropertyAccessorCache } from '../helpers/scriptprops';
 import { getMorphTargetGroupPropertyAccessors } from '../helpers/morphtargetprops';
 import { shapePrimitivePaths, type ShapePrimitiveType } from '../helpers/shapeprimitives';
+import {
+  ensureNodeDefaultName,
+  getDefaultNodeNameFromAssetPath,
+  getDefaultNodeNameFromCtor,
+  getDefaultShapeNodeName
+} from '../helpers/defaultnodename';
 import type { EditTool, EditToolContext } from './edittools/edittool';
 import { createEditTool, isObjectEditable } from './edittools/edittool';
 import { calcHierarchyBoundingBoxWorld } from '../helpers/misc';
@@ -163,6 +169,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   private _springBoneColliderGizmo: ShapeGizmo;
   private _springBone: JointDynamicsModifier;
   private _propGridScrollTopFrames: number;
+  private _assetPlacementLoadingCount: number;
   constructor(controller: SceneController) {
     super(controller);
     this._cmdManager = new CommandManager();
@@ -189,6 +196,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     this._springBoneColliderGizmo = null;
     this._springBone = null;
     this._propGridScrollTopFrames = 0;
+    this._assetPlacementLoadingCount = 0;
     this._currentEditTool = new DRef();
     this._cameraAnimationEyeFrom = new Vector3();
     this._cameraAnimationTargetFrom = new Vector3();
@@ -268,6 +276,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   }
   get cmdManager() {
     return this._cmdManager;
+  }
+  get busy() {
+    return this._cmdManager.busy || this._assetPlacementLoadingCount > 0;
   }
   get editToolContext() {
     return this._editToolContext;
@@ -1311,19 +1322,17 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
             switch (this._typeToBePlaced) {
               case 'asset':
                 this._cmdManager
-                  .execute(new AddAssetCommand(this.controller.model.scene, this._assetToBeAdded!, pos))
+                  .execute(new AddAssetCommand(this.controller.model.scene, this._assetToBeAdded!, pos, placeNode))
                   .then((node) => {
                     this._sceneHierarchy!.selectNode(node);
-                    placeNode.parent = null;
                     eventBus.dispatchEvent('scene_changed');
                   });
                 break;
               case 'prefab':
                 this._cmdManager
-                  .execute(new AddPrefabCommand(this.controller.model.scene, this._assetToBeAdded!, pos))
+                  .execute(new AddPrefabCommand(this.controller.model.scene, this._assetToBeAdded!, pos, placeNode))
                   .then((node) => {
                     this._sceneHierarchy!.selectNode(node);
-                    placeNode.parent = null;
                     eventBus.dispatchEvent('scene_changed');
                   });
                 break;
@@ -1531,6 +1540,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     eventBus.on('workspace_drag_end', this.handleWorkspaceDragEnd, this);
     eventBus.on('workspace_dragging', this.handleWorkspaceDragging, this);
     eventBus.on('workspace_drag_drop', this.handleWorkspaceDragDrop, this);
+    eventBus.on('assets_deleting', this.handleAssetsDeleting, this);
     eventBus.on('edit_material', this.editMaterial, this);
     eventBus.on('edit_material_function', this.editMaterialFunction, this);
     this.reset();
@@ -1562,6 +1572,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     eventBus.off('workspace_drag_end', this.handleWorkspaceDragEnd, this);
     eventBus.off('workspace_dragging', this.handleWorkspaceDragging, this);
     eventBus.off('workspace_drag_drop', this.handleWorkspaceDragDrop, this);
+    eventBus.off('assets_deleting', this.handleAssetsDeleting, this);
     eventBus.off('edit_material', this.editMaterial, this);
     eventBus.off('edit_material_function', this.editMaterialFunction, this);
     this.endEditAll();
@@ -2172,6 +2183,16 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   private getTopLevelSelection(nodes: SceneNode[]) {
     return nodes.filter((node) => !nodes.some((other) => other !== node && other.isParentOf(node)));
   }
+  private getHierarchyDragSelection(src: SceneNode, dst: SceneNode) {
+    const selectedNodes = this.getTopLevelSelection(this.getSelectedSceneNodes()).filter(
+      (node) => node && node !== this.controller.model.scene.rootNode
+    );
+    const dragNodes = selectedNodes.includes(src) ? selectedNodes : [src];
+    if (dragNodes.some((node) => node === dst || node.isParentOf(dst))) {
+      return [];
+    }
+    return dragNodes.filter((node) => node.parent !== dst);
+  }
   private ensureMultiTransformPivot() {
     if (!this._multiTransformPivot) {
       this._multiTransformPivot = new SceneNode(this.controller.model.scene);
@@ -2476,8 +2497,8 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       this._nodeToBePlaced.dispose();
       const command =
         this._typeToBePlaced === 'asset'
-          ? new AddAssetCommand(this.controller.model.scene, this._assetToBeAdded!, pos)
-          : new AddPrefabCommand(this.controller.model.scene, this._assetToBeAdded!, pos);
+          ? new AddAssetCommand(this.controller.model.scene, this._assetToBeAdded!, pos, placeNode)
+          : new AddPrefabCommand(this.controller.model.scene, this._assetToBeAdded!, pos, placeNode);
       this._cmdManager.execute(command).then((node) => {
         this._sceneHierarchy!.selectNode(node);
         eventBus.dispatchEvent('scene_changed');
@@ -2607,6 +2628,63 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   private handleAssetSelectionChanged() {
     this._lastDuplicateTarget = 'asset';
   }
+  private handleAssetsDeleting(paths: string[]) {
+    const scene = this.controller.model.scene;
+    if (!scene || !paths?.length) {
+      return;
+    }
+    const normalizedPaths = paths.map((path) => ProjectService.VFS.normalizePath(path)).filter(Boolean);
+    if (normalizedPaths.length === 0) {
+      return;
+    }
+    const matchedNodes: SceneNode[] = [];
+    scene.rootNode.iterateBottomToTop((node) => {
+      if (node === scene.rootNode) {
+        return false;
+      }
+      const prefabNode = node.getPrefabNode();
+      const prefabPath = prefabNode?.prefabId?.startsWith('/')
+        ? ProjectService.VFS.normalizePath(prefabNode.prefabId)
+        : '';
+      const assetId = getEngine().resourceManager.getAssetId(node);
+      const assetPath =
+        typeof assetId === 'string' && assetId.startsWith('/') ? ProjectService.VFS.normalizePath(assetId) : '';
+      const matched = normalizedPaths.some(
+        (path) =>
+          prefabPath === path ||
+          assetPath === path ||
+          (ProjectService.VFS.isParentOf(path, prefabPath) && prefabPath !== path) ||
+          (ProjectService.VFS.isParentOf(path, assetPath) && assetPath !== path)
+      );
+      if (matched) {
+        matchedNodes.push(node);
+      }
+      return false;
+    });
+    const removedNodes = matchedNodes.filter(
+      (node) => !matchedNodes.some((other) => other !== node && other.isParentOf(node))
+    );
+    if (removedNodes.length > 0) {
+      for (const node of removedNodes) {
+        node.remove();
+      }
+      this._sceneHierarchy?.refreshStructure();
+      if (
+        this._propGrid.object instanceof SceneNode &&
+        removedNodes.some((node) => node.isParentOf(this._propGrid.object))
+      ) {
+        this._propGrid.object = scene;
+      }
+      if (removedNodes.some((node) => node.isParentOf(this._postGizmoRenderer?.node))) {
+        this._postGizmoRenderer!.node = null;
+      }
+      const selectedNodes = this.getSelectedSceneNodes();
+      if (removedNodes.some((node) => selectedNodes.some((selected) => node.isParentOf(selected)))) {
+        this._sceneHierarchy?.selectNode(null);
+      }
+      eventBus.dispatchEvent('scene_changed');
+    }
+  }
   private handleDuplicateShortcut(): boolean {
     const selectedNodes = this.getSelectedSceneNodes();
     const assetRenderer = this._assetView?.renderer;
@@ -2631,10 +2709,20 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     return false;
   }
   private handleNodeDragDrop(src: SceneNode, dst: SceneNode) {
-    if (src.parent !== dst && !src.isParentOf(dst)) {
-      this._cmdManager.execute(new NodeReparentCommand(src, dst)).then(() => {
-        eventBus.dispatchEvent('scene_changed');
-      });
+    const dragNodes = this.getHierarchyDragSelection(src, dst);
+    if (dragNodes.length === 0) {
+      return;
+    }
+    const commands = dragNodes.map((node) => new NodeReparentCommand(node, dst));
+    const activeNode = dragNodes.includes(src) ? src : dragNodes[dragNodes.length - 1];
+    const onDone = () => {
+      this._sceneHierarchy?.selectNodes(dragNodes, activeNode);
+      eventBus.dispatchEvent('scene_changed');
+    };
+    if (commands.length === 1) {
+      this._cmdManager.execute(commands[0]).then(onDone);
+    } else {
+      this._cmdManager.execute(new CompositeCommand('Reparent objects', commands)).then(onDone);
     }
   }
   private handleNodePickerDrop(payload: SceneHierarchyNodePickerPayload, dst: SceneNode) {
@@ -2683,6 +2771,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     );
     const mesh = new Mesh(this.controller.model.scene, shape!, material!);
     mesh.gpuPickable = false;
+    ensureNodeDefaultName(mesh, getDefaultShapeNodeName(shapeCls));
     this._nodeToBePlaced.set(mesh);
     this._shapeToBeAdded = {
       cls: shapeCls
@@ -2700,6 +2789,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     const node = new ctor(this.controller.model.scene);
     node.parent = null;
     node.gpuPickable = false;
+    ensureNodeDefaultName(node, getDefaultNodeNameFromCtor(ctor));
     this._proxy!.createProxy(node);
     this._nodeToBePlaced.set(node);
     this._typeToBePlaced = 'node';
@@ -2713,10 +2803,12 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       this._nodeToBePlaced.dispose();
       this._typeToBePlaced = 'none';
     }
+    this._assetPlacementLoadingCount++;
     getEngine()
       .resourceManager.instantiatePrefab(this.controller.model.scene.rootNode, prefab)
       .then((node) => {
         node!.parent = null;
+        ensureNodeDefaultName(node, getDefaultNodeNameFromAssetPath(prefab));
         node!.iterate((node) => {
           node.gpuPickable = false;
         });
@@ -2724,6 +2816,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
         this._assetToBeAdded = prefab;
         this._typeToBePlaced = 'prefab';
         this._ctorToBePlaced = null;
+      })
+      .finally(() => {
+        this._assetPlacementLoadingCount = Math.max(0, this._assetPlacementLoadingCount - 1);
       });
   }
   private handleAddAsset(asset: string) {
@@ -2733,10 +2828,12 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       this._nodeToBePlaced.dispose();
       this._typeToBePlaced = 'none';
     }
+    this._assetPlacementLoadingCount++;
     getEngine()
       .resourceManager.fetchModel(asset, this.controller.model.scene)
       .then((node) => {
         node.parent = null;
+        ensureNodeDefaultName(node, getDefaultNodeNameFromAssetPath(asset));
         node.iterate((node) => {
           node.gpuPickable = false;
         });
@@ -2747,6 +2844,9 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       })
       .catch((err) => {
         Dialog.messageBox('Error', `${err}`);
+      })
+      .finally(() => {
+        this._assetPlacementLoadingCount = Math.max(0, this._assetPlacementLoadingCount - 1);
       });
   }
   private handleAddChild(parent: SceneNode, ctor: { new (scene: Scene): SceneNode }) {
@@ -2787,6 +2887,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     });
   }
   private handleNodeRemoved(node: SceneNode) {
+    this._sceneHierarchy?.refreshStructure();
     if (node.isParentOf(this._postGizmoRenderer!.node!)) {
       this._postGizmoRenderer!.node = null;
     }
@@ -2796,6 +2897,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
     }
   }
   private handleNodeAttached(node: SceneNode) {
+    this._sceneHierarchy?.refreshStructure();
     queueMicrotask(() => {
       this.syncNodeProxyTree(node);
     });

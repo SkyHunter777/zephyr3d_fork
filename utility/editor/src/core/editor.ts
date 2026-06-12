@@ -5,7 +5,7 @@ import { DialogRenderer } from '../components/modal';
 import { ModuleManager } from './module';
 import { SceneController } from '../controllers/scenecontroller';
 import { FontGlyph } from './fontglyph';
-import { AssetManager, ResourceManager, getEngine } from '@zephyr3d/scene';
+import { AssetManager, ResourceManager, getDevice, getEngine } from '@zephyr3d/scene';
 import type { Texture2D } from '@zephyr3d/device';
 import {
   analyzeGPUObjectGrowth,
@@ -38,6 +38,7 @@ import {
   type SystemPluginRecord
 } from './services/systemplugin';
 import { isDesktopApp } from './services/desktop';
+import type { SceneView } from '../views/sceneview';
 
 type TreeData = { files: { name: string; size: number }[]; subDirs: { [name: string]: TreeData } };
 
@@ -227,6 +228,15 @@ export class Editor {
   }
   update(dt: number) {
     eventBus.dispatchEvent('update', dt);
+  }
+  private updateBusyCursor() {
+    const sceneController = this._moduleManager.currentModule?.controller as SceneController;
+    const sceneView = sceneController?.view as SceneView;
+    const canvas = getDevice()?.canvas;
+    if (!canvas) {
+      return;
+    }
+    canvas.style.cursor = sceneView?.busy ? 'wait' : '';
   }
   getBrushes() {
     return this._assetImages.brushes;
@@ -461,6 +471,7 @@ export class Editor {
     }
     DialogRenderer.render();
     imGuiEndFrame();
+    this.updateBusyCursor();
   }
   renderWelcomePage() {
     const io = ImGui.GetIO();
