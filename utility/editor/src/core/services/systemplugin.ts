@@ -138,7 +138,10 @@ type LinkedPluginGraphCache = {
 };
 
 export class SystemPluginService {
-  private static readonly _linkedPluginMounts = new Map<string, ReturnType<typeof createLinkedDirectoryVFS>>();
+  private static readonly _linkedPluginMounts = new Map<
+    string,
+    ReturnType<typeof createLinkedDirectoryVFS>
+  >();
   private static readonly _linkedPluginDirectories = new Map<string, string>();
   private static readonly _linkedPluginGraphCaches = new Map<string, LinkedPluginGraphCache>();
 
@@ -758,16 +761,19 @@ export class SystemPluginService {
     onProgress?.('正在解析插件目录结构...');
     const packageFiles = this.normalizeImportedPluginFiles(inputFiles);
     const packageManifest = this.readPackageManifestFromFiles(packageFiles);
-    return this.installPluginFiles({
-      id: packageManifest.id,
-      name: packageManifest.name,
-      version: packageManifest.version,
-      description: packageManifest.description,
-      entryFileName: packageManifest.entry,
-      dependencies: packageManifest.dependencies,
-      files: packageFiles,
-      enabled: true
-    }, onProgress);
+    return this.installPluginFiles(
+      {
+        id: packageManifest.id,
+        name: packageManifest.name,
+        version: packageManifest.version,
+        description: packageManifest.description,
+        entryFileName: packageManifest.entry,
+        dependencies: packageManifest.dependencies,
+        files: packageFiles,
+        enabled: true
+      },
+      onProgress
+    );
   }
 
   static async installPluginFromZip(
@@ -792,16 +798,19 @@ export class SystemPluginService {
       onProgress?.('正在解析插件包结构...');
       const packageFiles = this.normalizeImportedPluginFiles(inputFiles);
       const packageManifest = this.readPackageManifestFromFiles(packageFiles);
-      return this.installPluginFiles({
-        id: packageManifest.id,
-        name: packageManifest.name,
-        version: packageManifest.version,
-        description: packageManifest.description,
-        entryFileName: packageManifest.entry,
-        dependencies: packageManifest.dependencies,
-        files: packageFiles,
-        enabled: true
-      }, onProgress);
+      return this.installPluginFiles(
+        {
+          id: packageManifest.id,
+          name: packageManifest.name,
+          version: packageManifest.version,
+          description: packageManifest.description,
+          entryFileName: packageManifest.entry,
+          dependencies: packageManifest.dependencies,
+          files: packageFiles,
+          enabled: true
+        },
+        onProgress
+      );
     } finally {
       await zipReader.close();
     }
@@ -817,7 +826,9 @@ export class SystemPluginService {
       throw new Error(`System plugin '${pluginId}' is not installed`);
     }
     if (plugin.linked?.directory) {
-      throw new Error(`Linked plugin '${plugin.id}' cannot install dependencies from the built-in plugin manager`);
+      throw new Error(
+        `Linked plugin '${plugin.id}' cannot install dependencies from the built-in plugin manager`
+      );
     }
     const match = spec.match(/^((?:@[^/]+\/)?[^@/]+)(?:@(.+))?$/);
     const packageName = match?.[1] ?? spec;
@@ -848,7 +859,9 @@ export class SystemPluginService {
       throw new Error(`System plugin '${pluginId}' is not installed`);
     }
     if (plugin.linked?.directory) {
-      throw new Error(`Linked plugin '${plugin.id}' cannot remove dependencies from the built-in plugin manager`);
+      throw new Error(
+        `Linked plugin '${plugin.id}' cannot remove dependencies from the built-in plugin manager`
+      );
     }
     const manifest = await this.readManifest();
     const manifestEntry = manifest.plugins[pluginId];
@@ -1193,7 +1206,11 @@ export class SystemPluginService {
     }
 
     const cache = this.getLinkedPluginGraphCache(directory);
-    const cachedGraph = await this.tryCollectCachedLinkedPluginGraphFiles(cache, linkedVFS, resolvedEntryPath);
+    const cachedGraph = await this.tryCollectCachedLinkedPluginGraphFiles(
+      cache,
+      linkedVFS,
+      resolvedEntryPath
+    );
     if (cachedGraph) {
       return cachedGraph;
     }
@@ -1653,7 +1670,11 @@ export class SystemPluginService {
       );
       const normalizedEntryFileName = this.normalizeEntryFileName(entryFileName ?? packageManifest.entry);
       onProgress?.('正在分析插件入口依赖...');
-      const graphFilesResult = await this.collectLinkedPluginGraphFiles(directory, linkedVFS, normalizedEntryFileName);
+      const graphFilesResult = await this.collectLinkedPluginGraphFiles(
+        directory,
+        linkedVFS,
+        normalizedEntryFileName
+      );
       const graphFiles = graphFilesResult.files;
       const packageFiles =
         manifestFileName === SYSTEM_PLUGIN_PACKAGE_MANIFEST
