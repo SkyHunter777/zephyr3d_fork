@@ -44,7 +44,7 @@ import {
   TextureSampleNode,
   VertexColorNode
 } from '@zephyr3d/scene';
-import { exportFile, exportMultipleFilesAsZip, exportMultipleFilesToDirectory } from '../helpers/downloader';
+import { exportFile, exportMultipleFilesAsZip } from '../helpers/downloader';
 import { matchesMimeType } from '../helpers/mimematch';
 import { buildPrimitiveGlbFromZmshContent } from '../helpers/primitiveglb';
 import { DlgImportOptions } from '../views/dlg/importoptionsdlg';
@@ -53,7 +53,7 @@ import type { Editor } from '../core/editor';
 import type { RuntimeEditorAssetContext, RuntimeEditorMenuContext } from '../core/plugin';
 import type { PropertyAccessor } from '@zephyr3d/scene';
 import { AssetThumbnailService, ImageAssetThumbnailProvider } from './assetthumbnail';
-import { getDesktopAPI, isDesktopApp } from '../core/services/desktop';
+import { getDesktopAPI } from '../core/services/desktop';
 import { ElectronFS } from '../core/services/electronfs';
 
 type BlueprintNodeState = {
@@ -1849,11 +1849,7 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       return;
     }
     const items = Array.from(this.selectedItems);
-    const selectedPaths = items.map((item) => ('subDir' in item ? item.path : item.meta.path));
-    const preserveAssetsPath = selectedPaths.every(
-      (path) => path === '/assets' || this._vfs.isParentOf('/assets', path)
-    );
-    if (items.length === 1 && !('subDir' in items[0]) && !preserveAssetsPath) {
+    if (items.length === 1 && !('subDir' in items[0])) {
       const filename = this._vfs.basename(items[0].meta.path);
       this._vfs.readFile(items[0].meta.path, { encoding: 'binary' }).then((data) => {
         exportFile(data as ArrayBuffer, filename);
@@ -1865,71 +1861,11 @@ export class VFSRenderer extends makeObservable(Disposable)<{
       const dirs = (items.filter((items) => 'subDir' in items) as DirectoryInfo[]).map(
         (item: DirectoryInfo) => item.path
       );
-      const dlgProgressBar = new DlgProgress('Export Assets##ExportProgress', 320);
-      dlgProgressBar.showModal();
-      dlgProgressBar.setProgress(0, 1);
       const zipFilename =
         items.length === 1
           ? `${this._vfs.basename('subDir' in items[0] ? items[0].path : items[0].meta.path)}.zip`
-          : preserveAssetsPath
-            ? 'assets-export.zip'
-            : 'export.zip';
-      try {
-        if (preserveAssetsPath && isDesktopApp()) {
-          const desktop = getDesktopAPI();
-          const targetRoot = await desktop?.fs.pickDirectory({
-            title: 'Select Export Directory',
-            buttonLabel: 'Export Here'
-          });
-          if (!targetRoot) {
-            return;
-          }
-          const targetFS = new ElectronFS(`project:${targetRoot}`);
-          const resetPaths: string[] = [];
-          try {
-            if (await targetFS.exists('/assets')) {
-              const existingEntries = await targetFS.readDirectory('/assets', {
-                includeHidden: true,
-                recursive: false
-              });
-              if (existingEntries.length > 0) {
-                const action = await DlgMessageBoxEx.messageBoxEx(
-                  'Export Assets',
-                  'The target directory already contains an assets folder.\n\nReplace it, merge into it, or cancel?',
-                  ['Replace', 'Merge', 'Cancel'],
-                  420,
-                  0,
-                  true
-                );
-                if (action === 'Cancel' || !action) {
-                  return;
-                }
-                if (action === 'Replace') {
-                  resetPaths.push('/assets');
-                }
-              }
-            }
-          } finally {
-            await targetFS.close();
-          }
-          const exported = await exportMultipleFilesToDirectory(files, dirs, this._vfs, {
-            preserveProjectPaths: true,
-            targetRoot,
-            resetPaths,
-            onProgress: (current, total) => dlgProgressBar.setProgress(current, total)
-          });
-          if (!exported) {
-            return;
-          }
-        } else {
-          await exportMultipleFilesAsZip(files, dirs, zipFilename, this._vfs, {
-            preserveProjectPaths: preserveAssetsPath,
-            onProgress: (current, total) => dlgProgressBar.setProgress(current, total)
-          });
-        }
-      } finally {
-        dlgProgressBar.close();
-      }
+          : 'export.zip';
+      await exportMultipleFilesAsZip(files, dirs, zipFilename, this._vfs);
     }
   }
 
