@@ -20,6 +20,10 @@ import {
   SpriteMaterial
 } from '@zephyr3d/scene';
 import {
+  ConstantScalarNode,
+  ConstantVec2Node,
+  ConstantVec3Node,
+  ConstantVec4Node,
   DirectionalLight,
   FunctionCallNode,
   getApp,
@@ -159,7 +163,6 @@ export class PBRMaterialEditor extends GraphEditor {
     this._blueprintPath = '';
     this._cmdManager = new CommandManager();
     this._savedState = null;
-    this.propEditor.on('object_property_changed', this.graphChanged, this);
     this.propEditor.on('object_property_edit_finished', this.handlePropertyEditFinished, this);
   }
   //protected create
@@ -196,7 +199,6 @@ export class PBRMaterialEditor extends GraphEditor {
       const previewMesh = new Mesh(this._previewScene.get()!, sphere, mat);
       this._previewMesh = new DRef(previewMesh);
     }
-    this.propEditor.on('object_property_changed', this.graphChanged, this);
   }
   open() {
     //getApp().inputManager.useFirst(this.handleEvent, this);
@@ -213,7 +215,6 @@ export class PBRMaterialEditor extends GraphEditor {
     }
     this._defaultMaterial.dispose();
     this._editMaterial.dispose();
-    this.propEditor.off('object_property_changed', this.graphChanged, this);
     this.propEditor.off('object_property_edit_finished', this.handlePropertyEditFinished, this);
     this.fragmentEditor?.off('changed', this.graphChanged, this);
     this.fragmentEditor?.off('dragdrop', this.dragdropFrag, this);
@@ -748,7 +749,16 @@ export class PBRMaterialEditor extends GraphEditor {
       }
     }
   }
-  protected onPropChanged(): void {
+  protected onPropChanged(object: object, prop: PropertyAccessor): void {
+    const material = this._editMaterial.get();
+    if (object === material || (!object && this.propEditor.currentObject === material)) {
+      this.handleMaterialPropertyChanged(prop);
+      return;
+    }
+    if (this.tryUpdatePreviewUniformValue(object, prop)) {
+      this.markDirty();
+      return;
+    }
     this.graphChanged();
   }
   protected onSelectionChanged(object: Nullable<IGraphNode>): void {
@@ -784,11 +794,81 @@ export class PBRMaterialEditor extends GraphEditor {
     }
   }
   private graphChanged() {
-    this._version = -1;
+    this.markDirty();
     const mat = this._editMaterial.get();
     if (mat instanceof PBRBluePrintMaterial || mat instanceof SpriteBlueprintMaterial) {
       this._irChanged = true;
+      if (this.propEditor.currentObject === mat) {
+        this.propEditor.refresh();
+      }
     }
+  }
+  private markDirty() {
+    this._version = -1;
+  }
+  private shouldRefreshMaterialInspector(prop: Nullable<PropertyAccessor>) {
+    const name = prop?.name ?? '';
+    return name === 'Reflection' || name === 'AnisotropyDirectionTexture';
+  }
+  private handleMaterialPropertyChanged(prop: Nullable<PropertyAccessor>) {
+    this.markDirty();
+    if (this.shouldRefreshMaterialInspector(prop)) {
+      this.propEditor.refresh();
+    }
+  }
+  private isUniformValuePropertyName(name: string) {
+    return name === 'x' || name === 'y' || name === 'z' || name === 'w' || name === 'rgb' || name === 'rgba';
+  }
+  private getUniformNodeValue(
+    node: ConstantScalarNode | ConstantVec2Node | ConstantVec3Node | ConstantVec4Node
+  ): number | Float32Array | null {
+    if (!node.isUniform || !node.paramName) {
+      return null;
+    }
+    if (node instanceof ConstantScalarNode) {
+      return node.x;
+    }
+    if (node instanceof ConstantVec2Node) {
+      return new Float32Array([node.x, node.y]);
+    }
+    if (node instanceof ConstantVec3Node) {
+      return new Float32Array([node.x, node.y, node.z]);
+    }
+    return new Float32Array([node.x, node.y, node.z, node.w]);
+  }
+  private tryUpdatePreviewUniformValue(object: object, prop: PropertyAccessor) {
+    if (!this.isUniformValuePropertyName(prop?.name ?? '')) {
+      return false;
+    }
+    if (
+      !(
+        object instanceof ConstantScalarNode ||
+        object instanceof ConstantVec2Node ||
+        object instanceof ConstantVec3Node ||
+        object instanceof ConstantVec4Node
+      )
+    ) {
+      return false;
+    }
+    if (!object.isUniform || !object.paramName) {
+      return false;
+    }
+    const value = this.getUniformNodeValue(object);
+    if (value === null) {
+      return false;
+    }
+    const mat = this._editMaterial.get();
+    if (!(mat instanceof PBRBluePrintMaterial || mat instanceof SpriteBlueprintMaterial)) {
+      return false;
+    }
+    const uniform = mat.uniformValues?.find((u) => u.name === object.paramName);
+    if (!uniform) {
+      return false;
+    }
+    uniform.value = typeof value === 'number' ? [value] : Array.from(value);
+    uniform.finalValue = typeof value === 'number' ? value : new Float32Array(uniform.value);
+    mat.uniformChanged();
+    return true;
   }
   private handlePropertyEditFinished(
     object: Nullable<object>,
@@ -801,8 +881,14 @@ export class PBRMaterialEditor extends GraphEditor {
     }
     this._cmdManager.execute(
       new MaterialPropertyEditCommand(object, prop, oldValue, newValue, () => {
-        this.graphChanged();
-        this.propEditor.refresh();
+        if (object === this._editMaterial.get()) {
+          this.handleMaterialPropertyChanged(prop);
+        } else if (this.tryUpdatePreviewUniformValue(object, prop)) {
+          this.markDirty();
+        } else {
+          this.graphChanged();
+          this.propEditor.refresh();
+        }
       })
     );
   }

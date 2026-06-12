@@ -1077,23 +1077,7 @@ export class TextureSampleNode extends BaseGraphNode {
       name: 'TextureSampleNode',
       getProps(): PropertyAccessor<TextureSampleNode>[] {
         return defineProps([
-          {
-            name: 'Name',
-            type: 'string',
-            isNullable() {
-              return false;
-            },
-            get(this: TextureSampleNode, value) {
-              value.str[0] = this.paramName ? this.paramName.slice(2) : '';
-            },
-            set(this: TextureSampleNode, value) {
-              if (!/^[A-Za-z0-9_]+$/.test(value.str[0])) {
-                console.log(`Invalid parameter name: ${value.str[0]}`);
-              } else {
-                this.paramName = `u_${value.str[0]}`;
-              }
-            }
-          },
+          ...(textureNodeProps as unknown as PropertyAccessor<TextureSampleNode>[]),
           {
             name: 'SamplerType',
             type: 'string',

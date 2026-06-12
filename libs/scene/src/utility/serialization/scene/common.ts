@@ -6,11 +6,16 @@ import type {
   TextureSampler
 } from '@zephyr3d/device';
 import { defineProps, type PropertyAccessor, type SerializableClass } from '../types';
-import type { Material, MeshMaterial } from '../../../material';
+import { PBRBluePrintMaterial, type Material, type MeshMaterial } from '../../../material';
+import type { PBRBlueprintOutputName } from '../../../material/pbrblueprint';
 import type { Nullable } from '@zephyr3d/base';
 import { Matrix4x4, Vector2, Vector3, Vector4 } from '@zephyr3d/base';
 import type { ResourceManager } from '../manager';
 import { getDevice, getEngine } from '../../../app/api';
+
+function shouldHideBlueprintTextureProperty(object: unknown, outputs?: readonly PBRBlueprintOutputName[]) {
+  return !!outputs && object instanceof PBRBluePrintMaterial;
+}
 
 function getTextureLabel(name: string): string {
   return name
@@ -116,7 +121,8 @@ export function getTextureProps<T extends Material>(
       : never,
   sRGB: boolean,
   phase: number,
-  isValid?: (this: T) => boolean
+  isValid?: (this: T) => boolean,
+  blueprintOutputsToHide?: readonly PBRBlueprintOutputName[]
 ): PropertyAccessor<T>[] {
   const textureLabel = getTextureLabel(name);
   return defineProps([
@@ -159,6 +165,9 @@ export function getTextureProps<T extends Material>(
           }
         }
       },
+      isHidden(this: T) {
+        return shouldHideBlueprintTextureProperty(this, blueprintOutputsToHide);
+      },
       isValid() {
         if (this.$isInstance) {
           return false;
@@ -200,6 +209,9 @@ export function getTextureProps<T extends Material>(
             new Vector3(value.num[0], value.num[1], 1)
           );
         }
+      },
+      isHidden(this: T) {
+        return shouldHideBlueprintTextureProperty(this, blueprintOutputsToHide);
       },
       isValid() {
         if (this.$isInstance) {
@@ -248,6 +260,9 @@ export function getTextureProps<T extends Material>(
             maxAnisotropy: sampler.maxAnisotropy
           }) as any;
       },
+      isHidden(this: T) {
+        return shouldHideBlueprintTextureProperty(this, blueprintOutputsToHide);
+      },
       isValid() {
         if (this.$isInstance) {
           return false;
@@ -293,6 +308,9 @@ export function getTextureProps<T extends Material>(
           maxAnisotropy: sampler.maxAnisotropy
         });
       },
+      isHidden(this: T) {
+        return shouldHideBlueprintTextureProperty(this, blueprintOutputsToHide);
+      },
       isValid() {
         if (this.$isInstance) {
           return false;
@@ -315,6 +333,9 @@ export function getTextureProps<T extends Material>(
       },
       set(value) {
         this[name.slice(0, name.length - 7) + 'TexCoordIndex'] = value.num[0];
+      },
+      isHidden(this: T) {
+        return shouldHideBlueprintTextureProperty(this, blueprintOutputsToHide);
       },
       isValid() {
         if (this.$isInstance) {

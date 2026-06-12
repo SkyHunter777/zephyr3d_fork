@@ -61,7 +61,7 @@ import {
 import type { Scene } from '../../scene';
 import { SceneNode } from '../../scene';
 import type { PropertyTrack } from '../../animation';
-import type { ModelFetchOptions, TextureFetchOptions } from '../../asset';
+import type { ModelFetchOptions, ModelLoader, TextureFetchOptions } from '../../asset';
 import { AssetManager } from '../../asset';
 import type { BaseTexture, SamplerOptions, Texture2D, Texture2DArray, TextureCube } from '@zephyr3d/device';
 import {
@@ -305,7 +305,7 @@ export class ResourceManager {
         getSceneClass(this),
         getSubsurfaceProfileClass(),
         ...getMeshMaterialClass(),
-        ...getPBRBluePrintMaterialClass(this),
+        ...getPBRBluePrintMaterialClass(),
         ...getSpriteBlueprintMaterialClass(),
         ...getUnlitMaterialClass(this),
         ...getLambertMaterialClass(this),
@@ -874,7 +874,7 @@ export class ResourceManager {
   /**
    * Register a model loader by MIME type.
    */
-  setModelLoader(mimeType: string, loader: import('../../asset').ModelLoader) {
+  setModelLoader(mimeType: string, loader: ModelLoader) {
     this._assetManager.setModelLoader(mimeType, loader);
   }
   /**

@@ -19,7 +19,13 @@ export type NodeEditorState = {
     locked: boolean;
     node: Record<string, unknown>;
   }[];
-  links: { startNodeId: number; startSlotId: number; endNodeId: number; endSlotId: number }[];
+  links: {
+    startNodeId: number;
+    startSlotId: number;
+    endNodeId: number;
+    endSlotId: number;
+    reroutePoints?: number[][];
+  }[];
   canvasOffset?: number[];
   canvasScale?: number;
 };
@@ -31,6 +37,7 @@ interface GraphLink {
   endNodeId: number;
   endSlotId: number;
   color: ImGui.ImVec4;
+  reroutePoints: ImGui.ImVec2[];
 }
 
 interface SlotInfo {
@@ -38,6 +45,22 @@ interface SlotInfo {
   slotId: number;
   position: ImGui.ImVec2;
   isOutput: boolean;
+}
+
+interface LinkHitInfo {
+  linkId: number;
+  segmentIndex: number;
+  distance: number;
+  nearestPoint: ImGui.ImVec2;
+}
+
+interface LinkControlPointInfo {
+  linkId: number;
+  pointIndex: number;
+}
+
+interface LinkControlPointSelectionInfo extends LinkControlPointInfo {
+  key: string;
 }
 
 // Traversal Result
@@ -62,7 +85,9 @@ export class NodeEditor extends Observable<{
   private structureDirty: boolean;
 
   public selectedNodes: number[];
+  private selectedLinkControlPoints: Set<string>;
   private draggingNode: Nullable<number>;
+  private isDraggingLinkControlPoints: boolean;
   private isDraggingCanvas: boolean;
   private isHoveringMenu: boolean;
   private canvasOffset: ImGui.ImVec2;
@@ -71,6 +96,12 @@ export class NodeEditor extends Observable<{
   private isCreatingLink: boolean;
   private linkStartSlot: Nullable<SlotInfo>;
   private hoveredSlot: Nullable<SlotInfo>;
+  private hoveredLinkId: number | null;
+  private hoveredLinkControlPoint: LinkControlPointInfo | null;
+  private draggingLinkControlPoint: LinkControlPointInfo | null;
+  private draggingLinkControlPointDirty: boolean;
+  private draggingLinkControlPointStarted: boolean;
+  private linkControlPointMouseDownScreen: ImGui.ImVec2 | null;
   private contextMenuNode: Nullable<number>;
   private showContextMenu: boolean;
   private showGrid: boolean;
@@ -82,12 +113,26 @@ export class NodeEditor extends Observable<{
   private pendingSingleSelectNodeId: number | null;
   private dragStartedOnThisClick: boolean;
   private mouseDownPosWorld: ImGui.ImVec2 | null;
+  private isBoxSelecting: boolean;
+  private boxSelectStartWorld: ImGui.ImVec2 | null;
+  private boxSelectCurrentWorld: ImGui.ImVec2 | null;
+  private boxSelectInitialSelection: number[];
+  private boxSelectInitialLinkControlSelection: string[];
+  private boxSelectAdditive: boolean;
+  private boxSelectStartedOnThisClick: boolean;
   private justOpened: boolean;
   private nodeSearchBuf: [string];
   private filteredCategory: NodeCategory[];
   private readonly linkHitRadius: number;
   private readonly linkWidthNormal: number;
   private readonly linkWidthSelected: number;
+  private readonly linkHoverColor: ImGui.ImVec4;
+  private readonly linkControlPointRadiusPadding: number;
+  private readonly linkControlPointHitRadius: number;
+  private readonly linkControlPointHitRadiusSelected: number;
+  private readonly linkControlPointColor: ImGui.ImVec4;
+  private readonly linkControlPointHoverColor: ImGui.ImVec4;
+  private readonly linkControlPointSelectedColor: ImGui.ImVec4;
   private readonly pinOuterRadius: number;
   private readonly pinHighlightColor: ImGui.ImVec4;
   private readonly pinHoverColor: ImGui.ImVec4;
@@ -107,7 +152,9 @@ export class NodeEditor extends Observable<{
     };
     this.structureDirty = true;
     this.selectedNodes = [];
+    this.selectedLinkControlPoints = new Set();
     this.draggingNode = null;
+    this.isDraggingLinkControlPoints = false;
     this.isDraggingCanvas = false;
     this.canvasOffset = new ImGui.ImVec2(0, 0);
     this.canvasScale = 1.0;
@@ -115,6 +162,12 @@ export class NodeEditor extends Observable<{
     this.linkStartSlot = null;
     this.isHoveringMenu = false;
     this.hoveredSlot = null;
+    this.hoveredLinkId = null;
+    this.hoveredLinkControlPoint = null;
+    this.draggingLinkControlPoint = null;
+    this.draggingLinkControlPointDirty = false;
+    this.draggingLinkControlPointStarted = false;
+    this.linkControlPointMouseDownScreen = null;
     this.contextMenuNode = null;
     this.showContextMenu = false;
     this.showGrid = true;
@@ -126,12 +179,26 @@ export class NodeEditor extends Observable<{
     this.pendingSingleSelectNodeId = null;
     this.dragStartedOnThisClick = false;
     this.mouseDownPosWorld = null;
+    this.isBoxSelecting = false;
+    this.boxSelectStartWorld = null;
+    this.boxSelectCurrentWorld = null;
+    this.boxSelectInitialSelection = [];
+    this.boxSelectInitialLinkControlSelection = [];
+    this.boxSelectAdditive = false;
+    this.boxSelectStartedOnThisClick = false;
     this.justOpened = true;
     this.nodeSearchBuf = [''];
     this.filteredCategory = [];
     this.linkHitRadius = 6;
     this.linkWidthNormal = 2.0;
     this.linkWidthSelected = 4.0;
+    this.linkHoverColor = new ImGui.ImVec4(1.0, 0.85, 0.3, 1.0);
+    this.linkControlPointRadiusPadding = 1.5;
+    this.linkControlPointHitRadius = 8;
+    this.linkControlPointHitRadiusSelected = 10;
+    this.linkControlPointColor = new ImGui.ImVec4(0.9, 0.9, 0.9, 0.85);
+    this.linkControlPointHoverColor = new ImGui.ImVec4(1.0, 0.85, 0.3, 1.0);
+    this.linkControlPointSelectedColor = new ImGui.ImVec4(0.4, 0.75, 1.0, 1.0);
     this.pinOuterRadius = 7; //SLOT_RADIUS + 3;
     this.pinHighlightColor = new ImGui.ImVec4(1.0, 0.8, 0.2, 1.0);
     this.pinHoverColor = new ImGui.ImVec4(1.0, 1.0, 1.0, 0.8);
@@ -144,6 +211,12 @@ export class NodeEditor extends Observable<{
 
   private invalidateStructure() {
     this.structureDirty = true;
+    if (this.emitChange) {
+      this.dispatchEvent('changed');
+    }
+  }
+
+  private emitChanged() {
     if (this.emitChange) {
       this.dispatchEvent('changed');
     }
@@ -285,7 +358,9 @@ export class NodeEditor extends Observable<{
       startNodeId: link.startNodeId,
       startSlotId: link.startSlotId,
       endNodeId: link.endNodeId,
-      endSlotId: link.endSlotId
+      endSlotId: link.endSlotId,
+      reroutePoints:
+        link.reroutePoints.length > 0 ? link.reroutePoints.map((point) => [point.x, point.y]) : undefined
     }));
     return {
       nodes: await Promise.all(nodes),
@@ -324,7 +399,7 @@ export class NodeEditor extends Observable<{
     this.nodeId = maxId + 1;
     // load links
     for (const link of state.links) {
-      this.addLink(link.startNodeId, link.startSlotId, link.endNodeId, link.endSlotId);
+      this.addLink(link.startNodeId, link.startSlotId, link.endNodeId, link.endSlotId, link.reroutePoints);
     }
     // apply canvas states
     this.canvasOffset.x = state.canvasOffset ? state.canvasOffset[0] : 0;
@@ -621,7 +696,13 @@ export class NodeEditor extends Observable<{
     }
   }
 
-  private addLink(startNodeId: number, startSlotId: number, endNodeId: number, endSlotId: number): boolean {
+  private addLink(
+    startNodeId: number,
+    startSlotId: number,
+    endNodeId: number,
+    endSlotId: number,
+    reroutePoints?: number[][] | ImGui.ImVec2[]
+  ): boolean {
     const existingLink = this.links.find(
       (link) =>
         link.startNodeId === startNodeId &&
@@ -650,7 +731,8 @@ export class NodeEditor extends Observable<{
       startSlotId,
       endNodeId,
       endSlotId,
-      color: new ImGui.ImVec4(0.9, 0.9, 0.9, 1.0)
+      color: new ImGui.ImVec4(0.9, 0.9, 0.9, 1.0),
+      reroutePoints: this.cloneReroutePoints(reroutePoints)
     };
     this.links.push(link);
     const inputPin = this.nodes.get(endNodeId)!.inputs.find((pin) => pin.id === endSlotId);
@@ -684,62 +766,15 @@ export class NodeEditor extends Observable<{
     return null;
   }
 
-  private isPointNearBezier(
-    p: ImGui.ImVec2,
-    p0: ImGui.ImVec2,
-    p1: ImGui.ImVec2,
-    p2: ImGui.ImVec2,
-    p3: ImGui.ImVec2,
-    threshold: number
-  ): boolean {
-    const steps = 24;
-    let prev = p0;
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      const x =
-        Math.pow(1 - t, 3) * p0.x +
-        3 * Math.pow(1 - t, 2) * t * p1.x +
-        3 * (1 - t) * t * t * p2.x +
-        t * t * t * p3.x;
-      const y =
-        Math.pow(1 - t, 3) * p0.y +
-        3 * Math.pow(1 - t, 2) * t * p1.y +
-        3 * (1 - t) * t * t * p2.y +
-        t * t * t * p3.y;
-
-      const cur = new ImGui.ImVec2(x, y);
-      if (this.pointToSegmentDistance(p, prev, cur) <= threshold) {
-        return true;
-      }
-      prev = cur;
+  private cloneReroutePoints(points?: number[][] | ImGui.ImVec2[] | null): ImGui.ImVec2[] {
+    if (!points?.length) {
+      return [];
     }
-    return false;
-  }
-
-  private getLinkUnderMouse(canvasPos: ImGui.ImVec2): number | null {
-    const mousePos = ImGui.GetMousePos();
-
-    for (let i = this.links.length - 1; i >= 0; i--) {
-      const link = this.links[i];
-      const startNode = this.nodes.get(link.startNodeId);
-      const endNode = this.nodes.get(link.endNodeId);
-      if (!startNode || !endNode) {
-        continue;
-      }
-
-      const startPos = this.worldToCanvas(startNode.getSlotPosition(link.startSlotId, true));
-      const endPos = this.worldToCanvas(endNode.getSlotPosition(link.endSlotId, false));
-
-      const p0 = new ImGui.ImVec2(canvasPos.x + startPos.x, canvasPos.y + startPos.y);
-      const p3 = new ImGui.ImVec2(canvasPos.x + endPos.x, canvasPos.y + endPos.y);
-      const p1 = new ImGui.ImVec2(p0.x + 50, p0.y);
-      const p2 = new ImGui.ImVec2(p3.x - 50, p3.y);
-
-      if (this.isPointNearBezier(mousePos, p0, p1, p2, p3, this.linkHitRadius)) {
-        return link.id;
-      }
-    }
-    return null;
+    return points.map((point) =>
+      Array.isArray(point)
+        ? new ImGui.ImVec2(point[0] ?? 0, point[1] ?? 0)
+        : new ImGui.ImVec2(point.x, point.y)
+    );
   }
 
   private pointToSegmentDistance(p: ImGui.ImVec2, a: ImGui.ImVec2, b: ImGui.ImVec2): number {
@@ -762,6 +797,227 @@ export class NodeEditor extends Observable<{
     const projx = a.x + t * vx;
     const projy = a.y + t * vy;
     return Math.hypot(p.x - projx, p.y - projy);
+  }
+
+  private getLinkById(linkId: number): GraphLink | null {
+    return this.links.find((link) => link.id === linkId) ?? null;
+  }
+
+  private getLinkControlPointKey(info: LinkControlPointInfo): string {
+    return `${info.linkId}:${info.pointIndex}`;
+  }
+
+  private parseLinkControlPointKey(key: string): LinkControlPointInfo | null {
+    const [linkIdText, pointIndexText] = key.split(':');
+    const linkId = Number(linkIdText);
+    const pointIndex = Number(pointIndexText);
+    if (!Number.isInteger(linkId) || !Number.isInteger(pointIndex)) {
+      return null;
+    }
+    return { linkId, pointIndex };
+  }
+
+  private getSelectedLinkControlPointInfos(): LinkControlPointSelectionInfo[] {
+    const result: LinkControlPointSelectionInfo[] = [];
+    for (const key of this.selectedLinkControlPoints) {
+      const info = this.parseLinkControlPointKey(key);
+      if (!info) {
+        continue;
+      }
+      const link = this.getLinkById(info.linkId);
+      if (!link || !link.reroutePoints[info.pointIndex]) {
+        continue;
+      }
+      result.push({ ...info, key });
+    }
+    return result;
+  }
+
+  private isLinkControlPointSelected(info: LinkControlPointInfo): boolean {
+    return this.selectedLinkControlPoints.has(this.getLinkControlPointKey(info));
+  }
+
+  private setLinkControlPointSelection(infos: LinkControlPointInfo[]) {
+    this.selectedLinkControlPoints.clear();
+    for (const info of infos) {
+      this.selectedLinkControlPoints.add(this.getLinkControlPointKey(info));
+    }
+  }
+
+  private clearNodeSelection() {
+    this.selectedNodes = [];
+    this.nodes.forEach((node) => {
+      node.selected = false;
+    });
+  }
+
+  private getLinkEndpointsScreen(link: GraphLink, canvasPos: ImGui.ImVec2) {
+    const startNode = this.nodes.get(link.startNodeId);
+    const endNode = this.nodes.get(link.endNodeId);
+    if (!startNode || !endNode) {
+      return null;
+    }
+    const startPos = this.worldToCanvas(startNode.getSlotPosition(link.startSlotId, true));
+    const endPos = this.worldToCanvas(endNode.getSlotPosition(link.endSlotId, false));
+    return {
+      start: new ImGui.ImVec2(canvasPos.x + startPos.x, canvasPos.y + startPos.y),
+      end: new ImGui.ImVec2(canvasPos.x + endPos.x, canvasPos.y + endPos.y)
+    };
+  }
+
+  private getLinkPathPointsScreen(link: GraphLink, canvasPos: ImGui.ImVec2): ImGui.ImVec2[] | null {
+    const endpoints = this.getLinkEndpointsScreen(link, canvasPos);
+    if (!endpoints) {
+      return null;
+    }
+    const points = [endpoints.start];
+    for (const point of link.reroutePoints) {
+      const pointCanvas = this.worldToCanvas(point);
+      points.push(new ImGui.ImVec2(canvasPos.x + pointCanvas.x, canvasPos.y + pointCanvas.y));
+    }
+    points.push(endpoints.end);
+    return points;
+  }
+
+  private getSegmentControlPoints(
+    start: ImGui.ImVec2,
+    end: ImGui.ImVec2
+  ): [ImGui.ImVec2, ImGui.ImVec2, ImGui.ImVec2, ImGui.ImVec2] {
+    const dx = end.x - start.x;
+    const absDx = Math.abs(dx);
+    const handle = Math.max(30, Math.min(80, absDx * 0.5));
+    const dir = dx >= 0 ? 1 : -1;
+    const p0 = start;
+    const p1 = new ImGui.ImVec2(start.x + handle * dir, start.y);
+    const p2 = new ImGui.ImVec2(end.x - handle * dir, end.y);
+    const p3 = end;
+    return [p0, p1, p2, p3];
+  }
+
+  private sampleBezierNearestPoint(
+    p: ImGui.ImVec2,
+    p0: ImGui.ImVec2,
+    p1: ImGui.ImVec2,
+    p2: ImGui.ImVec2,
+    p3: ImGui.ImVec2
+  ): { distance: number; point: ImGui.ImVec2 } {
+    const steps = 32;
+    let prev = p0;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let bestPoint = new ImGui.ImVec2(p0.x, p0.y);
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const x =
+        Math.pow(1 - t, 3) * p0.x +
+        3 * Math.pow(1 - t, 2) * t * p1.x +
+        3 * (1 - t) * t * t * p2.x +
+        t * t * t * p3.x;
+      const y =
+        Math.pow(1 - t, 3) * p0.y +
+        3 * Math.pow(1 - t, 2) * t * p1.y +
+        3 * (1 - t) * t * t * p2.y +
+        t * t * t * p3.y;
+      const cur = new ImGui.ImVec2(x, y);
+      const distance = this.pointToSegmentDistance(p, prev, cur);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestPoint = new ImGui.ImVec2((prev.x + cur.x) * 0.5, (prev.y + cur.y) * 0.5);
+      }
+      prev = cur;
+    }
+    return { distance: bestDistance, point: bestPoint };
+  }
+
+  private getLinkHitInfo(canvasPos: ImGui.ImVec2, mousePos = ImGui.GetMousePos()): LinkHitInfo | null {
+    let bestHit: LinkHitInfo | null = null;
+    for (let i = this.links.length - 1; i >= 0; i--) {
+      const link = this.links[i];
+      const points = this.getLinkPathPointsScreen(link, canvasPos);
+      if (!points || points.length < 2) {
+        continue;
+      }
+      for (let segIndex = 0; segIndex < points.length - 1; segIndex++) {
+        const [p0, p1, p2, p3] = this.getSegmentControlPoints(points[segIndex], points[segIndex + 1]);
+        const hit = this.sampleBezierNearestPoint(mousePos, p0, p1, p2, p3);
+        if (hit.distance <= this.linkHitRadius && (!bestHit || hit.distance < bestHit.distance)) {
+          bestHit = {
+            linkId: link.id,
+            segmentIndex: segIndex,
+            distance: hit.distance,
+            nearestPoint: hit.point
+          };
+        }
+      }
+    }
+    return bestHit;
+  }
+
+  private getLinkUnderMouse(canvasPos: ImGui.ImVec2): number | null {
+    return this.getLinkHitInfo(canvasPos)?.linkId ?? null;
+  }
+
+  private getLinkControlPointUnderMouse(
+    canvasPos: ImGui.ImVec2,
+    mousePos = ImGui.GetMousePos()
+  ): LinkControlPointInfo | null {
+    for (let i = this.links.length - 1; i >= 0; i--) {
+      const link = this.links[i];
+      for (let pointIndex = link.reroutePoints.length - 1; pointIndex >= 0; pointIndex--) {
+        const pointCanvas = this.worldToCanvas(link.reroutePoints[pointIndex]);
+        const pointScreen = new ImGui.ImVec2(canvasPos.x + pointCanvas.x, canvasPos.y + pointCanvas.y);
+        const info = {
+          linkId: link.id,
+          pointIndex
+        };
+        const hitRadius = this.isLinkControlPointSelected(info)
+          ? this.linkControlPointHitRadiusSelected
+          : this.linkControlPointHitRadius;
+        if (Math.hypot(mousePos.x - pointScreen.x, mousePos.y - pointScreen.y) <= hitRadius) {
+          return {
+            ...info
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  private insertReroutePoint(linkId: number, segmentIndex: number, worldPos: ImGui.ImVec2): boolean {
+    const link = this.getLinkById(linkId);
+    if (!link) {
+      return false;
+    }
+    const insertAt = Math.max(0, Math.min(link.reroutePoints.length, segmentIndex));
+    const snapped = this.snapWorldToScreenGrid(worldPos, this.canvasScale);
+    link.reroutePoints.splice(insertAt, 0, snapped);
+    this.emitChanged();
+    return true;
+  }
+
+  private removeReroutePoint(info: LinkControlPointInfo): boolean {
+    const link = this.getLinkById(info.linkId);
+    if (!link || !link.reroutePoints[info.pointIndex]) {
+      return false;
+    }
+    link.reroutePoints.splice(info.pointIndex, 1);
+    this.emitChanged();
+    return true;
+  }
+
+  private updateReroutePointPosition(info: LinkControlPointInfo, worldPos: ImGui.ImVec2) {
+    const link = this.getLinkById(info.linkId);
+    if (!link || !link.reroutePoints[info.pointIndex]) {
+      return;
+    }
+    const snapped = this.snapWorldToScreenGrid(worldPos, this.canvasScale);
+    link.reroutePoints[info.pointIndex].x = snapped.x;
+    link.reroutePoints[info.pointIndex].y = snapped.y;
+  }
+
+  private getLinkControlPointPositionWorld(info: LinkControlPointInfo): ImGui.ImVec2 | null {
+    const link = this.getLinkById(info.linkId);
+    const point = link?.reroutePoints[info.pointIndex];
+    return point ? new ImGui.ImVec2(point.x, point.y) : null;
   }
 
   worldToCanvas(worldPos: ImGui.ImVec2): ImGui.ImVec2 {
@@ -866,25 +1122,54 @@ export class NodeEditor extends Observable<{
       );
     }
   }
+
   private drawLink(drawList: ImGui.DrawList, link: GraphLink, canvasPos: ImGui.ImVec2) {
-    const startNode = this.nodes.get(link.startNodeId);
-    const endNode = this.nodes.get(link.endNodeId);
-    if (!startNode || !endNode) {
+    const points = this.getLinkPathPointsScreen(link, canvasPos);
+    if (!points || points.length < 2) {
       return;
     }
+    const hovered = this.hoveredLinkId === link.id;
+    const color = hovered ? this.linkHoverColor : link.color;
+    const width = hovered ? this.linkWidthSelected : this.linkWidthNormal;
+    const colorU32 = ImGui.ColorConvertFloat4ToU32(color);
+    for (let i = 0; i < points.length - 1; i++) {
+      const [p0, p1, p2, p3] = this.getSegmentControlPoints(points[i], points[i + 1]);
+      drawList.AddBezierCubic(p0, p1, p2, p3, colorU32, width);
+    }
+  }
 
-    const startPos = this.worldToCanvas(startNode.getSlotPosition(link.startSlotId, true));
-    const endPos = this.worldToCanvas(endNode.getSlotPosition(link.endSlotId, false));
-
-    const p0 = new ImGui.ImVec2(canvasPos.x + startPos.x, canvasPos.y + startPos.y);
-    const p3 = new ImGui.ImVec2(canvasPos.x + endPos.x, canvasPos.y + endPos.y);
-    const p1 = new ImGui.ImVec2(p0.x + 50, p0.y);
-    const p2 = new ImGui.ImVec2(p3.x - 50, p3.y);
-
-    const color = link.color;
-    const width = this.linkWidthNormal;
-
-    drawList.AddBezierCubic(p0, p1, p2, p3, ImGui.ColorConvertFloat4ToU32(color), width);
+  private drawLinkControlPoints(drawList: ImGui.DrawList, link: GraphLink, canvasPos: ImGui.ImVec2) {
+    if (link.reroutePoints.length === 0) {
+      return;
+    }
+    const lineWidth =
+      this.hoveredLinkId === link.id || this.draggingLinkControlPoint?.linkId === link.id
+        ? this.linkWidthSelected
+        : this.linkWidthNormal;
+    const radius = lineWidth * 0.5 + this.linkControlPointRadiusPadding;
+    for (let i = 0; i < link.reroutePoints.length; i++) {
+      const pointCanvas = this.worldToCanvas(link.reroutePoints[i]);
+      const pointScreen = new ImGui.ImVec2(canvasPos.x + pointCanvas.x, canvasPos.y + pointCanvas.y);
+      const hovered =
+        this.hoveredLinkControlPoint?.linkId === link.id && this.hoveredLinkControlPoint.pointIndex === i;
+      const dragging =
+        this.draggingLinkControlPoint?.linkId === link.id && this.draggingLinkControlPoint.pointIndex === i;
+      const selected = this.isLinkControlPointSelected({ linkId: link.id, pointIndex: i });
+      const color =
+        hovered || dragging
+          ? this.linkControlPointHoverColor
+          : selected
+            ? this.linkControlPointSelectedColor
+            : this.linkControlPointColor;
+      drawList.AddCircleFilled(pointScreen, radius, ImGui.ColorConvertFloat4ToU32(color));
+      drawList.AddCircle(
+        pointScreen,
+        radius + 1.25,
+        ImGui.ColorConvertFloat4ToU32(new ImGui.ImVec4(0.1, 0.1, 0.1, 0.9)),
+        16,
+        1.0
+      );
+    }
   }
 
   private isPinOccludedOnScreen(slot: SlotInfo, canvasPos: ImGui.ImVec2): boolean {
@@ -918,6 +1203,81 @@ export class NodeEditor extends Observable<{
     return false;
   }
 
+  private setSelection(nodeIds: number[]) {
+    const uniqueNodeIds = [...new Set(nodeIds)].filter((id) => this.nodes.has(id));
+    const selectedIdSet = new Set(uniqueNodeIds);
+    this.selectedNodes = uniqueNodeIds;
+    this.nodes.forEach((node) => {
+      node.selected = selectedIdSet.has(node.id);
+    });
+  }
+
+  private getLinkControlPointsInRect(rectMin: ImGui.ImVec2, rectMax: ImGui.ImVec2): LinkControlPointInfo[] {
+    const result: LinkControlPointInfo[] = [];
+    for (const link of this.links) {
+      for (let pointIndex = 0; pointIndex < link.reroutePoints.length; pointIndex++) {
+        const point = link.reroutePoints[pointIndex];
+        if (point.x >= rectMin.x && point.x <= rectMax.x && point.y >= rectMin.y && point.y <= rectMax.y) {
+          result.push({
+            linkId: link.id,
+            pointIndex
+          });
+        }
+      }
+    }
+    return result;
+  }
+
+  private updateBoxSelection() {
+    if (!this.boxSelectStartWorld || !this.boxSelectCurrentWorld) {
+      return;
+    }
+    const rectMin = new ImGui.ImVec2(
+      Math.min(this.boxSelectStartWorld.x, this.boxSelectCurrentWorld.x),
+      Math.min(this.boxSelectStartWorld.y, this.boxSelectCurrentWorld.y)
+    );
+    const rectMax = new ImGui.ImVec2(
+      Math.max(this.boxSelectStartWorld.x, this.boxSelectCurrentWorld.x),
+      Math.max(this.boxSelectStartWorld.y, this.boxSelectCurrentWorld.y)
+    );
+    const selected = this.boxSelectAdditive ? [...this.boxSelectInitialSelection] : [];
+    for (const node of this.nodes.values()) {
+      const nodeMin = node.position;
+      const nodeMax = new ImGui.ImVec2(node.position.x + node.size.x, node.position.y + node.size.y);
+      if (this.rectIntersects(rectMin, rectMax, nodeMin, nodeMax)) {
+        selected.push(node.id);
+      }
+    }
+    this.setSelection(selected);
+    const selectedLinkControlPoints = this.boxSelectAdditive
+      ? [...this.boxSelectInitialLinkControlSelection]
+      : [];
+    for (const info of this.getLinkControlPointsInRect(rectMin, rectMax)) {
+      selectedLinkControlPoints.push(this.getLinkControlPointKey(info));
+    }
+    this.selectedLinkControlPoints = new Set(selectedLinkControlPoints);
+  }
+
+  private drawBoxSelection(drawList: ImGui.DrawList, canvasPos: ImGui.ImVec2) {
+    if (!this.isBoxSelecting || !this.boxSelectStartWorld || !this.boxSelectCurrentWorld) {
+      return;
+    }
+    const startCanvas = this.worldToCanvas(this.boxSelectStartWorld);
+    const currentCanvas = this.worldToCanvas(this.boxSelectCurrentWorld);
+    const min = new ImGui.ImVec2(
+      canvasPos.x + Math.min(startCanvas.x, currentCanvas.x),
+      canvasPos.y + Math.min(startCanvas.y, currentCanvas.y)
+    );
+    const max = new ImGui.ImVec2(
+      canvasPos.x + Math.max(startCanvas.x, currentCanvas.x),
+      canvasPos.y + Math.max(startCanvas.y, currentCanvas.y)
+    );
+    const fill = ImGui.ColorConvertFloat4ToU32(new ImGui.ImVec4(0.25, 0.5, 1.0, 0.18));
+    const border = ImGui.ColorConvertFloat4ToU32(new ImGui.ImVec4(0.45, 0.7, 1.0, 0.95));
+    drawList.AddRectFilled(min, max, fill);
+    drawList.AddRect(min, max, border, 0, 0, 1.5);
+  }
+
   private handleInput(canvasPos: ImGui.ImVec2, isCanvasHovered: boolean, isCanvasFocused: boolean) {
     const io = ImGui.GetIO();
     const mousePos = ImGui.GetMousePos();
@@ -925,7 +1285,12 @@ export class NodeEditor extends Observable<{
     const worldMousePos = this.canvasToWorld(relativeMousePos);
 
     const canProcessThisFrame =
-      isCanvasHovered || this.isDraggingCanvas || this.draggingNode !== null || this.isCreatingLink;
+      isCanvasHovered ||
+      this.isDraggingCanvas ||
+      this.draggingNode !== null ||
+      this.draggingLinkControlPoint !== null ||
+      this.isCreatingLink ||
+      this.isBoxSelecting;
 
     if (!canProcessThisFrame) {
       return;
@@ -937,6 +1302,20 @@ export class NodeEditor extends Observable<{
         hovered = null;
       }
       this.hoveredSlot = hovered;
+      if (!this.hoveredSlot) {
+        this.hoveredLinkControlPoint = this.getLinkControlPointUnderMouse(canvasPos, mousePos);
+        if (!this.hoveredLinkControlPoint) {
+          this.hoveredLinkId = this.getLinkUnderMouse(canvasPos);
+        } else {
+          this.hoveredLinkId = this.hoveredLinkControlPoint.linkId;
+        }
+      } else {
+        this.hoveredLinkControlPoint = null;
+        this.hoveredLinkId = null;
+      }
+    } else if (!this.draggingLinkControlPoint) {
+      this.hoveredLinkId = null;
+      this.hoveredLinkControlPoint = null;
     }
 
     const hoveredNode = isCanvasHovered ? this.hitTestNodeAt(worldMousePos) : null;
@@ -947,7 +1326,46 @@ export class NodeEditor extends Observable<{
       hoveredNode.hovered = true;
     }
 
+    if (
+      isCanvasHovered &&
+      !this.hoveredSlot &&
+      !this.hoveredLinkControlPoint &&
+      this.hoveredLinkId !== null &&
+      ImGui.IsMouseDoubleClicked(ImGui.MouseButton.Left)
+    ) {
+      const hit = this.getLinkHitInfo(canvasPos, mousePos);
+      if (hit && this.insertReroutePoint(hit.linkId, hit.segmentIndex, worldMousePos)) {
+        this.hoveredLinkId = hit.linkId;
+      }
+      return;
+    }
+
     if (isCanvasHovered && ImGui.IsMouseClicked(0)) {
+      if (this.hoveredLinkControlPoint) {
+        if (io.KeyAlt) {
+          this.removeReroutePoint(this.hoveredLinkControlPoint);
+          this.hoveredLinkControlPoint = null;
+          return;
+        }
+        const hoveredLinkControlKey = this.getLinkControlPointKey(this.hoveredLinkControlPoint);
+        const isAlreadySelected = this.selectedLinkControlPoints.has(hoveredLinkControlKey);
+        if (io.KeyCtrl) {
+          if (isAlreadySelected) {
+            this.selectedLinkControlPoints.delete(hoveredLinkControlKey);
+          } else {
+            this.selectedLinkControlPoints.add(hoveredLinkControlKey);
+          }
+        } else if (!isAlreadySelected || this.selectedLinkControlPoints.size === 0) {
+          this.setLinkControlPointSelection([this.hoveredLinkControlPoint]);
+        }
+        this.clearNodeSelection();
+        this.draggingLinkControlPoint = { ...this.hoveredLinkControlPoint };
+        this.isDraggingLinkControlPoints = this.selectedLinkControlPoints.has(hoveredLinkControlKey);
+        this.draggingLinkControlPointDirty = false;
+        this.draggingLinkControlPointStarted = false;
+        this.linkControlPointMouseDownScreen = new ImGui.ImVec2(mousePos.x, mousePos.y);
+        return;
+      }
       if (this.hoveredSlot) {
         if (io.KeyAlt) {
           if (this.hoveredSlot.isOutput) {
@@ -1034,6 +1452,7 @@ export class NodeEditor extends Observable<{
         } else {
           const clickedNode = this.hitTestNodeAt(worldMousePos);
           if (clickedNode) {
+            this.selectedLinkControlPoints.clear();
             const isAlreadySelected = this.selectedNodes.includes(clickedNode.id);
 
             this.mouseDownPosWorld = worldMousePos;
@@ -1079,10 +1498,14 @@ export class NodeEditor extends Observable<{
             this.nodes.delete(nodeId);
             this.nodes.set(nodeId, nodeObj);
           } else {
-            this.selectedNodes = [];
-            this.nodes.forEach((n) => (n.selected = false));
-            this.isDraggingCanvas = true;
-
+            this.isBoxSelecting = true;
+            this.boxSelectStartWorld = new ImGui.ImVec2(worldMousePos.x, worldMousePos.y);
+            this.boxSelectCurrentWorld = new ImGui.ImVec2(worldMousePos.x, worldMousePos.y);
+            this.boxSelectInitialSelection = [...this.selectedNodes];
+            this.boxSelectInitialLinkControlSelection = [...this.selectedLinkControlPoints];
+            this.boxSelectAdditive = io.KeyCtrl;
+            this.boxSelectStartedOnThisClick = false;
+            this.mouseDownPosWorld = worldMousePos;
             if (!this.canvasContextClickLocal) {
               this.isCreatingLink = false;
               this.linkStartSlot = null;
@@ -1092,17 +1515,71 @@ export class NodeEditor extends Observable<{
       }
     }
 
-    if (ImGui.IsMouseDown(0)) {
-      /*
-      if (isCanvasHovered && !this.draggingNode && !this.isCreatingLink) {
-        this.isDraggingCanvas = this.isDraggingCanvas || true;
-      }
-      */
+    if (isCanvasHovered && ImGui.IsMouseClicked(ImGui.MouseButton.Middle)) {
+      this.isDraggingCanvas = true;
+    }
+
+    if (ImGui.IsMouseDown(ImGui.MouseButton.Middle)) {
       if (this.isDraggingCanvas) {
-        const mouseDelta = ImGui.GetMouseDragDelta(0);
+        const mouseDelta = ImGui.GetMouseDragDelta(ImGui.MouseButton.Middle);
         this.canvasOffset.x += mouseDelta.x / this.canvasScale;
         this.canvasOffset.y += mouseDelta.y / this.canvasScale;
-        ImGui.ResetMouseDragDelta(0);
+        ImGui.ResetMouseDragDelta(ImGui.MouseButton.Middle);
+      }
+    } else {
+      this.isDraggingCanvas = false;
+    }
+
+    if (ImGui.IsMouseDown(0)) {
+      if (this.isBoxSelecting) {
+        this.boxSelectCurrentWorld = new ImGui.ImVec2(worldMousePos.x, worldMousePos.y);
+        if (!this.boxSelectStartedOnThisClick && this.mouseDownPosWorld) {
+          const downScreen = new ImGui.ImVec2(
+            (this.mouseDownPosWorld.x + this.canvasOffset.x) * this.canvasScale + canvasPos.x,
+            (this.mouseDownPosWorld.y + this.canvasOffset.y) * this.canvasScale + canvasPos.y
+          );
+          const dx = mousePos.x - downScreen.x;
+          const dy = mousePos.y - downScreen.y;
+          const dist2 = dx * dx + dy * dy;
+          const startDragThresholdPx = 4;
+          if (dist2 >= startDragThresholdPx * startDragThresholdPx) {
+            this.boxSelectStartedOnThisClick = true;
+          }
+        }
+        if (this.boxSelectStartedOnThisClick) {
+          this.updateBoxSelection();
+        }
+      } else if (this.draggingLinkControlPoint) {
+        if (!this.draggingLinkControlPointStarted && this.linkControlPointMouseDownScreen) {
+          const dx = mousePos.x - this.linkControlPointMouseDownScreen.x;
+          const dy = mousePos.y - this.linkControlPointMouseDownScreen.y;
+          const dist2 = dx * dx + dy * dy;
+          const startDragThresholdPx = 4;
+          if (dist2 >= startDragThresholdPx * startDragThresholdPx) {
+            this.draggingLinkControlPointStarted = true;
+          }
+        }
+        if (this.draggingLinkControlPointStarted) {
+          if (this.isDraggingLinkControlPoints) {
+            const anchorPos = this.getLinkControlPointPositionWorld(this.draggingLinkControlPoint);
+            if (anchorPos) {
+              const delta = new ImGui.ImVec2(worldMousePos.x - anchorPos.x, worldMousePos.y - anchorPos.y);
+              for (const info of this.getSelectedLinkControlPointInfos()) {
+                const currentPos = this.getLinkControlPointPositionWorld(info);
+                if (!currentPos) {
+                  continue;
+                }
+                this.updateReroutePointPosition(
+                  info,
+                  new ImGui.ImVec2(currentPos.x + delta.x, currentPos.y + delta.y)
+                );
+              }
+            }
+          } else {
+            this.updateReroutePointPosition(this.draggingLinkControlPoint, worldMousePos);
+          }
+          this.draggingLinkControlPointDirty = true;
+        }
       } else if (this.draggingNode !== null) {
         if (!this.dragStartedOnThisClick && this.mouseDownPosWorld) {
           const downScreen = new ImGui.ImVec2(
@@ -1133,7 +1610,18 @@ export class NodeEditor extends Observable<{
         }
       }
     } else {
-      if (!this.dragStartedOnThisClick && this.pendingSingleSelectNodeId !== null) {
+      if (this.isBoxSelecting) {
+        if (!this.boxSelectStartedOnThisClick && !this.boxSelectAdditive) {
+          this.setSelection([]);
+          this.selectedLinkControlPoints.clear();
+        }
+        this.isBoxSelecting = false;
+        this.boxSelectStartWorld = null;
+        this.boxSelectCurrentWorld = null;
+        this.boxSelectInitialSelection = [];
+        this.boxSelectAdditive = false;
+        this.boxSelectStartedOnThisClick = false;
+      } else if (!this.dragStartedOnThisClick && this.pendingSingleSelectNodeId !== null) {
         const keepId = this.pendingSingleSelectNodeId;
         this.nodes.forEach((n) => (n.selected = false));
         this.selectedNodes = [keepId];
@@ -1143,8 +1631,18 @@ export class NodeEditor extends Observable<{
         }
       }
 
+      if (this.draggingLinkControlPoint) {
+        if (this.draggingLinkControlPointDirty) {
+          this.emitChanged();
+        }
+        this.draggingLinkControlPoint = null;
+        this.isDraggingLinkControlPoints = false;
+        this.draggingLinkControlPointDirty = false;
+        this.draggingLinkControlPointStarted = false;
+        this.linkControlPointMouseDownScreen = null;
+      }
+
       this.draggingNode = null;
-      this.isDraggingCanvas = false;
       this.dragOffsetsForSelection.clear();
       this.pendingSingleSelectNodeId = null;
       this.dragStartedOnThisClick = false;
@@ -1339,12 +1837,20 @@ export class NodeEditor extends Observable<{
     this.isCreatingLink = false;
     this.linkStartSlot = null;
     this.draggingNode = null;
+    this.draggingLinkControlPoint = null;
+    this.isDraggingLinkControlPoints = false;
+    this.draggingLinkControlPointDirty = false;
+    this.draggingLinkControlPointStarted = false;
+    this.linkControlPointMouseDownScreen = null;
     this.isDraggingCanvas = false;
 
     this.selectedNodes = [];
+    this.selectedLinkControlPoints.clear();
     this.nodes.forEach((n) => (n.selected = false));
 
     this.hoveredSlot = null;
+    this.hoveredLinkId = null;
+    this.hoveredLinkControlPoint = null;
 
     this.contextMenuNode = null;
     this.showContextMenu = false;
@@ -1353,6 +1859,13 @@ export class NodeEditor extends Observable<{
     this.pendingSingleSelectNodeId = null;
     this.dragStartedOnThisClick = false;
     this.mouseDownPosWorld = null;
+    this.isBoxSelecting = false;
+    this.boxSelectStartWorld = null;
+    this.boxSelectCurrentWorld = null;
+    this.boxSelectInitialSelection = [];
+    this.boxSelectInitialLinkControlSelection = [];
+    this.boxSelectAdditive = false;
+    this.boxSelectStartedOnThisClick = false;
   }
 
   public render() {
@@ -1385,6 +1898,14 @@ export class NodeEditor extends Observable<{
 
     this.drawGrid(drawList, canvasPos);
 
+    const mousePos = ImGui.GetMousePos();
+    if (!this.draggingLinkControlPoint) {
+      this.hoveredLinkControlPoint = this.getLinkControlPointUnderMouse(canvasPos, mousePos);
+      if (!this.hoveredSlot) {
+        this.hoveredLinkId = this.hoveredLinkControlPoint?.linkId ?? this.getLinkUnderMouse(canvasPos);
+      }
+    }
+
     for (const link of this.links) {
       const startNode = this.nodes.get(link.startNodeId);
       const endNode = this.nodes.get(link.endNodeId);
@@ -1392,16 +1913,10 @@ export class NodeEditor extends Observable<{
         continue;
       }
 
-      const startWorld = startNode.getSlotPosition(link.startSlotId, true);
-      const endWorld = endNode.getSlotPosition(link.endSlotId, false);
-
-      const bb = this.getLinkBoundingBox(
-        startWorld,
-        endWorld,
-        Math.max(this.linkHitRadius, this.linkWidthSelected)
-      );
+      const bb = this.getLinkBoundingBox(link, Math.max(this.linkHitRadius, this.linkWidthSelected));
       if (this.rectIntersects(bb.min, bb.max, viewRect.min, viewRect.max)) {
         this.drawLink(drawList, link, canvasPos);
+        this.drawLinkControlPoints(drawList, link, canvasPos);
       }
     }
 
@@ -1444,6 +1959,7 @@ export class NodeEditor extends Observable<{
         }
       }
     }
+    this.drawBoxSelection(drawList, canvasPos);
     drawList.PopClipRect();
 
     ImGui.SetCursorScreenPos(canvasPos);
@@ -1478,22 +1994,32 @@ export class NodeEditor extends Observable<{
     return !(aMax.x < bMin.x || aMin.x > bMax.x || aMax.y < bMin.y || aMin.y > bMax.y);
   }
 
-  private getLinkBoundingBox(
-    startWorld: ImGui.ImVec2,
-    endWorld: ImGui.ImVec2,
-    padding = 6
-  ): { min: ImGui.ImVec2; max: ImGui.ImVec2 } {
-    const p0 = startWorld;
-    const p3 = endWorld;
-    const p1 = new ImGui.ImVec2(p0.x + 50, p0.y);
-    const p2 = new ImGui.ImVec2(p3.x - 50, p3.y);
-
-    const minX = Math.min(p0.x, p1.x, p2.x, p3.x) - padding;
-    const minY = Math.min(p0.y, p1.y, p2.y, p3.y) - padding;
-    const maxX = Math.max(p0.x, p1.x, p2.x, p3.x) + padding;
-    const maxY = Math.max(p0.y, p1.y, p2.y, p3.y) + padding;
-
-    return { min: new ImGui.ImVec2(minX, minY), max: new ImGui.ImVec2(maxX, maxY) };
+  private getLinkBoundingBox(link: GraphLink, padding = 6): { min: ImGui.ImVec2; max: ImGui.ImVec2 } {
+    const startNode = this.nodes.get(link.startNodeId);
+    const endNode = this.nodes.get(link.endNodeId);
+    if (!startNode || !endNode) {
+      return { min: new ImGui.ImVec2(0, 0), max: new ImGui.ImVec2(0, 0) };
+    }
+    const points = [
+      startNode.getSlotPosition(link.startSlotId, true),
+      ...link.reroutePoints,
+      endNode.getSlotPosition(link.endSlotId, false)
+    ];
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < points.length - 1; i++) {
+      const [p0, p1, p2, p3] = this.getSegmentControlPoints(points[i], points[i + 1]);
+      minX = Math.min(minX, p0.x, p1.x, p2.x, p3.x);
+      minY = Math.min(minY, p0.y, p1.y, p2.y, p3.y);
+      maxX = Math.max(maxX, p0.x, p1.x, p2.x, p3.x);
+      maxY = Math.max(maxY, p0.y, p1.y, p2.y, p3.y);
+    }
+    return {
+      min: new ImGui.ImVec2(minX - padding, minY - padding),
+      max: new ImGui.ImVec2(maxX + padding, maxY + padding)
+    };
   }
   private getSlotInputType(slot: SlotInfo) {
     const node = this.nodes.get(slot.nodeId)!.impl;

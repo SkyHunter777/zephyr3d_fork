@@ -1,51 +1,62 @@
-import { MeshMaterial, applyMaterialMixins } from './meshmaterial';
 import type { BindGroup, PBFunctionScope, PBInsideFunctionScope, PBShaderExp } from '@zephyr3d/device';
+import { DRef, Vector4, type Clonable } from '@zephyr3d/base';
 import { ShaderHelper } from './shader/helper';
-import { MaterialVaryingFlags, RENDER_PASS_TYPE_LIGHT } from '../values';
-import { DRef, Vector2, Vector4, type Clonable, type Immutable } from '@zephyr3d/base';
-import { mixinPBRBluePrint } from './mixins/lightmodel/pbrblueprintmixin';
-import { mixinTextureProps } from './mixins/texture';
 import type { BluePrintUniformTexture, BluePrintUniformValue } from '../utility/blueprint/material/ir';
 import { MaterialBlueprintIR } from '../utility/blueprint/material/ir';
-import type { DrawContext } from '../render/drawable';
+import type { IGraphNode } from '../utility/blueprint/node';
 import { PBRBlockNode, VertexBlockNode } from '../utility/blueprint/material/pbr';
-import type { PBRReflectionMode } from './mixins/lightmodel/pbrmetallicroughness';
-import type { SubsurfaceProfile } from './subsurfaceprofile';
+import { PBRMetallicRoughnessMaterial } from './pbrmr';
+import type { DrawContext } from '../render/drawable';
 
-const PBR_REFLECTION_MODE: Record<PBRReflectionMode, number> = {
-  none: 0,
-  ggx: 1,
-  anisotropic: 2,
-  glint: 3
-};
+type BlueprintOutputMap = Partial<Record<PBRBlueprintOutputName, number | boolean | PBShaderExp>>;
+type VertexBlueprintOutputName = 'Position' | 'Normal' | 'Tangent' | 'Color' | 'UV';
+type VertexBlueprintOutputMap = Partial<Record<VertexBlueprintOutputName, number | boolean | PBShaderExp>>;
+
+export type PBRBlueprintOutputName =
+  | 'BaseColor'
+  | 'Metallic'
+  | 'Roughness'
+  | 'Specular'
+  | 'Emissive'
+  | 'Normal'
+  | 'Tangent'
+  | 'Opacity'
+  | 'SpecularWeight'
+  | 'AO';
+
+const DEFAULT_OUTPUT_NAMES: readonly PBRBlueprintOutputName[] = [
+  'BaseColor',
+  'Metallic',
+  'Roughness',
+  'Specular',
+  'Emissive',
+  'Normal',
+  'Tangent',
+  'Opacity',
+  'SpecularWeight',
+  'AO'
+] as const;
 
 /**
- * Physically-based rendering material driven by blueprint graphs.
+ * Physically-based rendering material driven by blueprint graphs, but shaded by the
+ * same PBR metallic/roughness backend used by {@link PBRMetallicRoughnessMaterial}.
  *
  * @remarks
- * This material extends {@link MeshMaterial} with PBR behavior via
- * {@link mixinPBRBluePrint}, and uses {@link MaterialBlueprintIR}
- * graphs for both vertex and fragment stages.
- *
- * - The **vertex blueprint IR** (`vertexIR`) controls vertex
- *   transformations and per-vertex data.
- * - The **fragment blueprint IR** (`fragmentIR`) produces inputs
- *   for the PBR shading model (albedo, roughness, metalness, etc.).
- *
- * Uniform values and textures for the blueprints are provided via
- * {@link PBRBluePrintMaterial.uniformValues} and
- * {@link PBRBluePrintMaterial.uniformTextures}.
+ * The blueprint graph only produces surface inputs. Final direct/indirect lighting,
+ * transmission, clearcoat, sheen, iridescence and anisotropic reflection still run
+ * through the standard PBRM backend so imported GLTF materials and blueprint materials
+ * stay on the same shading path.
  *
  * @public
  */
 export class PBRBluePrintMaterial
-  extends applyMaterialMixins(MeshMaterial, mixinPBRBluePrint, mixinTextureProps('subsurface'))
+  extends PBRMetallicRoughnessMaterial
   implements Clonable<PBRBluePrintMaterial>
 {
   /** @internal */
-  private static readonly FEATURE_VERTEX_COLOR = this.defineFeature();
+  private static readonly FEATURE_BLUEPRINT_VERTEX_COLOR = this.defineFeature();
   /** @internal */
-  private static readonly FEATURE_VERTEX_UV = this.defineFeature();
+  private static readonly FEATURE_BLUEPRINT_VERTEX_UV = this.defineFeature();
   /** @internal */
   private _irFrag: MaterialBlueprintIR;
   /** @internal */
@@ -55,27 +66,12 @@ export class PBRBluePrintMaterial
   /** @internal */
   private _uniformTextures: BluePrintUniformTexture[];
   /** @internal */
-  private _reflectionMode: PBRReflectionMode;
+  private _connectedOutputs: Set<PBRBlueprintOutputName>;
   /** @internal */
-  private readonly _subsurfaceProfileChanged: () => void;
+  private _vertexUsesColor: boolean;
   /** @internal */
-  private _subsurfaceProfile: SubsurfaceProfile | null;
-  /** @internal */
-  private _anisotropy: number;
-  /** @internal */
-  private _anisotropyDirection: number;
-  /** @internal */
-  private readonly _anisotropyDirectionScaleBias: Vector2;
-  /**
-   * Creates a new {@link PBRBluePrintMaterial} instance.
-   *
-   * @param irFrag - Optional fragment blueprint IR. If omitted, a default
-   *   IR containing a single {@link PBRBlockNode} is created.
-   * @param irVertex - Optional vertex blueprint IR. If omitted, a default
-   *   IR containing a single {@link VertexBlockNode} is created.
-   * @param uniformValues - Optional initial list of uniform value descriptors.
-   * @param uniformTextures - Optional initial list of texture uniform descriptors.
-   */
+  private _vertexUsesUV: boolean;
+
   constructor(
     irFrag?: MaterialBlueprintIR,
     irVertex?: MaterialBlueprintIR,
@@ -115,94 +111,36 @@ export class PBRBluePrintMaterial
       );
     this._uniformValues = uniformValues ?? [];
     this._uniformTextures = uniformTextures ?? [];
-    this._reflectionMode = 'ggx';
-    this._subsurfaceProfileChanged = () => this.uniformChanged();
-    this._subsurfaceProfile = null;
-    this._anisotropy = 0.75;
-    this._anisotropyDirection = 0;
-    this._anisotropyDirectionScaleBias = new Vector2(1, 0);
-    this.useFeature(PBRBluePrintMaterial.FEATURE_VERTEX_COLOR, this._irVertex.behaviors.useVertexColor);
-    this.useFeature(PBRBluePrintMaterial.FEATURE_VERTEX_UV, this._irVertex.behaviors.useVertexUV);
+    this._connectedOutputs = new Set();
+    this._vertexUsesColor = false;
+    this._vertexUsesUV = false;
+    this.syncBlueprintMetadata();
   }
-  get reflectionMode() {
-    return this._reflectionMode;
-  }
-  set reflectionMode(val: PBRReflectionMode) {
-    if (val !== this._reflectionMode) {
-      this._reflectionMode = val;
-      this.uniformChanged();
-    }
-  }
-  get subsurfaceProfile() {
-    return this._subsurfaceProfile;
-  }
-  set subsurfaceProfile(val: SubsurfaceProfile | null) {
-    if (val !== this._subsurfaceProfile) {
-      this._subsurfaceProfile?.removeChangeListener(this._subsurfaceProfileChanged);
-      this._subsurfaceProfile = val ?? null;
-      this._subsurfaceProfile?.addChangeListener(this._subsurfaceProfileChanged);
-      this.optionChanged(true);
-    }
-  }
-  get anisotropy() {
-    return this._anisotropy;
-  }
-  set anisotropy(val: number) {
-    const clamped = Math.max(-0.95, Math.min(0.95, val));
-    if (clamped !== this._anisotropy) {
-      this._anisotropy = clamped;
-      this.uniformChanged();
-    }
-  }
-  get anisotropyDirection() {
-    return this._anisotropyDirection;
-  }
-  set anisotropyDirection(val: number) {
-    if (val !== this._anisotropyDirection) {
-      this._anisotropyDirection = val;
-      this.uniformChanged();
-    }
-  }
-  get anisotropyDirectionScaleBias(): Immutable<Vector2> {
-    return this._anisotropyDirectionScaleBias;
-  }
-  set anisotropyDirectionScaleBias(val: Immutable<Vector2>) {
-    if (!val.equalsTo(this._anisotropyDirectionScaleBias)) {
-      this._anisotropyDirectionScaleBias.set(val);
-      this.uniformChanged();
-    }
-  }
-  /**
-   * Gets the fragment blueprint IR.
-   */
+
   get fragmentIR() {
     return this._irFrag;
   }
   set fragmentIR(ir: MaterialBlueprintIR) {
     if (ir && ir !== this._irFrag) {
       this._irFrag = ir;
+      this.syncBlueprintMetadata();
       this.clearCache();
       this.optionChanged(true);
     }
   }
-  /**
-   * Gets the vertex blueprint IR.
-   */
+
   get vertexIR() {
     return this._irVertex;
   }
   set vertexIR(ir: MaterialBlueprintIR) {
     if (ir && ir !== this._irVertex) {
       this._irVertex = ir;
-      this.useFeature(PBRBluePrintMaterial.FEATURE_VERTEX_COLOR, this._irVertex.behaviors.useVertexColor);
-      this.useFeature(PBRBluePrintMaterial.FEATURE_VERTEX_UV, this._irVertex.behaviors.useVertexUV);
+      this.syncBlueprintMetadata();
       this.clearCache();
       this.optionChanged(true);
     }
   }
-  /**
-   * Gets the list of uniform value descriptors used by the blueprints.
-   */
+
   get uniformValues() {
     return this._uniformValues;
   }
@@ -210,47 +148,40 @@ export class PBRBluePrintMaterial
     this._uniformValues = (val ?? []).map((v) => ({ ...v }));
     this.uniformChanged();
   }
-  /**
-   * Gets the list of texture uniform descriptors used by the blueprints.
-   */
+
   get uniformTextures() {
     return this._uniformTextures;
   }
   set uniformTextures(val: BluePrintUniformTexture[]) {
     if (val !== this._uniformTextures) {
-      const newUniforms = val.map((v) => ({
-        finalTexture: new DRef(v.finalTexture!.get()),
+      const newUniforms = (val ?? []).map((v) => ({
+        finalTexture: new DRef(v.finalTexture?.get() ?? null),
         finalSampler: v.finalSampler,
-        name: v.name,
-        params: v.params?.clone() ?? Vector4.zero(),
-        texture: v.texture,
-        type: v.type,
-        sRGB: v.sRGB,
-        wrapS: v.wrapS,
-        wrapT: v.wrapT,
         inFragmentShader: v.inFragmentShader,
         inVertexShader: v.inVertexShader,
-        minFilter: v.minFilter,
         magFilter: v.magFilter,
-        mipFilter: v.mipFilter
+        minFilter: v.minFilter,
+        mipFilter: v.mipFilter,
+        name: v.name,
+        params: v.params?.clone() ?? Vector4.zero(),
+        sRGB: v.sRGB,
+        texture: v.texture,
+        type: v.type,
+        wrapS: v.wrapS,
+        wrapT: v.wrapT
       }));
       for (const u of this._uniformTextures) {
-        u.finalTexture!.dispose();
+        u.finalTexture?.dispose();
       }
       this._uniformTextures = newUniforms;
       this.uniformChanged();
     }
   }
-  /**
-   * Creates a deep copy of this material.
-   *
-   * @remarks
-   * The clone shares the same vertex/fragment IR references and copies
-   * the current blueprint uniform descriptors, then calls `copyFrom`
-   * to copy base-class and mixin state.
-   *
-   * @returns A new {@link PBRBluePrintMaterial} instance.
-   */
+
+  hasConnectedOutput(name: PBRBlueprintOutputName) {
+    return this._connectedOutputs.has(name);
+  }
+
   clone() {
     const other = new PBRBluePrintMaterial(
       this._irFrag,
@@ -261,330 +192,603 @@ export class PBRBluePrintMaterial
     other.copyFrom(this);
     return other;
   }
+
   copyFrom(other: this) {
     super.copyFrom(other);
-    this.reflectionMode = other.reflectionMode;
-    this.subsurfaceProfile = other.subsurfaceProfile;
-    this.anisotropy = other.anisotropy;
-    this.anisotropyDirection = other.anisotropyDirection;
-    this.anisotropyDirectionScaleBias = other.anisotropyDirectionScaleBias;
+    if (other instanceof PBRBluePrintMaterial) {
+      this.fragmentIR = other.fragmentIR;
+      this.vertexIR = other.vertexIR;
+      this.uniformValues = other.uniformValues;
+      this.uniformTextures = other.uniformTextures;
+    }
   }
-  /**
-   * Builds the vertex shader for this PBR blueprint material.
-   *
-   * @param scope - The current vertex shader function scope.
-   */
+
   vertexShader(scope: PBFunctionScope) {
     super.vertexShader(scope);
     const pb = scope.$builder;
-    scope.$inputs.zVertexPos = pb.vec3().attrib('position');
-    scope.$inputs.zVertexNormal = pb.vec3().attrib('normal');
-    scope.$inputs.zVertexTangent = pb.vec4().attrib('tangent');
-    if (this.featureUsed(PBRBluePrintMaterial.FEATURE_VERTEX_COLOR)) {
-      scope.$inputs.zVertexColor = pb.vec4().attrib('diffuse');
+
+    scope.zVertexColor = this.getBlueprintVertexColor(scope);
+    scope.zVertexUV = this.getBlueprintVertexUV(scope);
+    scope.zVertexNormal = (scope.$outputs.wNorm ?? pb.vec3(0, 0, 1)) as PBShaderExp;
+    scope.zVertexTangent = (scope.$outputs.wTangent ?? pb.vec3(1, 0, 0)) as PBShaderExp;
+    scope.zVertexBinormal = (scope.$outputs.wBinormal ?? pb.vec3(0, 1, 0)) as PBShaderExp;
+    scope.zWorldPos = scope.$outputs.worldPos as PBShaderExp;
+    if (this._vertexUsesColor && !scope.$outputs.zOutDiffuse) {
+      scope.$outputs.zOutDiffuse = scope.zVertexColor;
     }
-    if (this.featureUsed(PBRBluePrintMaterial.FEATURE_VERTEX_UV)) {
-      scope.$inputs.zVertexUV = pb.vec2().attrib('texCoord0');
+    if (this._vertexUsesUV) {
+      scope.$outputs.zVertexUV = scope.zVertexUV;
     }
 
     for (const u of [...this._uniformValues, ...this._uniformTextures]) {
       if (u.inVertexShader) {
-        // @ts-ignore
+        // @ts-ignore dynamic shader type constructor
         pb.getGlobalScope()[u.name] = pb[u.type]().uniform(2);
       }
     }
-    const outputs = this._irVertex.create(pb)!;
-    scope.$l.oPos = this.getOutput(outputs, 'Position') ?? ShaderHelper.resolveVertexPosition(scope);
-    const worldMatrix = ShaderHelper.getWorldMatrix(scope);
-    scope.$outputs.worldPos = pb.mul(worldMatrix, pb.vec4(scope.oPos, 1)).xyz;
-    scope.$l.csPos = pb.mul(ShaderHelper.getViewProjectionMatrix(scope), pb.vec4(scope.$outputs.worldPos, 1));
-    ShaderHelper.setClipSpacePosition(scope, scope.csPos);
-    scope.$outputs.zVertexColor =
-      this.getOutput(outputs, 'Color') ??
-      (this.featureUsed(PBRBluePrintMaterial.FEATURE_VERTEX_COLOR) ? scope.$inputs.zVertexColor : pb.vec4(1));
-    scope.$outputs.zVertexUV =
-      this.getOutput(outputs, 'UV') ??
-      (this.featureUsed(PBRBluePrintMaterial.FEATURE_VERTEX_UV) ? scope.$inputs.zVertexUV : pb.vec2(0));
-    scope.$l.oNorm = this.getOutput(outputs, 'Normal') ?? ShaderHelper.resolveVertexNormal(scope);
-    scope.$outputs.zVertexNormal = pb.mul(ShaderHelper.getNormalMatrix(scope), pb.vec4(scope.oNorm, 0)).xyz;
-    scope.$l.oTangent = this.getOutput(outputs, 'Tangent') ?? ShaderHelper.resolveVertexTangent(scope);
-    scope.$outputs.zVertexTangent = pb.mul(
-      ShaderHelper.getNormalMatrix(scope),
-      pb.vec4(scope.oTangent.xyz, 0)
-    ).xyz;
-    scope.$outputs.zVertexBinormal = pb.mul(
-      pb.cross(scope.$outputs.zVertexNormal, scope.$outputs.zVertexTangent),
-      scope.oTangent.w
-    );
-  }
-  /**
-   * Builds the fragment shader for this PBR blueprint material.
-   *
-   * @param scope - The current fragment shader function scope.
-   */
-  fragmentShader(scope: PBFunctionScope) {
-    super.fragmentShader(scope);
-    const pb = scope.$builder;
-    if (
-      !!this._subsurfaceProfile &&
-      this.needFragmentColor() &&
-      this.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT
-    ) {
-      scope.zSubsurfaceProfileId = pb.float().uniform(2);
-      scope.zSubsurfaceProfileScale = pb.float().uniform(2);
-      scope.zSubsurfaceProfileStrength = pb.float().uniform(2);
-      scope.zSubsurfaceProfilePreset = pb.float().uniform(2);
+
+    const outputs = this._irVertex.create(pb);
+    if (!outputs) {
+      return;
     }
-    if (this.needFragmentColor()) {
-      scope.zAnisotropy = pb.float().uniform(2);
-      scope.zAnisotropyDirection = pb.float().uniform(2);
-      scope.zAnisotropyDirectionScaleBias = pb.vec2().uniform(2);
+    const vertexOut = this.toVertexOutputMap(outputs);
+    const worldMatrix = ShaderHelper.getWorldMatrix(scope);
+
+    if (vertexOut.Position) {
+      scope.$l.oPos = vertexOut.Position as PBShaderExp;
+      scope.$outputs.worldPos = pb.mul(worldMatrix, pb.vec4(scope.oPos, 1)).xyz;
+      scope.zWorldPos = scope.$outputs.worldPos as PBShaderExp;
+      scope.$l.csPos = pb.mul(
+        ShaderHelper.getViewProjectionMatrix(scope),
+        pb.vec4(scope.$outputs.worldPos, 1)
+      );
+      ShaderHelper.setClipSpacePosition(scope, scope.csPos);
+    }
+    if (vertexOut.Color) {
+      scope.zVertexColor = this.toVec4(scope as unknown as PBInsideFunctionScope, vertexOut.Color, 1);
+      if (scope.$outputs.zOutDiffuse) {
+        scope.$outputs.zOutDiffuse = scope.zVertexColor;
+      }
+    }
+    if (vertexOut.UV) {
+      scope.zVertexUV = this.toVec2(scope as unknown as PBInsideFunctionScope, vertexOut.UV);
+      if (this._vertexUsesUV) {
+        scope.$outputs.zVertexUV = scope.zVertexUV;
+      }
+    }
+    if (vertexOut.Normal) {
+      scope.$l.oNorm = this.toVec3(scope as unknown as PBInsideFunctionScope, vertexOut.Normal);
+      scope.$outputs.wNorm = pb.mul(ShaderHelper.getNormalMatrix(scope), pb.vec4(scope.oNorm, 0)).xyz;
+      scope.zVertexNormal = scope.$outputs.wNorm as PBShaderExp;
+    }
+    if (vertexOut.Tangent) {
+      const tangent = vertexOut.Tangent as PBShaderExp;
+      scope.$l.oTangent =
+        tangent.getTypeName() === 'vec4'
+          ? tangent
+          : pb.vec4(this.toVec3(scope as unknown as PBInsideFunctionScope, tangent), 1);
+      scope.$outputs.wTangent = pb.mul(
+        ShaderHelper.getNormalMatrix(scope),
+        pb.vec4(scope.oTangent.xyz, 0)
+      ).xyz;
+      scope.$outputs.wBinormal = pb.mul(
+        pb.cross(scope.$outputs.wNorm as PBShaderExp, scope.$outputs.wTangent as PBShaderExp),
+        scope.oTangent.w
+      );
+      scope.zVertexTangent = scope.$outputs.wTangent as PBShaderExp;
+      scope.zVertexBinormal = scope.$outputs.wBinormal as PBShaderExp;
+    }
+  }
+
+  fragmentShader(scope: PBFunctionScope) {
+    const pb = scope.$builder;
+    if (this.needFragmentColorInput()) {
       for (const u of [...this._uniformValues, ...this._uniformTextures]) {
         if (u.inFragmentShader) {
-          // @ts-ignore
+          // @ts-ignore dynamic shader type constructor
           pb.getGlobalScope()[u.name] = pb[u.type]().uniform(2);
         }
       }
-      scope.$l.viewVec = this.calculateViewVector(scope, scope.$inputs.worldPos);
-      scope.$l.commonData = this.getCommonDatasStruct(scope)();
-      this.getCommonData(
-        scope,
-        scope.commonData,
-        scope.viewVec,
-        scope.$inputs.worldPos,
-        scope.$inputs.zVertexNormal,
-        scope.$inputs.zVertexTangent,
-        scope.$inputs.zVertexBinormal,
-        scope.$inputs.zVertexColor,
-        scope.$inputs.zVertexUV,
-        this._irFrag
-      );
-      if (this.drawContext.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
-        if (this.drawContext.materialFlags & MaterialVaryingFlags.SSR_STORE_ROUGHNESS) {
-          scope.$l.outRoughness = pb.vec4();
-          const writeSSSDiffuse =
-            !!this._subsurfaceProfile &&
-            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_DIFFUSE);
-          if (writeSSSDiffuse) {
-            scope.$l.sssDiffuse = pb.vec4();
-            scope.$l.litColor = this.PBRLight(
-              scope,
-              scope.$inputs.worldPos,
-              scope.viewVec,
-              scope.commonData,
-              scope.outRoughness,
-              scope.sssDiffuse
-            );
-          } else {
-            scope.$l.litColor = this.PBRLight(
-              scope,
-              scope.$inputs.worldPos,
-              scope.viewVec,
-              scope.commonData,
-              scope.outRoughness
-            );
-          }
-          const writeSSSProfile =
-            !!this._subsurfaceProfile &&
-            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE);
-          scope.$l.sssProfile = writeSSSProfile ? this.buildSubsurfaceProfile(scope) : pb.vec4(0);
-          scope.$l.sssParams = writeSSSProfile ? (scope.sssParams ?? pb.vec4(0)) : pb.vec4(0);
-          this.outputFragmentColor(
-            scope,
-            scope.$inputs.worldPos,
-            scope.litColor,
-            scope.outRoughness,
-            pb.vec4(pb.add(pb.mul(scope.commonData.normal, 0.5), pb.vec3(0.5)), 1),
-            scope.sssProfile,
-            scope.sssParams,
-            writeSSSDiffuse ? scope.sssDiffuse : undefined,
-            undefined,
-            writeSSSProfile
-          );
-        } else {
-          const writeSSSDiffuse =
-            !!this._subsurfaceProfile &&
-            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_DIFFUSE);
-          if (writeSSSDiffuse) {
-            scope.$l.sssDiffuse = pb.vec4();
-            scope.$l.litColor = this.PBRLight(
-              scope,
-              scope.$inputs.worldPos,
-              scope.viewVec,
-              scope.commonData,
-              undefined,
-              scope.sssDiffuse
-            );
-          } else {
-            scope.$l.litColor = this.PBRLight(scope, scope.$inputs.worldPos, scope.viewVec, scope.commonData);
-          }
-          const writeSSSProfile =
-            !!this._subsurfaceProfile &&
-            !!(this.drawContext.materialFlags & MaterialVaryingFlags.SSS_STORE_PROFILE);
-          scope.$l.sssProfile = writeSSSProfile ? this.buildSubsurfaceProfile(scope) : pb.vec4(0);
-          scope.$l.sssParams = writeSSSProfile ? (scope.sssParams ?? pb.vec4(0)) : pb.vec4(0);
-          this.outputFragmentColor(
-            scope,
-            scope.$inputs.worldPos,
-            scope.litColor,
-            undefined,
-            undefined,
-            scope.sssProfile,
-            scope.sssParams,
-            writeSSSDiffuse ? scope.sssDiffuse : undefined,
-            undefined,
-            writeSSSProfile
-          );
-        }
-      } else {
-        this.outputFragmentColor(scope, scope.$inputs.worldPos, scope.commonData.albedo);
-      }
-    } else {
-      this.outputFragmentColor(scope, scope.$inputs.worldPos, null);
+      scope.zVertexColor = scope.$inputs.zOutDiffuse ?? pb.vec4(1);
+      scope.zVertexUV = scope.$inputs.zVertexUV ?? pb.vec2(0);
+      scope.zVertexNormal = scope.$inputs.wNorm ?? pb.vec3(0, 0, 1);
+      scope.zVertexTangent = scope.$inputs.wTangent ?? pb.vec3(1, 0, 0);
+      scope.zVertexBinormal = scope.$inputs.wBinormal ?? pb.vec3(0, 1, 0);
+      scope.zWorldPos = scope.$inputs.worldPos as PBShaderExp;
     }
+    super.fragmentShader(scope);
   }
-  /**
-   * Applies runtime uniform values and textures to the given bind group.
-   *
-   * @remarks
-   * - Calls the base implementation first to bind standard mesh/PBR uniforms.
-   * - If fragment color is needed for the current context, all blueprint
-   *   scalar/vector uniform values and textures are then bound by name.
-   *
-   * @param bindGroup - The bind group to which material resources are bound.
-   * @param ctx - The current draw context.
-   * @param pass - Index of the active render pass.
-   */
+
   applyUniformValues(bindGroup: BindGroup, ctx: DrawContext, pass: number) {
     super.applyUniformValues(bindGroup, ctx, pass);
-    if (this.needFragmentColor(ctx)) {
-      bindGroup.setValue('zReflectionMode', PBR_REFLECTION_MODE[this._reflectionMode]);
-      bindGroup.setValue('zAnisotropy', this._anisotropy);
-      bindGroup.setValue('zAnisotropyDirection', this._anisotropyDirection);
-      bindGroup.setValue('zAnisotropyDirectionScaleBias', this._anisotropyDirectionScaleBias);
+    if (this.needFragmentColorInput(ctx)) {
       for (const u of this._uniformValues) {
         bindGroup.setValue(u.name, u.finalValue!);
       }
       for (const u of this._uniformTextures) {
-        bindGroup.setTexture(u.name, u.finalTexture!.get()!, u.finalSampler);
-      }
-      if (!!this._subsurfaceProfile && ctx.renderPass!.type === RENDER_PASS_TYPE_LIGHT) {
-        const profile = this._subsurfaceProfile;
-        bindGroup.setValue('zSubsurfaceProfileId', profile?.slot ?? 0);
-        bindGroup.setValue('zSubsurfaceProfileScale', profile?.scale ?? 0);
-        bindGroup.setValue('zSubsurfaceProfileStrength', profile?.strength ?? 0);
-        bindGroup.setValue('zSubsurfaceProfilePreset', profile?.presetIndex ?? 0);
+        const texture = u.finalTexture?.get();
+        if (texture) {
+          bindGroup.setTexture(u.name, texture, u.finalSampler);
+        }
       }
     }
   }
-  /**
-   * Creates a unique hash string used for program caching.
-   *
-   * @remarks
-   * The hash includes:
-   * - The base material hash (`super._createHash()`).
-   * - The fragment IR hash.
-   * - The vertex IR hash.
-   *
-   * Different blueprint graphs will therefore produce different programs.
-   *
-   * @returns A hash string that uniquely identifies this material configuration.
-   */
-  protected _createHash() {
-    return `${super._createHash()}:${this._irFrag.hash}:${this._irVertex.hash}:${
-      this._subsurfaceProfile ? 1 : 0
-    }`;
-  }
-  /**
-   * Creates the GPU program for this blueprint PBR material.
-   *
-   * @remarks
-   * This calls the base implementation and returns its result.
-   * Commented-out `console.log` lines are provided for debugging the
-   * generated vertex and fragment shader sources.
-   *
-   * @param ctx - The current draw context.
-   * @param pass - Index of the active render pass.
-   * @returns The created GPU program.
-   */
+
   protected createProgram(ctx: DrawContext, pass: number) {
-    const program = super.createProgram(ctx, pass);
-    //console.log(program.getShaderSource('vertex'));
-    //console.log(program.getShaderSource('fragment'));
-    return program;
+    return super.createProgram(ctx, pass);
   }
-  /**
-   * Disposes resources associated with this material.
-   *
-   * @remarks
-   * - Calls the base `onDispose` to clean up inherited resources.
-   * - Disposes all `finalTexture` references from the blueprint
-   *   texture uniform descriptors.
-   *
-   * This method is intended to be called by the engine's resource
-   * management system rather than directly by user code.
-   */
+
+  protected _createHash() {
+    return `${super._createHash()}:${this._irFrag.hash}:${this._irVertex.hash}:${this._connectedOutputHash()}`;
+  }
+
   protected onDispose() {
     super.onDispose();
     for (const u of this._uniformTextures) {
-      u.finalTexture!.dispose();
+      u.finalTexture?.dispose();
     }
   }
-  /**
-   * Retrieves a named output expression from a blueprint output list.
-   *
-   * @param outputs - The list of outputs generated by a blueprint graph.
-   * @param name - The desired output name (e.g. `"Position"`, `"Color"`, `"UV"`).
-   * @returns The expression associated with the given name, or `undefined` if not found.
-   */
-  private getOutput(
+
+  calculateAlbedoColor(scope: PBInsideFunctionScope, uv?: PBShaderExp) {
+    const baseColor = this.getBlueprintOutput(scope, 'BaseColor');
+    const opacity = this.getBlueprintOutput(scope, 'Opacity');
+    if (baseColor !== undefined) {
+      const pb = scope.$builder;
+      return pb.vec4(this.toVec3(scope, baseColor), (opacity as PBShaderExp | number) ?? 1);
+    }
+    const albedo = super.calculateAlbedoColor(scope, uv);
+    if (opacity !== undefined) {
+      const pb = scope.$builder;
+      return pb.vec4(albedo.rgb, opacity as PBShaderExp | number);
+    }
+    return albedo;
+  }
+
+  calculateMetallic(scope: PBInsideFunctionScope, albedo: PBShaderExp, normal: PBShaderExp) {
+    const value = this.getBlueprintOutput(scope, 'Metallic');
+    if (value !== undefined) {
+      return this.toFloat(scope, value);
+    }
+    return super.calculateMetallic(scope, albedo, normal);
+  }
+
+  calculateRoughness(scope: PBInsideFunctionScope, albedo: PBShaderExp, normal: PBShaderExp) {
+    const value = this.getBlueprintOutput(scope, 'Roughness');
+    if (value !== undefined) {
+      return this.toFloat(scope, value);
+    }
+    return super.calculateRoughness(scope, albedo, normal);
+  }
+
+  calculateSpecularFactor(scope: PBInsideFunctionScope, albedo: PBShaderExp, normal: PBShaderExp) {
+    const pb = scope.$builder;
+    const base = super.calculateSpecularFactor(scope, albedo, normal);
+    const specular = this.getBlueprintOutput(scope, 'Specular');
+    const weight = this.getBlueprintOutput(scope, 'SpecularWeight');
+    if (specular !== undefined || weight !== undefined) {
+      return pb.vec4(
+        specular !== undefined ? this.toVec3(scope, specular) : base.rgb,
+        (weight as PBShaderExp | number | undefined) ?? base.a
+      );
+    }
+    return base;
+  }
+
+  calculateEmissiveColor(scope: PBInsideFunctionScope) {
+    const emissive = this.getBlueprintOutput(scope, 'Emissive');
+    if (emissive !== undefined) {
+      return this.toVec3(scope, emissive);
+    }
+    return super.calculateEmissiveColor(scope);
+  }
+
+  calculateNormalAndTBN(
+    scope: PBInsideFunctionScope,
+    worldPos: PBShaderExp,
+    worldNormal?: PBShaderExp,
+    worldTangent?: PBShaderExp,
+    worldBinormal?: PBShaderExp
+  ) {
+    const outputNormal = this.getBlueprintOutput(scope, 'Normal');
+    const outputTangent = this.getBlueprintOutput(scope, 'Tangent');
+    if (outputNormal === undefined && outputTangent === undefined) {
+      return super.calculateNormalAndTBN(scope, worldPos, worldNormal, worldTangent, worldBinormal);
+    }
+    const pb = scope.$builder;
+    const NormalStruct = pb.defineStruct([pb.mat3('TBN'), pb.vec3('normal')]);
+    const funcName = 'Z_calculateBlueprintNormalAndTBN';
+    const that = this;
+    pb.func(
+      funcName,
+      [
+        pb.vec3('worldPos'),
+        pb.vec3('worldNormal'),
+        pb.vec3('worldTangent'),
+        pb.vec3('worldBinormal'),
+        pb.vec3('surfaceNormal'),
+        pb.vec3('surfaceTangent')
+      ],
+      function () {
+        this.$l.TBN = that.calculateTBN(
+          this,
+          this.worldPos,
+          this.worldNormal,
+          this.worldTangent,
+          this.worldBinormal
+        );
+        this.$l.ng = this.TBN[2];
+        this.$l.t = this.TBN[0];
+        this.$l.b = this.TBN[1];
+        this.$if(pb.greaterThan(pb.length(this.surfaceTangent), 0.0001), function () {
+          this.$l.t_ = pb.normalize(this.surfaceTangent);
+          this.t = pb.normalize(pb.sub(this.t_, pb.mul(this.ng, pb.dot(this.ng, this.t_))));
+          this.b = pb.normalize(pb.cross(this.ng, this.t));
+        });
+        this.TBN = pb.mat3(this.t, this.b, this.ng);
+        this.$l.surfaceNormalTS = this.surfaceNormal;
+        this.$if(pb.lessThanEqual(pb.length(this.surfaceNormalTS), 0.0001), function () {
+          this.surfaceNormalTS = pb.vec3(0, 0, 1);
+        });
+        this.$l.surfaceNormalWS = pb.normalize(pb.mul(this.TBN, this.surfaceNormalTS));
+        this.$return(NormalStruct(this.TBN, this.surfaceNormalWS));
+      }
+    );
+    return pb
+      .getGlobalScope()
+      [
+        funcName
+      ](worldPos, (worldNormal ?? scope.zVertexNormal) as PBShaderExp, (worldTangent ?? scope.zVertexTangent) as PBShaderExp, (worldBinormal ?? scope.zVertexBinormal) as PBShaderExp, outputNormal !== undefined ? this.toVec3(scope, outputNormal) : pb.vec3(0, 0, 1), outputTangent !== undefined ? this.toVec3(scope, outputTangent) : pb.vec3(0)) as PBShaderExp;
+  }
+
+  indirectLighting(
+    scope: PBInsideFunctionScope,
+    normal: PBShaderExp,
+    viewVec: PBShaderExp,
+    commonData: PBShaderExp,
+    outColor: PBShaderExp,
+    outRoughness?: PBShaderExp,
+    outDiffuseColor?: PBShaderExp
+  ) {
+    const ao = this.getBlueprintOutput(scope, 'AO');
+    if (ao === undefined) {
+      super.indirectLighting(scope, normal, viewVec, commonData, outColor, outRoughness, outDiffuseColor);
+      return;
+    }
+    const pb = scope.$builder;
+    const funcName = `Z_applyBlueprintAO${outDiffuseColor ? '_D' : ''}`;
+    pb.func(
+      funcName,
+      [
+        pb.vec3('outColor').inout(),
+        ...(outDiffuseColor ? [pb.vec3('outDiffuseColor').inout()] : []),
+        pb.float('ao')
+      ],
+      function () {
+        this.outColor = pb.mul(this.outColor, this.ao);
+        if (outDiffuseColor) {
+          this.outDiffuseColor = pb.mul(this.outDiffuseColor, this.ao);
+        }
+      }
+    );
+    super.indirectLighting(scope, normal, viewVec, commonData, outColor, outRoughness, outDiffuseColor);
+    if (outDiffuseColor) {
+      pb.getGlobalScope()[funcName](outColor, outDiffuseColor, ao as PBShaderExp | number);
+    } else {
+      pb.getGlobalScope()[funcName](outColor, ao as PBShaderExp | number);
+    }
+  }
+
+  private syncBlueprintMetadata() {
+    this._connectedOutputs = this.collectConnectedOutputs(this._irFrag, PBRBlockNode);
+    const fragmentUsesColor = this._irFrag.behaviors.useVertexColor;
+    const fragmentUsesUV = this._irFrag.behaviors.useVertexUV;
+    const vertexUsesColor = this._irVertex.behaviors.useVertexColor;
+    const vertexUsesUV = this._irVertex.behaviors.useVertexUV;
+    this._vertexUsesColor = fragmentUsesColor || vertexUsesColor;
+    this._vertexUsesUV = fragmentUsesUV || vertexUsesUV;
+    this.useFeature(PBRBluePrintMaterial.FEATURE_BLUEPRINT_VERTEX_COLOR, this._vertexUsesColor);
+    this.useFeature(PBRBluePrintMaterial.FEATURE_BLUEPRINT_VERTEX_UV, this._vertexUsesUV);
+  }
+
+  private collectConnectedOutputs<T extends IGraphNode>(
+    ir: MaterialBlueprintIR,
+    rootCtor: new (...args: any[]) => T
+  ): Set<PBRBlueprintOutputName> {
+    const outputs = new Set<PBRBlueprintOutputName>();
+    for (const rootId of ir.DAG.roots) {
+      const rootNode = ir.DAG.nodeMap[rootId];
+      if (!(rootNode instanceof rootCtor)) {
+        continue;
+      }
+      for (const input of rootNode.inputs) {
+        if (input.inputNode) {
+          outputs.add(input.name as PBRBlueprintOutputName);
+        }
+      }
+    }
+    return outputs;
+  }
+
+  private getBlueprintVertexColor(scope: PBFunctionScope): PBShaderExp {
+    const pb = scope.$builder;
+    if (this.vertexColor) {
+      return this.getVertexColor(scope as unknown as PBInsideFunctionScope);
+    }
+    if (this._vertexUsesColor) {
+      if (scope.$inputs.zDiffuse) {
+        return scope.$inputs.zDiffuse as PBShaderExp;
+      }
+      if (scope.$getVertexAttrib('diffuse')) {
+        return scope.$getVertexAttrib('diffuse') as PBShaderExp;
+      }
+      scope.$inputs.zDiffuse = pb.vec4().attrib('diffuse');
+      return scope.$inputs.zDiffuse as PBShaderExp;
+    }
+    return pb.vec4(1);
+  }
+
+  private getBlueprintVertexUV(scope: PBFunctionScope): PBShaderExp {
+    const pb = scope.$builder;
+    if (this._vertexUsesUV) {
+      if (scope.$inputs.zVertexUV) {
+        return scope.$inputs.zVertexUV as PBShaderExp;
+      }
+      if (scope.$getVertexAttrib('texCoord0')) {
+        return scope.$getVertexAttrib('texCoord0') as PBShaderExp;
+      }
+      scope.$inputs.zVertexUV = pb.vec2().attrib('texCoord0');
+      return scope.$inputs.zVertexUV as PBShaderExp;
+    }
+    if (this.albedoTexture) {
+      return (this.getAlbedoTexCoord(scope as unknown as PBInsideFunctionScope) ?? pb.vec2(0)) as PBShaderExp;
+    }
+    return pb.vec2(0);
+  }
+
+  private getBlueprintOutput(
+    scope: PBInsideFunctionScope,
+    name: PBRBlueprintOutputName
+  ): number | boolean | PBShaderExp | undefined {
+    if (!this._connectedOutputs.has(name)) {
+      return undefined;
+    }
+    return this.getBlueprintOutputMap(scope)[name];
+  }
+
+  private getBlueprintOutputMap(scope: PBInsideFunctionScope): BlueprintOutputMap {
+    const pb = scope.$builder;
+    const funcName = 'Z_GetPBRBlueprintOutputs';
+    const that = this;
+    const outputsStruct = pb.defineStruct(
+      DEFAULT_OUTPUT_NAMES.map((name) => {
+        switch (name) {
+          case 'BaseColor':
+            return pb.vec3(name);
+          case 'Specular':
+          case 'Emissive':
+          case 'Normal':
+          case 'Tangent':
+            return pb.vec3(name);
+          default:
+            return pb.float(name);
+        }
+      })
+    );
+    if (!pb.getGlobalScope()[funcName]) {
+      pb.func(
+        funcName,
+        [
+          pb.vec3('worldPos'),
+          pb.vec4('vertexColor'),
+          pb.vec2('vertexUV'),
+          pb.vec3('vertexNormal'),
+          pb.vec3('vertexTangent'),
+          pb.vec3('vertexBinormal')
+        ],
+        function () {
+          this.zWorldPos = this.worldPos;
+          this.zVertexColor = this.vertexColor;
+          this.zVertexUV = this.vertexUV;
+          this.zVertexNormal = this.vertexNormal;
+          this.zVertexTangent = this.vertexTangent;
+          this.zVertexBinormal = this.vertexBinormal;
+          const outputs = that._irFrag.create(pb);
+          let baseColor: number | PBShaderExp = pb.vec3(1);
+          let metallic: number | PBShaderExp = 0;
+          let roughness: number | PBShaderExp = 1;
+          let specular: number | PBShaderExp = pb.vec3(1);
+          let emissive: number | PBShaderExp = pb.vec3(0);
+          let normal: number | PBShaderExp = pb.vec3(0);
+          let tangent: number | PBShaderExp = pb.vec3(0);
+          let opacity: number | PBShaderExp = 1;
+          let specularWeight: number | PBShaderExp = 1;
+          let ao: number | PBShaderExp = 1;
+          if (outputs) {
+            const map = that.toOutputMap(outputs);
+            if (map.BaseColor !== undefined) {
+              baseColor = that.toVec3(scope, map.BaseColor);
+            }
+            if (map.Metallic !== undefined) {
+              metallic = map.Metallic as PBShaderExp | number;
+            }
+            if (map.Roughness !== undefined) {
+              roughness = map.Roughness as PBShaderExp | number;
+            }
+            if (map.Specular !== undefined) {
+              specular = that.toVec3(scope, map.Specular);
+            }
+            if (map.Emissive !== undefined) {
+              emissive = that.toVec3(scope, map.Emissive);
+            }
+            if (map.Normal !== undefined) {
+              normal = that.toVec3(scope, map.Normal);
+            }
+            if (map.Tangent !== undefined) {
+              tangent = that.toVec3(scope, map.Tangent);
+            }
+            if (map.Opacity !== undefined) {
+              opacity = map.Opacity as PBShaderExp | number;
+            }
+            if (map.SpecularWeight !== undefined) {
+              specularWeight = map.SpecularWeight as PBShaderExp | number;
+            }
+            if (map.AO !== undefined) {
+              ao = map.AO as PBShaderExp | number;
+            }
+          }
+          this.$return(
+            outputsStruct(
+              baseColor,
+              metallic,
+              roughness,
+              specular,
+              emissive,
+              normal,
+              tangent,
+              opacity,
+              specularWeight,
+              ao
+            )
+          );
+        }
+      );
+    }
+    const result = pb
+      .getGlobalScope()
+      [
+        funcName
+      ](this.getBlueprintWorldPos(scope), this.getBlueprintFragmentVertexColor(scope), this.getBlueprintFragmentVertexUV(scope), this.getBlueprintFragmentVertexNormal(scope), this.getBlueprintFragmentVertexTangent(scope), this.getBlueprintFragmentVertexBinormal(scope)) as PBShaderExp;
+    const map: BlueprintOutputMap = {};
+    for (const name of DEFAULT_OUTPUT_NAMES) {
+      map[name] = result[name] as PBShaderExp;
+    }
+    return map;
+  }
+
+  private getBlueprintWorldPos(scope: PBInsideFunctionScope): PBShaderExp {
+    const pb = scope.$builder;
+    return (scope.$inputs.worldPos ?? scope.zWorldPos ?? pb.vec3(0)) as PBShaderExp;
+  }
+
+  private getBlueprintFragmentVertexColor(scope: PBInsideFunctionScope): PBShaderExp {
+    const pb = scope.$builder;
+    return (scope.$inputs.zOutDiffuse ?? scope.zVertexColor ?? pb.vec4(1)) as PBShaderExp;
+  }
+
+  private getBlueprintFragmentVertexUV(scope: PBInsideFunctionScope): PBShaderExp {
+    const pb = scope.$builder;
+    return (scope.$inputs.zVertexUV ?? scope.zVertexUV ?? pb.vec2(0)) as PBShaderExp;
+  }
+
+  private getBlueprintFragmentVertexNormal(scope: PBInsideFunctionScope): PBShaderExp {
+    const pb = scope.$builder;
+    return (scope.$inputs.wNorm ?? scope.zVertexNormal ?? pb.vec3(0, 0, 1)) as PBShaderExp;
+  }
+
+  private getBlueprintFragmentVertexTangent(scope: PBInsideFunctionScope): PBShaderExp {
+    const pb = scope.$builder;
+    return (scope.$inputs.wTangent ?? scope.zVertexTangent ?? pb.vec3(1, 0, 0)) as PBShaderExp;
+  }
+
+  private getBlueprintFragmentVertexBinormal(scope: PBInsideFunctionScope): PBShaderExp {
+    const pb = scope.$builder;
+    return (scope.$inputs.wBinormal ?? scope.zVertexBinormal ?? pb.vec3(0, 1, 0)) as PBShaderExp;
+  }
+
+  private toOutputMap(
     outputs: {
       name: string;
       exp: number | boolean | PBShaderExp;
-    }[],
-    name: string
-  ) {
-    return outputs.find((output) => output.name === name)?.exp;
-  }
-  private buildSubsurfaceProfile(scope: PBInsideFunctionScope) {
-    const pb = scope.$builder;
-    scope.$l.sssMask = pb.float(1);
-    scope.$l.sssScatterSoftness = pb.float(0);
-    scope.$l.sssTransmissionMask = pb.float(0);
-    if (this.subsurfaceTexture) {
-      scope.$l.sssTexel = this.sampleSubsurfaceTexture(scope);
-      scope.sssMask = pb.clamp(scope.sssTexel.r, 0, 1);
-      scope.sssScatterSoftness = pb.clamp(scope.sssTexel.g, 0, 1);
+    }[]
+  ): BlueprintOutputMap {
+    const map: BlueprintOutputMap = {};
+    for (const output of outputs) {
+      map[output.name as PBRBlueprintOutputName] = output.exp;
     }
-    scope.$l.sssScatterStrengthMask = pb.clamp(
-      pb.add(pb.mul(scope.sssMask, 0.82), pb.mul(scope.sssScatterSoftness, 0.38)),
-      0,
-      1
-    );
-    scope.$l.sssScatterWidthMask = pb.clamp(
-      pb.max(scope.sssMask, pb.mul(scope.sssScatterSoftness, 0.9)),
-      0,
-      1
-    );
-    scope.$l.sssStrength = pb.mul(scope.zSubsurfaceProfileStrength, scope.sssScatterStrengthMask);
-    scope.$l.sssWidthBase = pb.mul(scope.zSubsurfaceProfileScale, scope.sssScatterWidthMask);
-    scope.$l.sssWidth = pb.clamp(pb.div(scope.sssWidthBase, pb.add(scope.sssWidthBase, 1)), 0, 0.999);
-    scope.sssTransmissionMask = pb.clamp(
-      pb.add(
-        pb.mul(scope.sssMask, 0.12),
-        pb.add(pb.mul(scope.sssStrength, 0.18), pb.mul(scope.sssWidth, 0.24))
-      ),
-      0,
-      0.42
-    );
-    scope.$l.sssSlotEncoded = pb.div(scope.zSubsurfaceProfileId, 255);
-    scope.$l.sssPresetEncoded = pb.div(scope.zSubsurfaceProfilePreset, 255);
-    scope.$l.sssParams = pb.vec4(
-      scope.sssSlotEncoded,
-      scope.sssWidth,
-      scope.sssPresetEncoded,
-      pb.add(0.75, pb.mul(scope.sssScatterSoftness, 0.25))
-    );
-    return pb.vec4(scope.sssStrength, scope.sssStrength, scope.sssStrength, scope.sssTransmissionMask);
+    return map;
+  }
+
+  private toVertexOutputMap(
+    outputs: {
+      name: string;
+      exp: number | boolean | PBShaderExp;
+    }[]
+  ): VertexBlueprintOutputMap {
+    const map: VertexBlueprintOutputMap = {};
+    for (const output of outputs) {
+      map[output.name as VertexBlueprintOutputName] = output.exp;
+    }
+    return map;
+  }
+
+  private toFloat(scope: PBInsideFunctionScope, value: number | boolean | PBShaderExp): PBShaderExp {
+    const pb = scope.$builder;
+    if (typeof value === 'number') {
+      return pb.float(value);
+    }
+    const exp = value as PBShaderExp;
+    return exp.getTypeName() === 'float' ? exp : exp.x;
+  }
+
+  private toVec2(scope: PBInsideFunctionScope, value: number | boolean | PBShaderExp): PBShaderExp {
+    const pb = scope.$builder;
+    if (typeof value === 'number') {
+      return pb.vec2(value);
+    }
+    const exp = value as PBShaderExp;
+    const type = exp.getTypeName();
+    if (type === 'float') {
+      return pb.vec2(exp);
+    }
+    if (type === 'vec3' || type === 'vec4') {
+      return exp.xy;
+    }
+    return exp;
+  }
+
+  private toVec3(scope: PBInsideFunctionScope, value: number | boolean | PBShaderExp): PBShaderExp {
+    const pb = scope.$builder;
+    if (typeof value === 'number') {
+      return pb.vec3(value);
+    }
+    const exp = value as PBShaderExp;
+    const type = exp.getTypeName();
+    if (type === 'float') {
+      return pb.vec3(exp);
+    }
+    if (type === 'vec2') {
+      return pb.vec3(exp, 0);
+    }
+    if (type === 'vec4') {
+      return exp.xyz;
+    }
+    return exp;
+  }
+
+  private toVec4(
+    scope: PBInsideFunctionScope,
+    value: number | boolean | PBShaderExp,
+    alpha: number | PBShaderExp
+  ): PBShaderExp {
+    const pb = scope.$builder;
+    if (typeof value === 'number') {
+      return pb.vec4(value, value, value, alpha);
+    }
+    const exp = value as PBShaderExp;
+    const type = exp.getTypeName();
+    if (type === 'float') {
+      return pb.vec4(pb.vec3(exp), alpha);
+    }
+    if (type === 'vec2') {
+      return pb.vec4(exp, 0, alpha);
+    }
+    if (type === 'vec3') {
+      return pb.vec4(exp, alpha);
+    }
+    return exp;
+  }
+
+  private _connectedOutputHash() {
+    return DEFAULT_OUTPUT_NAMES.map((name) => (this._connectedOutputs.has(name) ? '1' : '0')).join('');
   }
 }
