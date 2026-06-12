@@ -262,7 +262,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
           originBox: info.originBox.clone()
         }
       : null;
-    this.updateMorphBoundingBox();
+    this.refreshAnimatedBoundingBox();
   }
   /**
    * Gets morph target bounding data.
@@ -375,7 +375,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
         this._morphInfo.buffer!.set(morphUniformBuffer);
       }
       this._morphDirty = false;
-      this.updateMorphBoundingBox();
+      this.refreshAnimatedBoundingBox();
       this._renderBundle = {};
       RenderBundleWrapper.drawableChanged(this);
     }
@@ -385,6 +385,17 @@ export class Mesh extends MeshBase implements BatchDrawable {
    */
   getMorphInfo() {
     return this._morphInfo;
+  }
+  /** @internal */
+  resolveAnimatedBoundingBox(morphBoundingBox?: Nullable<BoundingBox>) {
+    const skinnedBoundingBox =
+      this._boneMatrices.get() && this._skinnedBoundingInfo?.boundingBox?.isValid()
+        ? this._skinnedBoundingInfo.boundingBox
+        : null;
+    if (skinnedBoundingBox && morphBoundingBox) {
+      return skinnedBoundingBox.clone().union(morphBoundingBox) as BoundingBox;
+    }
+    return skinnedBoundingBox?.clone() ?? morphBoundingBox ?? null;
   }
   /**
    * Get the number of morph targets
@@ -438,7 +449,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
       if (this._morphInfo!.data[4 + index] !== weight) {
         this._morphInfo!.data[4 + index] = weight;
         this._morphDirty = true;
-        this.updateMorphBoundingBox();
+        this.refreshAnimatedBoundingBox();
         this.scene!.queueUpdateNode(this);
       }
     } else {
@@ -467,7 +478,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     if (this._morphInfo && weight && weight.length <= this._morphInfo.data[3]) {
       this._morphInfo.data.set(weight, 4);
       this._morphDirty = true;
-      this.updateMorphBoundingBox();
+      this.refreshAnimatedBoundingBox();
       this.scene!.queueUpdateNode(this);
     }
   }
@@ -530,13 +541,13 @@ export class Mesh extends MeshBase implements BatchDrawable {
     return this.material?.needSceneDepth() ?? false;
   }
   /** @internal */
-  private updateMorphBoundingBox() {
+  private calculateMorphBoundingBox(): Nullable<BoundingBox> {
     if (!this._morphInfo || !this._morphBoundingInfo) {
-      return;
+      return null;
     }
     const numTargets = Math.min(this._morphInfo.data[3], this._morphBoundingInfo.targetBoxes.length);
     if (numTargets <= 0) {
-      return;
+      return null;
     }
     const weights =
       this._morphInfo.data instanceof Float32Array
@@ -546,13 +557,17 @@ export class Mesh extends MeshBase implements BatchDrawable {
     calculateMorphBoundingBox(bbox, this._morphBoundingInfo.targetBoxes, weights, numTargets);
     bbox.minPoint.addBy(this._morphBoundingInfo.originBox.minPoint);
     bbox.maxPoint.addBy(this._morphBoundingInfo.originBox.maxPoint);
-    this.setAnimatedBoundingBox(bbox);
+    return bbox;
+  }
+  /** @internal */
+  private refreshAnimatedBoundingBox() {
+    this.setAnimatedBoundingBox(this.resolveAnimatedBoundingBox(this.calculateMorphBoundingBox()));
   }
   /** @internal */
   private updateMorphState() {
     if (this._morphInfo && this._morphDirty) {
       this._morphInfo.buffer!.get()!.bufferSubData(4 * 4, this._morphInfo.data, 4, this._morphInfo.data[3]);
-      this.updateMorphBoundingBox();
+      this.refreshAnimatedBoundingBox();
       this._morphDirty = false;
     }
   }
@@ -567,12 +582,10 @@ export class Mesh extends MeshBase implements BatchDrawable {
     if (binding) {
       this.setBoneMatrices(binding.jointTexture);
       binding.computeBoundingBox(this._skinnedBoundingInfo!, this.invWorldMatrix);
-      this.setAnimatedBoundingBox(this._skinnedBoundingInfo!.boundingBox);
+      this.refreshAnimatedBoundingBox();
     } else {
       this.setBoneMatrices(null);
-      if (!this._morphInfo || !this._morphBoundingInfo) {
-        this.setAnimatedBoundingBox(null);
-      }
+      this.refreshAnimatedBoundingBox();
     }
     if (this._skinBindingName) {
       this.scene!.queueUpdateNode(this);

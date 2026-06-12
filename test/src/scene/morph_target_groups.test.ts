@@ -265,4 +265,26 @@ describe('morph target groups', () => {
     restoredMesh.setMorphWeight('smile', 1);
     expectBoundingBox(restoredMesh.getAnimatedBoundingBox(), [-1, -2, -3], [3, 4, 5]);
   });
+
+  test('keeps combined animated bounds stable when skinning and morphing are both active', () => {
+    const scene = new Scene();
+    const root = new SceneNode(scene);
+    const mesh = new Mesh(scene);
+    mesh.parent = root;
+    setMorphInfo(mesh, ['smile'], [0.5]);
+    mesh.setMorphBoundingInfo({
+      originBox: new BoundingBox(new Vector3(0, 0, 0), new Vector3(1, 1, 1)),
+      targetBoxes: [new BoundingBox(new Vector3(-1, -2, -3), new Vector3(2, 3, 4))]
+    });
+    mesh.setBoneMatrices({ dispose() {} } as any);
+    mesh.setSkinnedBoundingInfo({
+      boundingVertices: [],
+      boundingVertexBlendIndices: new Float32Array(24),
+      boundingVertexJointWeights: new Float32Array(24),
+      boundingBox: new BoundingBox(new Vector3(10, 10, 10), new Vector3(11, 11, 11))
+    });
+    (mesh as any).refreshAnimatedBoundingBox();
+
+    expectBoundingBox(mesh.getAnimatedBoundingBox(), [-0.5, -1, -1.5], [11, 11, 11]);
+  });
 });
