@@ -343,6 +343,7 @@ export class NodeDeleteCommand extends Command {
       return;
     }
     const parent = node.parent;
+    const ref = new DRef(node);
     node.remove();
     try {
       await waitForNextFrame();
@@ -350,6 +351,8 @@ export class NodeDeleteCommand extends Command {
     } catch (err) {
       node.parent = parent;
       throw err;
+    } finally {
+      ref.dispose();
     }
   }
   async undo() {
