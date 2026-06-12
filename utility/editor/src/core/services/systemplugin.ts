@@ -1,8 +1,8 @@
 import { PathUtils } from '@zephyr3d/base';
 import { BlobReader, TextWriter, ZipReader, configure, type FileEntry } from '@zip.js/zip.js';
 import { libDir } from '../build/templates';
-import { installDeps } from '../build/dep';
-import { createSystemPluginVFS } from './storage';
+import { installDeps, readLock } from '../build/dep';
+import { createLinkedDirectoryVFS, createSystemPluginVFS } from './storage';
 
 configure({ useWebWorkers: false });
 
@@ -13,6 +13,7 @@ const SYSTEM_PLUGIN_PACKAGES_DIR = `${SYSTEM_PLUGIN_ROOT}/packages`;
 const SYSTEM_PLUGIN_STATE_DIR = `${SYSTEM_PLUGIN_ROOT}/state`;
 const SYSTEM_PLUGIN_MANIFEST = `${SYSTEM_PLUGIN_ROOT}/manifest.json`;
 const SYSTEM_PLUGIN_PACKAGE_MANIFEST = 'plugin.json';
+const SYSTEM_PLUGIN_DEV_PACKAGE_MANIFEST = 'plugin.dev.json';
 
 export type SystemPluginManifestEntry = {
   id: string;
@@ -21,6 +22,10 @@ export type SystemPluginManifestEntry = {
   description?: string;
   entry: string;
   dependencies?: Record<string, string>;
+  linked?: {
+    directory: string;
+    entry?: string;
+  };
   enabled: boolean;
   installedAt: number;
   updatedAt: number;
@@ -81,6 +86,14 @@ export type InstallSystemPluginFilesInput = {
   enabled?: boolean;
 };
 
+export type LinkSystemPluginInput = {
+  directory: string;
+  entryFileName?: string;
+  enabled?: boolean;
+};
+
+export type SystemPluginProgressHandler = (stage: string) => void;
+
 export type SystemPluginFileRecord = {
   path: string;
   relativePath: string;
@@ -94,7 +107,41 @@ export type SystemPluginDirectoryRecord = {
   name: string;
 };
 
+type LinkedPluginFileAnalysisCacheEntry = {
+  source: string;
+  importSpecifiers: string[];
+  modifiedAt: number;
+  size: number;
+};
+
+type LinkedPluginEntryGraphCacheEntry = {
+  filePaths: string[];
+};
+
+type LinkedPluginManifestCacheEntry = {
+  manifestFileName: string;
+  manifestSource: string;
+  packageManifest: SystemPluginPackageManifest;
+  modifiedAt: number;
+  size: number;
+};
+
+type LinkedPluginGraphFilesResult = {
+  files: SystemPluginFileInput[];
+  importSpecifiersByPath: Map<string, string[]>;
+};
+
+type LinkedPluginGraphCache = {
+  manifest?: LinkedPluginManifestCacheEntry;
+  files: Map<string, LinkedPluginFileAnalysisCacheEntry>;
+  entryGraphs: Map<string, LinkedPluginEntryGraphCacheEntry>;
+};
+
 export class SystemPluginService {
+  private static readonly _linkedPluginMounts = new Map<string, ReturnType<typeof createLinkedDirectoryVFS>>();
+  private static readonly _linkedPluginDirectories = new Map<string, string>();
+  private static readonly _linkedPluginGraphCaches = new Map<string, LinkedPluginGraphCache>();
+
   static get VFS() {
     return systemPluginVFS;
   }
@@ -121,16 +168,19 @@ export class SystemPluginService {
   }
 
   static async listPlugins(): Promise<SystemPluginRecord[]> {
+    await this.syncLinkedPluginMounts();
     const manifest = await this.readManifest();
     return Object.values(manifest.plugins).map((plugin) => this.toRecord(plugin));
   }
 
   static async getPlugin(id: string): Promise<SystemPluginRecord | null> {
+    await this.syncLinkedPluginMounts();
     const manifest = await this.readManifest();
     return manifest.plugins[id] ? this.toRecord(manifest.plugins[id]) : null;
   }
 
   static async getInstalledPluginSource(id: string): Promise<InstalledSystemPlugin | null> {
+    await this.syncLinkedPluginMounts();
     const manifest = await this.readManifest();
     const plugin = manifest.plugins[id];
     if (!plugin) {
@@ -205,6 +255,7 @@ export class SystemPluginService {
   }
 
   static async findPluginByPath(path: string): Promise<SystemPluginRecord | null> {
+    await this.syncLinkedPluginMounts();
     const normalizedPath = systemPluginVFS.normalizePath(path);
     const plugins = await this.listPlugins();
     for (const plugin of plugins) {
@@ -221,6 +272,9 @@ export class SystemPluginService {
     const plugin = await this.getPlugin(pluginId);
     if (!plugin) {
       throw new Error(`System plugin '${pluginId}' is not installed`);
+    }
+    if (plugin.linked?.directory) {
+      throw new Error(`Linked plugin '${plugin.id}' is read-only in the built-in plugin editor`);
     }
     const normalizedRelativePath = this.normalizePluginFilePath(relativePath);
     if (!normalizedRelativePath) {
@@ -254,6 +308,9 @@ export class SystemPluginService {
     if (!plugin) {
       throw new Error(`System plugin '${pluginId}' is not installed`);
     }
+    if (plugin.linked?.directory) {
+      throw new Error(`Linked plugin '${plugin.id}' is read-only in the built-in plugin editor`);
+    }
     const normalizedRelativePath = this.normalizePluginFilePath(relativePath);
     if (!normalizedRelativePath) {
       throw new Error('Plugin directory path must not be empty');
@@ -279,6 +336,9 @@ export class SystemPluginService {
     const plugin = await this.getPlugin(pluginId);
     if (!plugin) {
       throw new Error(`System plugin '${pluginId}' is not installed`);
+    }
+    if (plugin.linked?.directory) {
+      throw new Error(`Linked plugin '${plugin.id}' is read-only in the built-in plugin editor`);
     }
     const oldPath = this.normalizePluginFilePath(oldRelativePath);
     const nextPath = this.normalizePluginFilePath(newRelativePath);
@@ -320,6 +380,9 @@ export class SystemPluginService {
     if (!plugin) {
       throw new Error(`System plugin '${pluginId}' is not installed`);
     }
+    if (plugin.linked?.directory) {
+      throw new Error(`Linked plugin '${plugin.id}' is read-only in the built-in plugin editor`);
+    }
     const normalizedRelativePath = this.normalizePluginFilePath(relativePath);
     if (!normalizedRelativePath) {
       throw new Error('Plugin file path must not be empty');
@@ -355,6 +418,9 @@ export class SystemPluginService {
     if (!plugin) {
       throw new Error(`System plugin '${pluginId}' is not installed`);
     }
+    if (plugin.linked?.directory) {
+      throw new Error(`Linked plugin '${plugin.id}' is read-only in the built-in plugin editor`);
+    }
     const oldPath = this.normalizePluginFilePath(oldRelativePath);
     const nextPath = this.normalizePluginFilePath(newRelativePath);
     if (!oldPath || !nextPath) {
@@ -388,6 +454,9 @@ export class SystemPluginService {
     if (!plugin) {
       throw new Error(`System plugin '${pluginId}' is not installed`);
     }
+    if (plugin.linked?.directory) {
+      throw new Error(`Linked plugin '${plugin.id}' is read-only in the built-in plugin editor`);
+    }
     const normalizedRelativePath = this.normalizePluginFilePath(relativePath);
     if (!normalizedRelativePath) {
       throw new Error('Plugin directory path must not be empty');
@@ -411,6 +480,7 @@ export class SystemPluginService {
   }
 
   static async getPluginByPath(path: string): Promise<SystemPluginRecord | null> {
+    await this.syncLinkedPluginMounts();
     const manifest = await this.readManifest();
     const normalizedPath = systemPluginVFS.normalizePath(path);
     for (const plugin of Object.values(manifest.plugins)) {
@@ -440,7 +510,11 @@ export class SystemPluginService {
     });
   }
 
-  static async installPluginFiles(input: InstallSystemPluginFilesInput): Promise<SystemPluginRecord> {
+  static async installPluginFiles(
+    input: InstallSystemPluginFilesInput,
+    onProgress?: SystemPluginProgressHandler
+  ): Promise<SystemPluginRecord> {
+    onProgress?.('正在校验插件清单...');
     await this.ensureLayout();
     const packageManifest = this.resolvePackageManifestForInstall(input);
     const normalizedFiles = this.withPackageManifestFile(
@@ -455,8 +529,12 @@ export class SystemPluginService {
     const oldEntry = manifest.plugins[packageManifest.id];
     const packageDir = this.getPackageDir(packageManifest.id);
 
+    onProgress?.('正在清理旧插件文件...');
+    await this.unmountLinkedPlugin(packageManifest.id);
+
     await systemPluginVFS.deleteDirectory(packageDir, true).catch(() => undefined);
     await systemPluginVFS.makeDirectory(packageDir, true);
+    onProgress?.('正在写入插件文件...');
     for (const file of normalizedFiles) {
       const fullPath = systemPluginVFS.join(packageDir, file.path);
       await this.ensureParentDirectory(fullPath);
@@ -469,6 +547,7 @@ export class SystemPluginService {
       await systemPluginVFS.makeDirectory(systemPluginVFS.join(packageDir, libDir), true);
     }
 
+    onProgress?.('正在更新插件清单...');
     manifest.plugins[packageManifest.id] = {
       id: packageManifest.id,
       name: packageManifest.name,
@@ -478,6 +557,7 @@ export class SystemPluginService {
       dependencies: packageManifest.dependencies
         ? { ...packageManifest.dependencies }
         : oldEntry?.dependencies,
+      linked: undefined,
       enabled: input.enabled ?? true,
       installedAt: oldEntry?.installedAt ?? now,
       updatedAt: now
@@ -486,12 +566,98 @@ export class SystemPluginService {
     return this.toRecord(manifest.plugins[packageManifest.id]);
   }
 
+  static async linkPlugin(
+    input: LinkSystemPluginInput,
+    onProgress?: SystemPluginProgressHandler
+  ): Promise<SystemPluginRecord> {
+    onProgress?.('正在读取插件源码...');
+    await this.ensureLayout();
+    const linkedInfo = await this.readLinkedPluginInput(input.directory, input.entryFileName, onProgress);
+    const packageManifest = linkedInfo.packageManifest;
+    const entryFileName = linkedInfo.entryFileName;
+
+    const now = Date.now();
+    const manifest = await this.readManifest();
+    const oldEntry = manifest.plugins[packageManifest.id];
+    if (oldEntry?.linked?.directory && oldEntry.linked.directory !== input.directory) {
+      this._linkedPluginGraphCaches.delete(oldEntry.linked.directory);
+    }
+    manifest.plugins[packageManifest.id] = {
+      id: packageManifest.id,
+      name: packageManifest.name,
+      version: packageManifest.version,
+      description: packageManifest.description,
+      entry: `/${entryFileName}`,
+      dependencies: packageManifest.dependencies,
+      linked: {
+        directory: input.directory,
+        entry: input.entryFileName ? `/${entryFileName}` : undefined
+      },
+      enabled: input.enabled ?? true,
+      installedAt: oldEntry?.installedAt ?? now,
+      updatedAt: now
+    };
+    onProgress?.('正在写入 Link 信息...');
+    await this.writeManifest(manifest);
+    onProgress?.('正在挂载插件目录...');
+    await this.mountLinkedPlugin(this.toRecord(manifest.plugins[packageManifest.id]));
+    return this.toRecord(manifest.plugins[packageManifest.id]);
+  }
+
+  static async refreshLinkedPlugins(onProgress?: SystemPluginProgressHandler): Promise<SystemPluginRecord[]> {
+    await this.ensureLayout();
+    const manifest = await this.readManifest();
+    const linkedEntries = Object.values(manifest.plugins).filter((plugin) => !!plugin.linked?.directory);
+    const refreshed: SystemPluginRecord[] = [];
+    let dirty = false;
+    let index = 0;
+    for (const plugin of Object.values(manifest.plugins)) {
+      const directory = plugin.linked?.directory?.trim();
+      if (!directory) {
+        continue;
+      }
+      index++;
+      onProgress?.(`正在刷新插件 ${plugin.name || plugin.id} (${index}/${linkedEntries.length})...`);
+      const linkedInfo = await this.readLinkedPluginInput(
+        directory,
+        plugin.linked?.entry?.replace(/^\/+/, ''),
+        onProgress
+      );
+      const nextManifest = linkedInfo.packageManifest;
+      const nextEntry = linkedInfo.entryFileName;
+      if (
+        plugin.name !== nextManifest.name ||
+        plugin.version !== nextManifest.version ||
+        plugin.description !== nextManifest.description ||
+        plugin.entry !== `/${nextEntry}` ||
+        JSON.stringify(plugin.dependencies ?? {}) !== JSON.stringify(nextManifest.dependencies ?? {})
+      ) {
+        plugin.name = nextManifest.name;
+        plugin.version = nextManifest.version;
+        plugin.description = nextManifest.description;
+        plugin.entry = `/${nextEntry}`;
+        plugin.dependencies = nextManifest.dependencies;
+        plugin.updatedAt = Date.now();
+        dirty = true;
+      }
+      refreshed.push(this.toRecord(plugin));
+    }
+    if (dirty) {
+      onProgress?.('正在写回刷新后的插件清单...');
+      await this.writeManifest(manifest);
+    }
+    onProgress?.('正在同步已 Link 的插件目录...');
+    await this.syncLinkedPluginMounts();
+    return refreshed;
+  }
+
   static async removePlugin(id: string): Promise<void> {
     const manifest = await this.readManifest();
     const plugin = manifest.plugins[id];
     if (!plugin) {
       return;
     }
+    await this.unmountLinkedPlugin(id);
     delete manifest.plugins[id];
     await this.writeManifest(manifest);
     await systemPluginVFS.deleteDirectory(this.getPackageDir(id), true).catch(() => undefined);
@@ -565,23 +731,31 @@ export class SystemPluginService {
     )}\n`;
   }
 
-  static async installPluginFromFile(file: File): Promise<SystemPluginRecord> {
+  static async installPluginFromFile(
+    file: File,
+    onProgress?: SystemPluginProgressHandler
+  ): Promise<SystemPluginRecord> {
     const fileName = (file.name || '').toLowerCase();
     if (!fileName.endsWith('.zip')) {
       throw new Error(
         "Install Plugin only accepts '.zip' plugin packages. Use Install Folder for unpacked plugins."
       );
     }
-    return this.installPluginFromZip(file);
+    return this.installPluginFromZip(file, onProgress);
   }
 
-  static async installPluginFromDirectory(files: File[]): Promise<SystemPluginRecord> {
+  static async installPluginFromDirectory(
+    files: File[],
+    onProgress?: SystemPluginProgressHandler
+  ): Promise<SystemPluginRecord> {
+    onProgress?.('正在读取插件目录文件...');
     const inputFiles = await Promise.all(
       files.map(async (file) => ({
         path: this.normalizePluginFilePath(file.webkitRelativePath || file.name),
         source: await file.text()
       }))
     );
+    onProgress?.('正在解析插件目录结构...');
     const packageFiles = this.normalizeImportedPluginFiles(inputFiles);
     const packageManifest = this.readPackageManifestFromFiles(packageFiles);
     return this.installPluginFiles({
@@ -593,14 +767,19 @@ export class SystemPluginService {
       dependencies: packageManifest.dependencies,
       files: packageFiles,
       enabled: true
-    });
+    }, onProgress);
   }
 
-  static async installPluginFromZip(file: Blob): Promise<SystemPluginRecord> {
+  static async installPluginFromZip(
+    file: Blob,
+    onProgress?: SystemPluginProgressHandler
+  ): Promise<SystemPluginRecord> {
+    onProgress?.('正在读取 ZIP 插件包...');
     const zipReader = new ZipReader(new BlobReader(file));
     try {
       const entries = await zipReader.getEntries();
       const inputFiles: SystemPluginFileInput[] = [];
+      onProgress?.(`正在解压插件文件（共 ${entries.filter((entry) => !entry.directory).length} 个）...`);
       for (const entry of entries) {
         if (entry.directory) {
           continue;
@@ -610,6 +789,7 @@ export class SystemPluginService {
           source: await (entry as FileEntry).getData(new TextWriter())
         });
       }
+      onProgress?.('正在解析插件包结构...');
       const packageFiles = this.normalizeImportedPluginFiles(inputFiles);
       const packageManifest = this.readPackageManifestFromFiles(packageFiles);
       return this.installPluginFiles({
@@ -621,7 +801,7 @@ export class SystemPluginService {
         dependencies: packageManifest.dependencies,
         files: packageFiles,
         enabled: true
-      });
+      }, onProgress);
     } finally {
       await zipReader.close();
     }
@@ -635,6 +815,9 @@ export class SystemPluginService {
     const plugin = await this.getPlugin(pluginId);
     if (!plugin) {
       throw new Error(`System plugin '${pluginId}' is not installed`);
+    }
+    if (plugin.linked?.directory) {
+      throw new Error(`Linked plugin '${plugin.id}' cannot install dependencies from the built-in plugin manager`);
     }
     const match = spec.match(/^((?:@[^/]+\/)?[^@/]+)(?:@(.+))?$/);
     const packageName = match?.[1] ?? spec;
@@ -663,6 +846,9 @@ export class SystemPluginService {
     const plugin = await this.getPlugin(pluginId);
     if (!plugin) {
       throw new Error(`System plugin '${pluginId}' is not installed`);
+    }
+    if (plugin.linked?.directory) {
+      throw new Error(`Linked plugin '${plugin.id}' cannot remove dependencies from the built-in plugin manager`);
     }
     const manifest = await this.readManifest();
     const manifestEntry = manifest.plugins[pluginId];
@@ -722,10 +908,14 @@ export class SystemPluginService {
 
   static async updatePluginFile(path: string, source: string): Promise<SystemPluginRecord> {
     await this.ensureLayout();
+    await this.syncLinkedPluginMounts();
     const normalizedPath = systemPluginVFS.normalizePath(path);
     const plugin = await this.getPluginByPath(normalizedPath);
     if (!plugin) {
       throw new Error(`System plugin file '${path}' is not installed`);
+    }
+    if (plugin.linked?.directory) {
+      throw new Error(`Linked plugin '${plugin.id}' is read-only in the built-in plugin editor`);
     }
 
     const manifest = await this.readManifest();
@@ -767,7 +957,12 @@ export class SystemPluginService {
     this.validatePluginImports(source);
   }
 
-  static validatePluginFiles(files: SystemPluginFileInput[], entryFileName: string, pluginId?: string) {
+  static validatePluginFiles(
+    files: SystemPluginFileInput[],
+    entryFileName: string,
+    pluginId?: string,
+    importSpecifiersByPath?: ReadonlyMap<string, string[]>
+  ) {
     const normalizedFiles = this.normalizePluginFiles(files);
     const entryPath = this.normalizePluginFilePath(entryFileName);
     const packageManifest = this.readPackageManifestFromFiles(normalizedFiles);
@@ -788,14 +983,15 @@ export class SystemPluginService {
       if (file.path === SYSTEM_PLUGIN_PACKAGE_MANIFEST) {
         continue;
       }
-      this.validatePluginImports(file.source);
-      this.validateRelativeImportsStayWithinPlugin(file.path, file.source);
+      const specs = importSpecifiersByPath?.get(file.path);
+      this.validatePluginImports(file.source, specs);
+      this.validateRelativeImportsStayWithinPlugin(file.path, file.source, specs);
     }
   }
 
-  private static validatePluginImports(source: string) {
-    const specs = this.collectImportSpecifiers(source);
-    for (const spec of specs) {
+  private static validatePluginImports(source: string, specs?: readonly string[]) {
+    const importSpecs = specs ?? this.collectImportSpecifiers(source);
+    for (const spec of importSpecs) {
       if (spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('/')) {
         continue;
       }
@@ -855,6 +1051,197 @@ export class SystemPluginService {
     return resolved.join('/');
   }
 
+  private static stripPluginImportQuery(spec: string) {
+    const queryIndex = spec.indexOf('?');
+    const hashIndex = spec.indexOf('#');
+    const cutIndex =
+      queryIndex >= 0 && hashIndex >= 0
+        ? Math.min(queryIndex, hashIndex)
+        : queryIndex >= 0
+          ? queryIndex
+          : hashIndex;
+    return cutIndex >= 0 ? spec.slice(0, cutIndex) : spec;
+  }
+
+  private static async resolveLinkedPluginModulePath(
+    linkedVFS: ReturnType<typeof createLinkedDirectoryVFS>,
+    path: string
+  ): Promise<string | null> {
+    const candidates = new Set<string>();
+    const normalizedPath = this.normalizePluginFilePath(path);
+    if (normalizedPath) {
+      candidates.add(normalizedPath);
+      if (!/\.(ts|js|mjs)$/i.test(normalizedPath)) {
+        candidates.add(`${normalizedPath}.ts`);
+        candidates.add(`${normalizedPath}.js`);
+        candidates.add(`${normalizedPath}.mjs`);
+      }
+    }
+    for (const candidate of candidates) {
+      const absolutePath = linkedVFS.normalizePath(linkedVFS.join('/', candidate));
+      if (!(await linkedVFS.exists(absolutePath))) {
+        continue;
+      }
+      const stat = await linkedVFS.stat(absolutePath);
+      if (stat.isFile) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  private static getLinkedPluginGraphCache(directory: string): LinkedPluginGraphCache {
+    let cache = this._linkedPluginGraphCaches.get(directory);
+    if (!cache) {
+      cache = {
+        files: new Map(),
+        entryGraphs: new Map()
+      };
+      this._linkedPluginGraphCaches.set(directory, cache);
+    }
+    return cache;
+  }
+
+  private static getLinkedPluginFileCacheFingerprint(stat: { modified: Date; size: number }) {
+    return {
+      modifiedAt: stat.modified?.getTime?.() ?? 0,
+      size: stat.size ?? 0
+    };
+  }
+
+  private static isLinkedPluginFileCacheCurrent(
+    cacheEntry: { modifiedAt: number; size: number } | undefined,
+    stat: { modified: Date; size: number }
+  ) {
+    if (!cacheEntry) {
+      return false;
+    }
+    const fingerprint = this.getLinkedPluginFileCacheFingerprint(stat);
+    return cacheEntry.modifiedAt === fingerprint.modifiedAt && cacheEntry.size === fingerprint.size;
+  }
+
+  private static async getLinkedPluginFileAnalysis(
+    cache: LinkedPluginGraphCache,
+    linkedVFS: ReturnType<typeof createLinkedDirectoryVFS>,
+    normalizedPath: string
+  ) {
+    const absolutePath = linkedVFS.normalizePath(linkedVFS.join('/', normalizedPath));
+    const stat = await linkedVFS.stat(absolutePath);
+    if (!stat.isFile) {
+      throw new Error(`Plugin file '${normalizedPath}' does not exist`);
+    }
+    const cached = cache.files.get(normalizedPath);
+    if (this.isLinkedPluginFileCacheCurrent(cached, stat)) {
+      return cached;
+    }
+    const source = (await linkedVFS.readFile(absolutePath, { encoding: 'utf8' })) as string;
+    const fingerprint = this.getLinkedPluginFileCacheFingerprint(stat);
+    const analysis: LinkedPluginFileAnalysisCacheEntry = {
+      source,
+      importSpecifiers: this.collectImportSpecifiers(source),
+      modifiedAt: fingerprint.modifiedAt,
+      size: fingerprint.size
+    };
+    cache.files.set(normalizedPath, analysis);
+    return analysis;
+  }
+
+  private static async tryCollectCachedLinkedPluginGraphFiles(
+    cache: LinkedPluginGraphCache,
+    linkedVFS: ReturnType<typeof createLinkedDirectoryVFS>,
+    resolvedEntryPath: string
+  ): Promise<LinkedPluginGraphFilesResult | null> {
+    const entryCache = cache.entryGraphs.get(resolvedEntryPath);
+    if (!entryCache || entryCache.filePaths.length === 0) {
+      return null;
+    }
+    const files: SystemPluginFileInput[] = [];
+    const importSpecifiersByPath = new Map<string, string[]>();
+    for (const filePath of entryCache.filePaths) {
+      const absolutePath = linkedVFS.normalizePath(linkedVFS.join('/', filePath));
+      if (!(await linkedVFS.exists(absolutePath))) {
+        return null;
+      }
+      const stat = await linkedVFS.stat(absolutePath);
+      if (!stat.isFile) {
+        return null;
+      }
+      const cached = cache.files.get(filePath);
+      if (!this.isLinkedPluginFileCacheCurrent(cached, stat) || !cached) {
+        return null;
+      }
+      files.push({
+        path: filePath,
+        source: cached.source
+      });
+      importSpecifiersByPath.set(filePath, cached.importSpecifiers);
+    }
+    return {
+      files,
+      importSpecifiersByPath
+    };
+  }
+
+  private static async collectLinkedPluginGraphFiles(
+    directory: string,
+    linkedVFS: ReturnType<typeof createLinkedDirectoryVFS>,
+    entryFileName: string
+  ): Promise<LinkedPluginGraphFilesResult> {
+    const resolvedEntryPath = await this.resolveLinkedPluginModulePath(linkedVFS, entryFileName);
+    if (!resolvedEntryPath) {
+      throw new Error(`System plugin entry '${entryFileName}' does not exist in linked plugin`);
+    }
+
+    const cache = this.getLinkedPluginGraphCache(directory);
+    const cachedGraph = await this.tryCollectCachedLinkedPluginGraphFiles(cache, linkedVFS, resolvedEntryPath);
+    if (cachedGraph) {
+      return cachedGraph;
+    }
+
+    const collected = new Map<string, string>();
+    const importSpecifiersByPath = new Map<string, string[]>();
+    const visit = async (filePath: string): Promise<void> => {
+      const normalizedPath = this.normalizePluginFilePath(filePath);
+      if (collected.has(normalizedPath)) {
+        return;
+      }
+      const analysis = await this.getLinkedPluginFileAnalysis(cache, linkedVFS, normalizedPath);
+      collected.set(normalizedPath, analysis.source);
+      importSpecifiersByPath.set(normalizedPath, analysis.importSpecifiers);
+
+      const specs = analysis.importSpecifiers;
+      for (const spec of specs) {
+        if (!spec.startsWith('./') && !spec.startsWith('../') && !spec.startsWith('/')) {
+          continue;
+        }
+        const normalizedSpec = this.stripPluginImportQuery(spec);
+        const nextPath = spec.startsWith('/')
+          ? this.normalizePluginFilePath(normalizedSpec)
+          : this.normalizePluginFilePath(
+              linkedVFS.join(linkedVFS.dirname(`/${normalizedPath}`), normalizedSpec).replace(/^\/+/, '')
+            );
+        const resolvedPath = await this.resolveLinkedPluginModulePath(linkedVFS, nextPath);
+        if (!resolvedPath) {
+          throw new Error(`Plugin import '${spec}' from '${normalizedPath}' does not exist`);
+        }
+        await visit(resolvedPath);
+      }
+    };
+
+    await visit(resolvedEntryPath);
+    const filePaths = [...collected.keys()];
+    cache.entryGraphs.set(resolvedEntryPath, {
+      filePaths
+    });
+    return {
+      files: filePaths.map((path) => ({
+        path,
+        source: collected.get(path) as string
+      })),
+      importSpecifiersByPath
+    };
+  }
+
   private static normalizePluginFiles(files: SystemPluginFileInput[]) {
     const normalized = new Map<string, string>();
     for (const file of files) {
@@ -911,13 +1298,63 @@ export class SystemPluginService {
     if (!manifestFile) {
       throw new Error(`Plugin package is missing '${SYSTEM_PLUGIN_PACKAGE_MANIFEST}'`);
     }
+    return this.parsePackageManifest(manifestFile.source, SYSTEM_PLUGIN_PACKAGE_MANIFEST);
+  }
+
+  private static parsePackageManifest(source: string, fileName: string) {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(manifestFile.source);
+      parsed = JSON.parse(source);
     } catch (err) {
-      throw new Error(`Invalid '${SYSTEM_PLUGIN_PACKAGE_MANIFEST}': ${err}`);
+      throw new Error(`Invalid '${fileName}': ${err}`);
     }
     return this.normalizePackageManifest(parsed);
+  }
+
+  private static async readLinkedPackageManifest(
+    directory: string,
+    linkedVFS: ReturnType<typeof createLinkedDirectoryVFS>
+  ) {
+    const cache = this.getLinkedPluginGraphCache(directory);
+    const manifestCandidates = [SYSTEM_PLUGIN_DEV_PACKAGE_MANIFEST, SYSTEM_PLUGIN_PACKAGE_MANIFEST];
+    for (const manifestFileName of manifestCandidates) {
+      const manifestPath = linkedVFS.normalizePath(linkedVFS.join('/', manifestFileName));
+      if (!(await linkedVFS.exists(manifestPath))) {
+        continue;
+      }
+      const stat = await linkedVFS.stat(manifestPath);
+      if (!stat.isFile) {
+        continue;
+      }
+      if (
+        cache.manifest?.manifestFileName === manifestFileName &&
+        this.isLinkedPluginFileCacheCurrent(cache.manifest, stat)
+      ) {
+        return {
+          manifestFileName,
+          manifestSource: cache.manifest.manifestSource,
+          packageManifest: cache.manifest.packageManifest
+        };
+      }
+      const source = (await linkedVFS.readFile(manifestPath, { encoding: 'utf8' })) as string;
+      const fingerprint = this.getLinkedPluginFileCacheFingerprint(stat);
+      const packageManifest = this.parsePackageManifest(source, manifestFileName);
+      cache.manifest = {
+        manifestFileName,
+        manifestSource: source,
+        packageManifest,
+        modifiedAt: fingerprint.modifiedAt,
+        size: fingerprint.size
+      };
+      return {
+        manifestFileName,
+        manifestSource: source,
+        packageManifest
+      };
+    }
+    throw new Error(
+      `Linked plugin directory must contain '${SYSTEM_PLUGIN_DEV_PACKAGE_MANIFEST}' or '${SYSTEM_PLUGIN_PACKAGE_MANIFEST}' at its root`
+    );
   }
 
   private static resolvePackageManifestForInstall(input: InstallSystemPluginFilesInput) {
@@ -1005,9 +1442,13 @@ export class SystemPluginService {
     return Object.keys(result).length > 0 ? result : undefined;
   }
 
-  private static validateRelativeImportsStayWithinPlugin(filePath: string, source: string) {
-    const specs = this.collectImportSpecifiers(source);
-    for (const spec of specs) {
+  private static validateRelativeImportsStayWithinPlugin(
+    filePath: string,
+    source: string,
+    specs?: readonly string[]
+  ) {
+    const importSpecs = specs ?? this.collectImportSpecifiers(source);
+    for (const spec of importSpecs) {
       if (!spec.startsWith('./') && !spec.startsWith('../')) {
         continue;
       }
@@ -1124,6 +1565,13 @@ export class SystemPluginService {
         delete plugin.builtin;
         dirty = true;
       }
+      if (plugin.linked && typeof plugin.linked.directory !== 'string') {
+        delete plugin.linked;
+        dirty = true;
+      } else if (plugin.linked && 'entry' in plugin.linked && typeof plugin.linked.entry !== 'string') {
+        delete plugin.linked.entry;
+        dirty = true;
+      }
     }
     if (dirty) {
       await this.writeManifest(normalized);
@@ -1148,5 +1596,105 @@ export class SystemPluginService {
       depsRoot: this.getDependenciesRoot(plugin.id),
       depsLockPath: this.getDependenciesLockPath(plugin.id)
     };
+  }
+
+  private static async syncLinkedPluginMounts() {
+    const manifest = await this.readManifest();
+    const linkedEntries = Object.values(manifest.plugins).filter((plugin) => !!plugin.linked?.directory);
+    const keepIds = new Set(linkedEntries.map((plugin) => plugin.id));
+    for (const id of [...this._linkedPluginMounts.keys()]) {
+      if (!keepIds.has(id)) {
+        await this.unmountLinkedPlugin(id);
+      }
+    }
+    for (const entry of linkedEntries) {
+      await this.mountLinkedPlugin(this.toRecord(entry));
+    }
+  }
+
+  private static async mountLinkedPlugin(plugin: SystemPluginRecord) {
+    const directory = plugin.linked?.directory?.trim();
+    if (!directory) {
+      await this.unmountLinkedPlugin(plugin.id);
+      return;
+    }
+    const currentDirectory = this._linkedPluginDirectories.get(plugin.id);
+    if (currentDirectory === directory && this._linkedPluginMounts.has(plugin.id)) {
+      return;
+    }
+    await this.unmountLinkedPlugin(plugin.id);
+    const vfs = createLinkedDirectoryVFS(directory);
+    await systemPluginVFS.mount(this.getPackageDir(plugin.id), vfs);
+    this._linkedPluginMounts.set(plugin.id, vfs);
+    this._linkedPluginDirectories.set(plugin.id, directory);
+  }
+
+  private static async unmountLinkedPlugin(id: string) {
+    if (this._linkedPluginMounts.has(id)) {
+      await systemPluginVFS.unmount(this.getPackageDir(id)).catch(() => false);
+      const vfs = this._linkedPluginMounts.get(id);
+      this._linkedPluginMounts.delete(id);
+      this._linkedPluginDirectories.delete(id);
+      await vfs?.close?.();
+    }
+  }
+
+  private static async readLinkedPluginInput(
+    directory: string,
+    entryFileName?: string,
+    onProgress?: SystemPluginProgressHandler
+  ) {
+    const linkedVFS = createLinkedDirectoryVFS(directory);
+    try {
+      onProgress?.('正在读取插件清单...');
+      const { manifestFileName, manifestSource, packageManifest } = await this.readLinkedPackageManifest(
+        directory,
+        linkedVFS
+      );
+      const normalizedEntryFileName = this.normalizeEntryFileName(entryFileName ?? packageManifest.entry);
+      onProgress?.('正在分析插件入口依赖...');
+      const graphFilesResult = await this.collectLinkedPluginGraphFiles(directory, linkedVFS, normalizedEntryFileName);
+      const graphFiles = graphFilesResult.files;
+      const packageFiles =
+        manifestFileName === SYSTEM_PLUGIN_PACKAGE_MANIFEST
+          ? [{ path: SYSTEM_PLUGIN_PACKAGE_MANIFEST, source: manifestSource }, ...graphFiles]
+          : graphFiles;
+      const validationFiles =
+        manifestFileName === SYSTEM_PLUGIN_PACKAGE_MANIFEST
+          ? packageFiles
+          : this.withPackageManifestFile(packageFiles, packageManifest);
+      onProgress?.('正在校验插件源码...');
+      this.validatePluginFiles(
+        validationFiles,
+        normalizedEntryFileName,
+        packageManifest.id,
+        graphFilesResult.importSpecifiersByPath
+      );
+      onProgress?.('正在检查插件依赖缓存...');
+      await this.ensureLinkedPluginDependencies(linkedVFS, packageManifest);
+      return {
+        packageManifest,
+        entryFileName: normalizedEntryFileName
+      };
+    } finally {
+      await linkedVFS.close();
+    }
+  }
+
+  private static async ensureLinkedPluginDependencies(
+    linkedVFS: ReturnType<typeof createLinkedDirectoryVFS>,
+    packageManifest: SystemPluginPackageManifest
+  ) {
+    const dependencies = Object.entries(packageManifest.dependencies ?? {});
+    if (dependencies.length === 0) {
+      return;
+    }
+    const lock = await readLock(linkedVFS, '/');
+    for (const [name, versionRange] of dependencies) {
+      if (lock?.dependencies?.[name]) {
+        continue;
+      }
+      await installDeps(packageManifest.id, linkedVFS, '/', `${name}@${versionRange}`, undefined, true);
+    }
   }
 }

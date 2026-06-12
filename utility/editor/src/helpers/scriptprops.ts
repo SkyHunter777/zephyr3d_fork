@@ -189,15 +189,22 @@ function getScriptConfigObject(host: ScriptHost, scriptPath?: string, attachment
 
 function getPropertyOptions(
   info: RuntimeScriptValueDeclaration | RuntimeScriptPropertyInfo,
-  scriptGroup?: string
+  scriptGroup?: string,
+  useDefaultScriptGroup = true
 ): PropertyAccessorOptions {
   const group = scriptGroup
     ? info.group
       ? `Script/${scriptGroup}/${info.group}`
-      : `Script/${scriptGroup}`
+      : useDefaultScriptGroup
+        ? `Script/${scriptGroup}`
+        : undefined
     : info.group
-      ? `Script/${info.group}`
-      : 'Script';
+      ? useDefaultScriptGroup
+        ? `Script/${info.group}`
+        : info.group
+      : useDefaultScriptGroup
+        ? 'Script'
+        : undefined;
   if (info.type === 'asset') {
     return {
       label: info.label,
@@ -462,6 +469,7 @@ function writeScalarFromInput(type: RuntimeScriptValueType, value: any) {
 }
 
 class ScriptArrayElement {
+  static readonly __scriptArrayElement = true;
   host: ScriptHost;
   scriptPath: string;
   attachmentIndex: number;
@@ -525,7 +533,7 @@ function getArrayElementSerializationClass(
           {
             name: 'Value',
             type: getScalarPropertyType(scalarElement.type),
-            options: getPropertyOptions(scalarElement),
+            options: getPropertyOptions(scalarElement, undefined, false),
             isHidden() {
               return !!scalarElement.hidden;
             },
@@ -547,7 +555,7 @@ function getArrayElementSerializationClass(
           ({
             name: field.name,
             type: getScalarPropertyType(field.type),
-            options: getPropertyOptions(field),
+            options: getPropertyOptions(field, undefined, false),
             isHidden() {
               return !!field.hidden;
             },
@@ -803,7 +811,16 @@ export async function getScriptPropertyAccessors(host: unknown): Promise<Propert
 
 export function clearScriptPropertyAccessorCache(path?: Nullable<string>) {
   if (path) {
-    propertyCache.delete(path);
+    const normalized = String(path).trim();
+    for (const key of [...propertyCache.keys()]) {
+      if (
+        key === normalized ||
+        key.startsWith(`${normalized}::`) ||
+        key.split('|').some((part) => part === normalized)
+      ) {
+        propertyCache.delete(key);
+      }
+    }
   } else {
     propertyCache.clear();
   }

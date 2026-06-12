@@ -108,6 +108,22 @@ export class SceneController extends BaseController<SceneModel, SceneView> {
         }
         break;
       }
+      case 'OPEN_PROJECT_DIRECTORY': {
+        await this.sceneAction('CLOSE_PROJECT', arg);
+        let result: { id: Nullable<string>; err: Nullable<string> };
+        if (!this._editor.currentProject) {
+          result = await this._editor.openProjectDirectory(arg?.path);
+        } else {
+          result = {
+            id: null,
+            err: 'User refused to open project directory'
+          };
+        }
+        if (arg?.cb) {
+          arg.cb(result);
+        }
+        break;
+      }
       case 'NEW_PROJECT': {
         await this.sceneAction('CLOSE_PROJECT', arg);
         let id: string = null;

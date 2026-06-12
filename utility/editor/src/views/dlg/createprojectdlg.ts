@@ -18,12 +18,31 @@ export class DlgCreateProject extends DialogRenderer<CreateProjectResult | null>
     title: string,
     defaultName?: string,
     defaultDirectory?: string,
+    directoryPlaceholder?: string,
+    directoryPickerTitle?: string,
+    confirmLabel?: string,
     width?: number
   ): Promise<CreateProjectResult | null> {
-    return new DlgCreateProject(title, defaultName, defaultDirectory, width).showModal();
+    return new DlgCreateProject(
+      title,
+      defaultName,
+      defaultDirectory,
+      directoryPlaceholder,
+      directoryPickerTitle,
+      confirmLabel,
+      width
+    ).showModal();
   }
 
-  constructor(id: string, defaultName = '', defaultDirectory = '', width = 560) {
+  constructor(
+    id: string,
+    defaultName = '',
+    defaultDirectory = '',
+    private readonly _directoryPlaceholder = 'Select or enter a project directory',
+    private readonly _directoryPickerTitle = 'Select Project Directory',
+    private readonly _confirmLabel = 'Create',
+    width = 560
+  ) {
     super(id, width, 0, true, true);
     this._name = [defaultName];
     this._directory = [defaultDirectory];
@@ -43,7 +62,7 @@ export class DlgCreateProject extends DialogRenderer<CreateProjectResult | null>
 
     const btnWidth = imGuiCalcTextSize('...').x + ImGui.GetStyle().FramePadding.x * 2;
     ImGui.PushItemWidth(ImGui.GetContentRegionAvail().x - btnWidth - ImGui.GetStyle().ItemSpacing.x);
-    customTextInput('##ProjectDirectory', this._directory, 'Select or enter a project directory');
+    customTextInput('##ProjectDirectory', this._directory, this._directoryPlaceholder);
     ImGui.PopItemWidth();
     ImGui.SameLine();
     if (ImGui.Button('...', new ImGui.ImVec2(btnWidth, 0))) {
@@ -51,7 +70,7 @@ export class DlgCreateProject extends DialogRenderer<CreateProjectResult | null>
     }
 
     const canCreate = !!this._name[0].trim() && !!this._directory[0].trim();
-    if (ImGui.Button('Create') && canCreate) {
+    if (ImGui.Button(this._confirmLabel) && canCreate) {
       this.close({
         name: this._name[0].trim(),
         directory: this._directory[0].trim()
@@ -71,7 +90,7 @@ export class DlgCreateProject extends DialogRenderer<CreateProjectResult | null>
     this._pickingDirectory = true;
     desktop.fs
       .pickDirectory({
-        title: 'Select Project Directory',
+        title: this._directoryPickerTitle,
         defaultPath: this._directory[0] || undefined,
         buttonLabel: 'Select Folder'
       })

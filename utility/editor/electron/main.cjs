@@ -2356,7 +2356,11 @@ function toPhysicalPath(root, vfsPath) {
   const relative = normalized.slice(1);
   const target = relative ? path.resolve(root, ...relative.split('/')) : path.resolve(root);
   const resolvedRoot = path.resolve(root);
-  if (target !== resolvedRoot && !target.startsWith(`${resolvedRoot}${path.sep}`)) {
+  const relativeToRoot = path.relative(resolvedRoot, target);
+  const isInsideRoot =
+    relativeToRoot === '' ||
+    (!relativeToRoot.startsWith('..') && !path.isAbsolute(relativeToRoot));
+  if (!isInsideRoot) {
     throw new Error(`VFS path escapes storage root: ${vfsPath}`);
   }
   return { normalized, target };

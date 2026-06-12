@@ -5,16 +5,19 @@ import { ImGui } from '@zephyr3d/imgui';
 import { renderLogView } from './logview';
 import type { Editor } from '../core/editor';
 import { AssistantPanel } from './assistantpanel';
+import type { RuntimeEditorPanelContribution } from '../core/plugin';
 
 export class BottomView extends Disposable {
   private readonly _panel: DockPannel;
-  private _renderer: VFSRenderer;
+  private readonly _renderer: VFSRenderer;
   private readonly _assistantPanel: AssistantPanel | null;
+  private readonly _editor: Editor | null;
 
   constructor(vfs: VFS, left: number, top: number, width: number, height: number, editor?: Editor) {
     super();
     this._renderer = new VFSRenderer(vfs, [], 200, { editor });
     this._panel = new DockPannel(left, top, width, height, 8, 0, 99999, ResizeDirection.Top, 200, 600);
+    this._editor = editor ?? null;
     this._assistantPanel = editor ? new AssistantPanel() : null;
   }
 
@@ -23,6 +26,17 @@ export class BottomView extends Disposable {
   }
   get renderer() {
     return this._renderer;
+  }
+  private renderPluginPanels(panels: RuntimeEditorPanelContribution[]) {
+    for (const panel of panels) {
+      if (panel.visible && !panel.visible()) {
+        continue;
+      }
+      if (ImGui.BeginTabItem(`${panel.title}##${panel.id}`)) {
+        panel.render();
+        ImGui.EndTabItem();
+      }
+    }
   }
   render() {
     if (this._panel.begin('##BottomPanel')) {
@@ -39,6 +53,7 @@ export class BottomView extends Disposable {
           this._assistantPanel.render();
           ImGui.EndTabItem();
         }
+        this.renderPluginPanels(this._editor?.plugins.getPanels('bottom') ?? []);
         ImGui.EndTabBar();
       }
     }

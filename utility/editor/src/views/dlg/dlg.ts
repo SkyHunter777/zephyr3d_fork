@@ -89,7 +89,7 @@ export class Dialog {
     width: number,
     height: number,
     defaultName?: string
-  ) {
+  ): Promise<string | null> {
     return DlgSaveFile.saveFile(title, vfs, rootDir, filter, width, height, defaultName);
   }
   public static async openFile(
@@ -117,10 +117,11 @@ export class Dialog {
     title: string,
     names: string[],
     ids: string[],
+    extraActionLabel?: string,
     width?: number,
     height?: number
   ): Promise<string> {
-    return DlgOpen.openFromList(title, names, ids, width, height);
+    return DlgOpen.openFromList(title, names, ids, extraActionLabel, width, height);
   }
   public static async promptName(
     title: string,
@@ -134,9 +135,20 @@ export class Dialog {
     title: string,
     defaultName?: string,
     defaultDirectory?: string,
+    directoryPlaceholder?: string,
+    directoryPickerTitle?: string,
+    confirmLabel?: string,
     width?: number
   ): Promise<CreateProjectResult | null> {
-    return DlgCreateProject.createProject(title, defaultName, defaultDirectory, width);
+    return DlgCreateProject.createProject(
+      title,
+      defaultName,
+      defaultDirectory,
+      directoryPlaceholder,
+      directoryPickerTitle,
+      confirmLabel,
+      width
+    );
   }
   public static async rename(title: string, name: string, width?: number): Promise<string> {
     return DlgRename.rename(title, name, width);

@@ -1,4 +1,4 @@
-import type { FileMetadata, Nullable, VFS } from '@zephyr3d/base';
+import type { FileMetadata, IDisposable, Nullable, VFS } from '@zephyr3d/base';
 import { Disposable, Observable } from '@zephyr3d/base';
 import type { Scene, SceneNode, Camera, PropertyAccessor } from '@zephyr3d/scene';
 import { ClipmapTerrain } from '@zephyr3d/scene';
@@ -17,6 +17,9 @@ import type {
   EditorMenuLocation,
   EditorMenuContribution,
   EditorToolbarContribution,
+  EditorPluginPanelContribution,
+  EditorPluginWindowOptions,
+  EditorPluginWindowContext,
   EditorEditToolFactory,
   EditorNodeProxyFactory,
   EditorSceneContext,
@@ -35,6 +38,7 @@ import type {
 import { Dialog } from '../views/dlg/dlg';
 import { SceneController } from '../controllers/scenecontroller';
 import type { SceneView } from '../views/sceneview';
+import { DialogRenderer } from '../components/modal';
 
 class EditorPluginSubscription extends Disposable {
   private readonly _disposeCallback: () => void;
@@ -54,6 +58,10 @@ export type {
   EditorMenuItem,
   EditorMenuContribution,
   EditorToolbarContribution,
+  EditorPluginPanelContribution,
+  EditorPluginPanelLocation,
+  EditorPluginWindowContext,
+  EditorPluginWindowOptions,
   EditorEditToolFactory,
   EditorNodeProxyFactory,
   EditorSceneContext,
@@ -124,6 +132,10 @@ export type RuntimeEditorMenuContribution = {
 export type RuntimeEditorToolbarContribution =
   | ToolBarItem
   | ((ctx: RuntimeEditorToolbarContext) => ToolBarItem);
+
+export type RuntimeEditorPanelContribution = EditorPluginPanelContribution & {
+  pluginId?: string;
+};
 
 export type RuntimeEditorEditToolFactory = {
   id: string;
@@ -207,6 +219,7 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
   private readonly _mainMenuItems: RuntimeEditorMenuContribution[] = [];
   private readonly _contextMenuItems: RuntimeEditorMenuContribution[] = [];
   private readonly _toolbarItems: RuntimeEditorToolbarContribution[] = [];
+  private readonly _panels: RuntimeEditorPanelContribution[] = [];
   private readonly _editToolFactories: RuntimeEditorEditToolFactory[] = [];
   private readonly _nodeProxyFactories: RuntimeEditorNodeProxyFactory[] = [];
   private readonly _propertyAccessorProviders = new Map<string, RuntimeEditorPropertyAccessorProvider>();
@@ -309,6 +322,21 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
     };
   }
 
+  addPanel(panel: RuntimeEditorPanelContribution) {
+    if (this._panels.some((item) => item.id === panel.id)) {
+      throw new Error(`Editor panel '${panel.id}' already registered`);
+    }
+    this._panels.push(panel);
+    this.dispatchContributionChanged();
+    return () => {
+      const index = this._panels.indexOf(panel);
+      if (index >= 0) {
+        this._panels.splice(index, 1);
+        this.dispatchContributionChanged();
+      }
+    };
+  }
+
   addEditToolFactory(factory: RuntimeEditorEditToolFactory) {
     if (this._editToolFactories.some((item) => item.id === factory.id)) {
       throw new Error(`Editor edit tool factory '${factory.id}' already registered`);
@@ -392,6 +420,12 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
     return this._toolbarItems
       .map((item) => (typeof item === 'function' ? item(ctx) : item))
       .filter((item): item is ToolBarItem => !!item);
+  }
+
+  getPanels(location: EditorPluginPanelContribution['location']) {
+    return this._panels
+      .filter((panel) => panel.location === location)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }
 
   canEditObject(obj: unknown, ctx: RuntimeEditorEditToolFactoryContext) {
@@ -538,6 +572,10 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
         confirm: async (title, message, okLabel = 'Ok', cancelLabel = 'Cancel') =>
           (await DlgMessageBoxEx.messageBoxEx(title, message, [okLabel, cancelLabel], 420, 0, true)) ===
           okLabel,
+        openWindow: async <TResult = unknown>(options: EditorPluginWindowOptions<TResult>) =>
+          await this.openPluginWindow(plugin.id, options, false, context.subscriptions),
+        openDialog: async <TResult = unknown>(options: EditorPluginWindowOptions<TResult>) =>
+          await this.openPluginWindow(plugin.id, options, true, context.subscriptions),
         selectProjectFiles: async (title, rootDir, multi, filter, width, height) =>
           await Dialog.openFile(title, ProjectService.VFS, rootDir, filter, multi, width, height),
         selectProjectFolders: async (title, rootDir, multi, width, height) =>
@@ -575,6 +613,14 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
       },
       refreshProperties: () => eventBus.dispatchEvent('refresh_properties'),
       notifySceneChanged: () => eventBus.dispatchEvent('scene_changed'),
+      registerPanel: (panel: EditorPluginPanelContribution) => {
+        const dispose = this.addPanel({
+          ...panel,
+          pluginId: plugin.id
+        });
+        context.subscriptions.push(new EditorPluginSubscription(dispose));
+        return dispose;
+      },
       registerMenuItems: (contribution: EditorMenuContribution) => {
         const dispose = this.addMenuItems(contribution as unknown as RuntimeEditorMenuContribution);
         context.subscriptions.push(new EditorPluginSubscription(dispose));
@@ -652,5 +698,55 @@ export class EditorPluginManager extends Observable<EditorEventMap> {
 
   private dispatchContributionChanged() {
     this.dispatchEvent('pluginContributionsChanged');
+  }
+
+  private async openPluginWindow<TResult>(
+    pluginId: string,
+    options: EditorPluginWindowOptions<TResult>,
+    modal: boolean,
+    subscriptions: IDisposable[]
+  ): Promise<TResult | null> {
+    const windowId = `${pluginId}:${options.id}`;
+    const dialogId = modal ? `${options.title}##${windowId}` : windowId;
+    if (!modal) {
+      const existingIndex = DialogRenderer.findModeless(dialogId);
+      if (existingIndex >= 0) {
+        return (DialogRenderer.getModeless(existingIndex)?.promise as Promise<TResult | null>) ?? null;
+      }
+    }
+    class PluginWindowDialog extends DialogRenderer<TResult | null> {
+      constructor() {
+        super(
+          dialogId,
+          options.width ?? 0,
+          options.height ?? 0,
+          options.mask ?? true,
+          options.noResize ?? false,
+          options.noMove ?? false,
+          options.center ?? true
+        );
+      }
+      override doRender() {
+        const ctx: EditorPluginWindowContext<TResult> = {
+          id: windowId,
+          title: options.title,
+          close: (result) => this.close((result ?? null) as TResult | null)
+        };
+        options.render(ctx);
+      }
+    }
+    const dialog = new PluginWindowDialog();
+    const dispose = () => DialogRenderer.close(dialogId, null);
+    const subscription = new EditorPluginSubscription(dispose);
+    subscriptions.push(subscription);
+    try {
+      return modal ? await dialog.showModal() : await dialog.show();
+    } finally {
+      const index = subscriptions.indexOf(subscription);
+      if (index >= 0) {
+        subscriptions.splice(index, 1);
+      }
+      subscription.dispose();
+    }
   }
 }

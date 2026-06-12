@@ -7,6 +7,7 @@ import type { SystemPluginRecord } from '../../core/services/systemplugin';
 import { FilePicker } from '../../components/filepicker';
 import { templateEditorPluginFiles } from '../../core/build/templates';
 import { SystemPluginService } from '../../core/services/systemplugin';
+import { getDesktopAPI } from '../../core/services/desktop';
 import { DlgPromptName } from './promptnamedlg';
 import { DlgMessageBoxEx } from './messageexdlg';
 import { Dialog } from './dlg';
@@ -21,6 +22,7 @@ import type {
 import { PathUtils, VFSError, VFS } from '@zephyr3d/base';
 import { VFSRenderer } from '../../components/vfsrenderer';
 import { CustomInputTextFlags, customTextInput } from '../../components/textinput';
+import { DlgProgress } from './progressdlg';
 
 function getPluginDependencyLines(plugin: SystemPluginRecord): string[] {
   const dependencies = Object.entries(plugin.dependencies ?? {}).sort(([a], [b]) => a.localeCompare(b));
@@ -37,6 +39,16 @@ function getPluginDependencySummary(plugin: SystemPluginRecord): string {
   }
   return `Dependencies: ${dependencies.map(([name, version]) => `${name}@${version}`).join(', ')}`;
 }
+
+function getPluginModeSummary(plugin: SystemPluginRecord): string {
+  return plugin.linked?.directory
+    ? `Mode: linked (${plugin.linked.directory})`
+    : 'Mode: installed package';
+}
+
+const AUTO_SCRIPT_PATHS_BY_PLUGIN_ID: Record<string, string[]> = {
+  'com.0yao.zephyr3d-plugin': ['/assets/scripts/gpucloth.ts', '/assets/scripts/springtest.ts']
+};
 
 function normalizePluginSettingsForSchema(
   schema: EditorPluginSettingsSchema,
@@ -173,6 +185,7 @@ class SystemPluginListView extends ListView<{}, SystemPluginRecord> {
         item.description ? '' : null,
         `Id: ${item.id}`,
         `Entry: ${item.entry}`,
+        getPluginModeSummary(item),
         ...((item.description || item.entry) && Object.keys(item.dependencies ?? {}).length > 0 ? [''] : []),
         ...getPluginDependencyLines(item)
       ]
@@ -416,12 +429,15 @@ class DlgPluginFiles extends DialogRenderer<void> {
 
   doRender(): void {
     ImGui.Text(`Plugin: ${this._plugin.id}`);
+    if (this._plugin.linked?.directory) {
+      ImGui.TextDisabled(`Linked to: ${this._plugin.linked.directory}`);
+    }
     ImGui.Separator();
-    if (ImGui.Button('Install Package...')) {
+    if (ImGui.Button('Install Package...') && !this._plugin.linked?.directory) {
       this.installPackage();
     }
     ImGui.SameLine();
-    if (ImGui.Button('Remove Package...')) {
+    if (ImGui.Button('Remove Package...') && !this._plugin.linked?.directory) {
       this.removePackage();
     }
     ImGui.Separator();
@@ -503,6 +519,7 @@ class DlgPluginFiles extends DialogRenderer<void> {
       'Remove Package',
       dependencyNames.map((name) => `${name}@${this._plugin.dependencies[name]}`),
       dependencyNames,
+      undefined,
       420,
       320
     );
@@ -727,12 +744,19 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
       ImGui.SetTooltip('Installs a plugin from directory');
     }
     ImGui.SameLine();
+    if (ImGui.Button('Link...') && !this._busy) {
+      this.linkPlugin();
+    }
+    if (ImGui.IsItemHovered()) {
+      ImGui.SetTooltip('Links a desktop plugin directory for development. Supports plugin.dev.json source entry.');
+    }
+    ImGui.SameLine();
     if (ImGui.Button('New Template...') && !this._busy) {
       this.createTemplatePlugin();
     }
     ImGui.SameLine();
     if (ImGui.Button('Refresh') && !this._busy) {
-      this.reload().catch(() => undefined);
+      this.refreshPlugins().catch(() => undefined);
     }
 
     ImGui.Separator();
@@ -755,17 +779,18 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
         this.browseFiles(selected);
       }
       ImGui.SameLine();
-      if (ImGui.Button('Install Package...') && !this._busy) {
+      if (ImGui.Button('Install Package...') && !this._busy && !selected.linked?.directory) {
         this.installPluginPackage(selected);
       }
       ImGui.SameLine();
-      if (ImGui.Button('Remove Package...') && !this._busy) {
+      if (ImGui.Button('Remove Package...') && !this._busy && !selected.linked?.directory) {
         this.removePluginPackage(selected);
       }
       ImGui.SameLine();
       if (ImGui.Button('Settings...') && !this._busy) {
         this.editPluginSettings(selected);
       }
+      ImGui.TextWrapped(getPluginModeSummary(selected));
       ImGui.TextWrapped(getPluginDependencySummary(selected));
     } else {
       ImGui.TextDisabled('Select a plugin to inspect or remove it.');
@@ -781,31 +806,107 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
     this._listData.elements = await this._editor.listSystemPlugins();
   }
 
-  private async installPlugin() {
+  private async runPluginBusyTask(
+    title: string,
+    action: (updateProgress: (current: number, total: number, message: string) => void) => Promise<void>
+  ) {
+    const progress = new DlgProgress(`${title}##SystemPluginProgress`, 420);
+    progress.showModal();
+    progress.setProgress(0, 4);
+    progress.setMessage('准备中...');
     this._busy = true;
     try {
-      const files = await FilePicker.chooseFiles(false, '.zip');
-      if (files?.[0]) {
-        await this._editor.installSystemPluginFromFile(files[0]);
-        await this.reload();
-      }
-    } catch {
+      await action((current, total, message) => {
+        progress.setProgress(current, total);
+        progress.setMessage(message);
+      });
+      progress.setProgress(4, 4);
+      progress.setMessage('操作完成');
     } finally {
+      progress.close();
       this._busy = false;
     }
   }
 
+  private async refreshPlugins() {
+    try {
+      await this.runPluginBusyTask('刷新插件', async (updateProgress) => {
+        updateProgress(1, 4, '正在扫描已 Link 的插件...');
+        this._listData.elements = await this._editor.refreshSystemPluginsWithProgress((message) => {
+          updateProgress(2, 4, message);
+        });
+        updateProgress(4, 4, '插件列表已刷新');
+      });
+    } catch {
+    }
+  }
+
+  private async installPlugin() {
+    try {
+      const files = await FilePicker.chooseFiles(false, '.zip');
+      if (files?.[0]) {
+        await this.runPluginBusyTask('安装插件', async (updateProgress) => {
+          updateProgress(1, 4, '正在读取插件包...');
+          await this._editor.installSystemPluginFromFileWithProgress(files[0], (message) => {
+            updateProgress(2, 4, message);
+          });
+          updateProgress(3, 4, '正在刷新插件列表...');
+          await this.reload();
+          updateProgress(4, 4, '插件安装完成');
+        });
+      }
+    } catch {
+    }
+  }
+
   private async installPluginFolder() {
-    this._busy = true;
     try {
       const files = await FilePicker.chooseDirectory();
       if (files?.length) {
-        await this._editor.installSystemPluginFromDirectory(files);
-        await this.reload();
+        await this.runPluginBusyTask('安装插件目录', async (updateProgress) => {
+          updateProgress(1, 4, '正在读取插件目录...');
+          await this._editor.installSystemPluginFromDirectoryWithProgress(files, (message) => {
+            updateProgress(2, 4, message);
+          });
+          updateProgress(3, 4, '正在刷新插件列表...');
+          await this.reload();
+          updateProgress(4, 4, '插件安装完成');
+        });
       }
     } catch {
-    } finally {
-      this._busy = false;
+    }
+  }
+
+  private async linkPlugin() {
+    const desktop = getDesktopAPI();
+    if (!desktop?.fs?.pickDirectory) {
+      return;
+    }
+    try {
+      const directory = await desktop.fs.pickDirectory({
+        title: 'Select Plugin Directory',
+        buttonLabel: 'Link Plugin'
+      });
+      if (directory) {
+        await this.runPluginBusyTask('Link 插件', async (updateProgress) => {
+          updateProgress(1, 4, '正在读取插件目录...');
+          await this._editor.linkSystemPluginWithProgress(directory, undefined, (message) => {
+            updateProgress(2, 4, message);
+          });
+          updateProgress(3, 4, '正在刷新插件列表...');
+          await this.reload();
+          updateProgress(4, 4, '插件 Link 完成');
+        });
+      }
+    } catch (err) {
+      await DlgMessageBoxEx.messageBoxEx(
+        'Link Plugin Failed',
+        err instanceof Error ? err.message : String(err),
+        ['Close'],
+        480,
+        0,
+        true
+      );
     }
   }
 
@@ -875,7 +976,37 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
   private async removeSelected(plugin: SystemPluginRecord) {
     this._busy = true;
     try {
+      const autoScriptPaths = AUTO_SCRIPT_PATHS_BY_PLUGIN_ID[plugin.id] ?? [];
+      let shouldDeleteScripts = false;
+      if (autoScriptPaths.length > 0 && this._editor.currentProject && !this._editor.isProjectReadOnly()) {
+        const existingPaths: string[] = [];
+        for (const path of autoScriptPaths) {
+          if (await this._editor.projectFileExists(path)) {
+            existingPaths.push(path);
+          }
+        }
+        if (existingPaths.length > 0) {
+          const confirmed = await DlgMessageBoxEx.messageBoxEx(
+            'Remove plugin scripts',
+            `Also remove these generated project scripts?\n\n${existingPaths.join('\n')}`,
+            ['Remove Plugin And Scripts', 'Keep Scripts', 'Cancel'],
+            460,
+            0,
+            true
+          );
+          if (confirmed === 'Cancel') {
+            return;
+          }
+          shouldDeleteScripts = confirmed === 'Remove Plugin And Scripts';
+          if (shouldDeleteScripts) {
+            for (const path of existingPaths) {
+              await this._editor.deleteProjectFile(path);
+            }
+          }
+        }
+      }
       await this._editor.removeSystemPlugin(plugin.id);
+      void shouldDeleteScripts;
       await this.reload();
     } catch {
     } finally {
@@ -950,6 +1081,7 @@ export class DlgSystemPlugins extends DialogRenderer<void> {
       'Remove Package',
       dependencyNames.map((name) => `${name}@${plugin.dependencies[name]}`),
       dependencyNames,
+      undefined,
       420,
       320
     );

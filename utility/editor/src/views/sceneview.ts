@@ -972,6 +972,18 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       this.syncNodeProxyTree(this.controller.model.scene.rootNode);
     }
   }
+  private renderPluginDockPanels(location: 'left' | 'right') {
+    const panels = this.editor.plugins.getPanels(location);
+    for (const panel of panels) {
+      if (panel.visible && !panel.visible()) {
+        continue;
+      }
+      if (ImGui.BeginTabItem(`${panel.title}##${panel.id}`)) {
+        panel.render();
+        ImGui.EndTabItem();
+      }
+    }
+  }
 
   public handleRefreshProperties() {
     this._propGrid.refresh();
@@ -1115,27 +1127,41 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
         //this._sceneHierarchy.draggingItem ? ImGui.WindowFlags.NoScrollbar : 0
       )
     ) {
-      this._sceneHierarchy!.render(this.controller.editor.sceneChanged);
+      if (ImGui.BeginTabBar('##LeftDockPanels')) {
+        if (ImGui.BeginTabItem('Scene Hierarchy##SceneHierarchyPanel')) {
+          this._sceneHierarchy!.render(this.controller.editor.sceneChanged);
+          ImGui.EndTabItem();
+        }
+        this.renderPluginDockPanels('left');
+        ImGui.EndTabBar();
+      }
     }
     this._leftDockPanel!.end();
 
     if (this._rightDockPanel.begin('##PropertyGridPanel')) {
-      if (ImGui.BeginChild('##PropGridRegion', new ImGui.ImVec2(-1, 0), false)) {
-        if (this._propGrid.scrollToTopRequested) {
-          this._propGridScrollTopFrames = 3;
+      if (ImGui.BeginTabBar('##RightDockPanels')) {
+        if (ImGui.BeginTabItem('Inspector##PropertyGridPanel')) {
+          if (ImGui.BeginChild('##PropGridRegion', new ImGui.ImVec2(-1, 0), false)) {
+            if (this._propGrid.scrollToTopRequested) {
+              this._propGridScrollTopFrames = 3;
+            }
+            if (this._propGridScrollTopFrames > 0) {
+              ImGui.SetScrollY(0);
+            }
+            this._propGrid.render();
+            ImGui.Separator();
+            this._scriptPanel.render();
+            if (this._propGridScrollTopFrames > 0) {
+              ImGui.SetScrollY(0);
+              this._propGridScrollTopFrames--;
+            }
+          }
+          ImGui.EndChild();
+          ImGui.EndTabItem();
         }
-        if (this._propGridScrollTopFrames > 0) {
-          ImGui.SetScrollY(0);
-        }
-        this._propGrid.render();
-        ImGui.Separator();
-        this._scriptPanel.render();
-        if (this._propGridScrollTopFrames > 0) {
-          ImGui.SetScrollY(0);
-          this._propGridScrollTopFrames--;
-        }
+        this.renderPluginDockPanels('right');
+        ImGui.EndTabBar();
       }
-      ImGui.EndChild();
     }
     this._rightDockPanel.end();
 
