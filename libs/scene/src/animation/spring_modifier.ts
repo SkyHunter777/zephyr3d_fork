@@ -15,6 +15,7 @@ import type { SpringSystem } from './spring/spring_system';
 export class SpringModifier extends SkeletonModifier {
   private _springSystem: SpringSystem;
   private _weight: number;
+  private _sourceId: string;
 
   /**
    * Create a spring post-processor.
@@ -26,6 +27,7 @@ export class SpringModifier extends SkeletonModifier {
     super();
     this._weight = weight;
     this._springSystem = springSystem;
+    this._sourceId = '';
   }
 
   /**
@@ -33,6 +35,15 @@ export class SpringModifier extends SkeletonModifier {
    */
   get springSystem(): SpringSystem {
     return this._springSystem;
+  }
+
+  /** Identifier of the source configuration that created this modifier. */
+  get sourceId(): string {
+    return this._sourceId;
+  }
+
+  set sourceId(value: string) {
+    this._sourceId = value;
   }
 
   /**

@@ -3,6 +3,14 @@ import { Vector3, Quaternion } from '@zephyr3d/base';
 import type { SpringChain } from './spring_chain';
 import type { SpringConstraint } from './spring_constraint';
 import { IKUtils } from '../ik/ik_utils';
+import type { CapsuleCollider, PlaneCollider, SphereCollider, SpringCollider } from './spring_collider';
+import {
+  resolveCapsuleCollision,
+  resolvePlaneCollision,
+  resolveSphereCollision,
+  updateColliderFromNode
+} from './spring_collider';
+import { SpringNodePoseTracker } from './spring_node_pose_tracker';
 
 /**
  * Constraint between particles in different chains
@@ -55,6 +63,15 @@ export interface MultiChainSpringSystemOptions {
    * - 'xpbd': compliance (m/N) gives physically correct, iteration-independent results.
    */
   solver?: 'verlet' | 'xpbd';
+  /** How strongly particles follow the animated pose. */
+  poseFollow?: number;
+  poseFollowRoot?: number;
+  poseFollowTip?: number;
+  poseFollowExponent?: number;
+  /** Maximum deviation from the animated pose; zero disables clamping. */
+  maxPoseOffset?: number;
+  maxPoseOffsetRoot?: number;
+  maxPoseOffsetTip?: number;
 }
 
 /**
@@ -75,6 +92,15 @@ export class MultiChainSpringSystem {
   private _centrifugalScale: number;
   private _coriolisScale: number;
   private _solver: 'verlet' | 'xpbd';
+  private _poseFollow: number;
+  private _maxPoseOffset: number;
+  private _poseFollowRoot: number;
+  private _poseFollowTip: number;
+  private _poseFollowExponent: number;
+  private _maxPoseOffsetRoot: number;
+  private _maxPoseOffsetTip: number;
+  private _colliders: SpringCollider[];
+  private _nodePoseTracker: SpringNodePoseTracker;
 
   constructor(options?: MultiChainSpringSystemOptions) {
     this._chains = [];
@@ -86,6 +112,15 @@ export class MultiChainSpringSystem {
     this._centrifugalScale = options?.centrifugalScale ?? 1.0;
     this._coriolisScale = options?.coriolisScale ?? 1.0;
     this._solver = options?.solver ?? 'verlet';
+    this._poseFollow = Math.max(0, Math.min(1, options?.poseFollow ?? 0.35));
+    this._maxPoseOffset = Math.max(0, options?.maxPoseOffset ?? 0);
+    this._poseFollowRoot = Math.max(0, Math.min(1, options?.poseFollowRoot ?? this._poseFollow));
+    this._poseFollowTip = Math.max(0, Math.min(1, options?.poseFollowTip ?? this._poseFollow));
+    this._poseFollowExponent = Math.max(0.1, options?.poseFollowExponent ?? 1.6);
+    this._maxPoseOffsetRoot = Math.max(0, options?.maxPoseOffsetRoot ?? this._maxPoseOffset);
+    this._maxPoseOffsetTip = Math.max(0, options?.maxPoseOffsetTip ?? this._maxPoseOffset);
+    this._colliders = [];
+    this._nodePoseTracker = new SpringNodePoseTracker();
   }
 
   /**
@@ -162,6 +197,7 @@ export class MultiChainSpringSystem {
    * @param deltaTime - Time step in seconds
    */
   update(deltaTime: number): void {
+    this._nodePoseTracker.restoreInputPose();
     const dt = Math.min(deltaTime, 0.033);
 
     // Save all particle positions before updating
@@ -245,18 +281,23 @@ export class MultiChainSpringSystem {
           this.solveInterChainConstraint(constraint);
         }
       }
+      this.solvePosePreservation(this._iterations);
+      this.solveCollisions();
     }
   }
 
   private updateFixedParticles(): void {
     for (const chain of this._chains) {
       for (const particle of chain.particles) {
-        if (particle.fixed && particle.node) {
-          const worldPos = new Vector3(
-            particle.node.worldMatrix.m03,
-            particle.node.worldMatrix.m13,
-            particle.node.worldMatrix.m23
-          );
+        const sourceNode = particle.anchorNode ?? particle.node;
+        if (sourceNode) {
+          const worldPos = particle.anchorOffset
+            ? sourceNode.worldMatrix.transformPointAffine(particle.anchorOffset)
+            : new Vector3(sourceNode.worldMatrix.m03, sourceNode.worldMatrix.m13, sourceNode.worldMatrix.m23);
+          particle.animPosition.set(worldPos);
+          if (!particle.fixed) {
+            continue;
+          }
           particle.position.set(worldPos);
           particle.prevPosition.set(worldPos);
 
@@ -269,6 +310,73 @@ export class MultiChainSpringSystem {
             if (particle.positionHistory.length > 5) {
               particle.positionHistory.shift();
             }
+          }
+        }
+      }
+    }
+  }
+
+  private solvePosePreservation(totalIterations: number): void {
+    if (this._poseFollowRoot <= 0 && this._poseFollowTip <= 0) {
+      return;
+    }
+    for (const chain of this._chains) {
+      const lastIndex = Math.max(1, chain.particles.length - 1);
+      for (let i = 0; i < chain.particles.length; i++) {
+        const particle = chain.particles[i];
+        if (particle.fixed) {
+          continue;
+        }
+        const t = Math.pow(i / lastIndex, this._poseFollowExponent);
+        const follow = this._poseFollowRoot + (this._poseFollowTip - this._poseFollowRoot) * t;
+        const iterationFollow =
+          totalIterations > 1 ? 1 - Math.pow(Math.max(0, 1 - follow), 1 / totalIterations) : follow;
+        const correction = Vector3.scale(
+          Vector3.sub(particle.animPosition, particle.position, new Vector3()),
+          iterationFollow,
+          new Vector3()
+        );
+        Vector3.add(particle.position, correction, particle.position);
+        const maxOffset = this._maxPoseOffsetRoot + (this._maxPoseOffsetTip - this._maxPoseOffsetRoot) * t;
+        if (maxOffset > 0) {
+          const offset = Vector3.sub(particle.position, particle.animPosition, new Vector3());
+          if (offset.magnitude > maxOffset) {
+            offset.inplaceNormalize().scaleBy(maxOffset);
+            Vector3.add(particle.animPosition, offset, particle.position);
+          }
+        }
+      }
+    }
+  }
+
+  private solveCollisions(): void {
+    for (const collider of this._colliders) {
+      if (collider.node) {
+        updateColliderFromNode(collider);
+      }
+      if (!collider.enabled) {
+        continue;
+      }
+      for (const chain of this._chains) {
+        for (const particle of chain.particles) {
+          if (particle.fixed) {
+            continue;
+          }
+          const positionBeforeCollision = particle.position.clone();
+          let collided: boolean;
+          if (collider.type === 'sphere') {
+            collided = resolveSphereCollision(particle.position, collider as SphereCollider);
+          } else if (collider.type === 'capsule') {
+            collided = resolveCapsuleCollision(particle.position, collider as CapsuleCollider);
+          } else {
+            collided = resolvePlaneCollision(particle.position, collider as PlaneCollider);
+          }
+          if (collided) {
+            Vector3.add(
+              particle.prevPosition,
+              Vector3.sub(particle.position, positionBeforeCollision, new Vector3()),
+              particle.prevPosition
+            );
           }
         }
       }
@@ -598,14 +706,17 @@ export class MultiChainSpringSystem {
       }
 
       const parent = particle.node.parent;
+      const inputRotation = particle.node.rotation.clone();
       if (parent) {
         const parentWorldRotation = new Quaternion();
         parent.worldMatrix.decompose(null, parentWorldRotation, null);
         const parentInvRotation = Quaternion.conjugate(parentWorldRotation, new Quaternion());
         const localRotation = Quaternion.multiply(parentInvRotation, worldRotation, new Quaternion());
         particle.node.rotation = localRotation;
+        this._nodePoseTracker.recordAppliedRotation(particle.node, inputRotation, localRotation);
       } else {
         particle.node.rotation = worldRotation;
+        this._nodePoseTracker.recordAppliedRotation(particle.node, inputRotation, worldRotation);
       }
     }
   }
@@ -614,8 +725,19 @@ export class MultiChainSpringSystem {
    * Resets the simulation to initial state
    */
   reset(): void {
+    this._nodePoseTracker.clear(true);
     for (const chain of this._chains) {
       chain.reset();
+      for (const particle of chain.particles) {
+        particle.animPosition.set(particle.originalPosition);
+        particle.lastFramePosition.set(particle.originalPosition);
+        if (particle.positionHistory) {
+          particle.positionHistory.length = 0;
+        }
+      }
+    }
+    for (const constraint of this._interChainConstraints) {
+      constraint.lambda = 0;
     }
   }
 
@@ -717,5 +839,88 @@ export class MultiChainSpringSystem {
         }
       }
     }
+  }
+
+  get poseFollow(): number {
+    return this._poseFollow;
+  }
+
+  set poseFollow(value: number) {
+    const normalized = Math.max(0, Math.min(1, value));
+    this._poseFollow = normalized;
+    this._poseFollowRoot = normalized;
+    this._poseFollowTip = normalized;
+  }
+
+  get poseFollowRoot(): number {
+    return this._poseFollowRoot;
+  }
+
+  set poseFollowRoot(value: number) {
+    this._poseFollowRoot = Math.max(0, Math.min(1, value));
+  }
+
+  get poseFollowTip(): number {
+    return this._poseFollowTip;
+  }
+
+  set poseFollowTip(value: number) {
+    this._poseFollowTip = Math.max(0, Math.min(1, value));
+  }
+
+  get poseFollowExponent(): number {
+    return this._poseFollowExponent;
+  }
+
+  set poseFollowExponent(value: number) {
+    this._poseFollowExponent = Math.max(0.1, value);
+  }
+
+  get maxPoseOffset(): number {
+    return this._maxPoseOffset;
+  }
+
+  set maxPoseOffset(value: number) {
+    const normalized = Math.max(0, value);
+    this._maxPoseOffset = normalized;
+    this._maxPoseOffsetRoot = normalized;
+    this._maxPoseOffsetTip = normalized;
+  }
+
+  get maxPoseOffsetRoot(): number {
+    return this._maxPoseOffsetRoot;
+  }
+
+  set maxPoseOffsetRoot(value: number) {
+    this._maxPoseOffsetRoot = Math.max(0, value);
+  }
+
+  get maxPoseOffsetTip(): number {
+    return this._maxPoseOffsetTip;
+  }
+
+  set maxPoseOffsetTip(value: number) {
+    this._maxPoseOffsetTip = Math.max(0, value);
+  }
+
+  addCollider(collider: SpringCollider): void {
+    this._colliders.push(collider);
+  }
+
+  removeCollider(collider: SpringCollider): boolean {
+    const index = this._colliders.indexOf(collider);
+    if (index < 0) {
+      return false;
+    }
+    this._colliders.splice(index, 1);
+    return true;
+  }
+
+  clearColliders(): void {
+    this._colliders.length = 0;
+  }
+
+  get colliders(): SpringCollider[] {
+    return this._colliders;
   }
 }
