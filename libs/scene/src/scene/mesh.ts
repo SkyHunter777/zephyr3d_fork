@@ -11,6 +11,7 @@ import type {
   PickTarget,
   MorphData,
   MorphInfo,
+  SkinInfluenceData,
   RenderQueue
 } from '../render';
 import {
@@ -177,6 +178,8 @@ export class Mesh extends MeshBase implements BatchDrawable {
   /** @internal */
   protected _boneMatrices: DRef<Texture2D>;
   /** @internal */
+  protected _skinInfluenceData: Nullable<SkinInfluenceData>;
+  /** @internal */
   protected _morphData: Nullable<MorphData>;
   /** @internal */
   protected _morphInfo: Nullable<MorphInfo>;
@@ -228,6 +231,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     this._skinnedBoundingInfo = null;
     this._animatedBoundingBox = null;
     this._boneMatrices = new DRef();
+    this._skinInfluenceData = null;
     this._morphData = null;
     this._morphInfo = null;
     this._renderMorphInfo = null;
@@ -335,7 +339,10 @@ export class Mesh extends MeshBase implements BatchDrawable {
       RenderBundleWrapper.drawableChanged(this);
       this._primitiveChangeTag = null;
       if (this._morphData) {
-        this.ensureWebGLMorphVertexIndexAttribute();
+        this.ensureWebGLVertexIndexAttribute('morphing');
+      }
+      if (this._skinInfluenceData && this._skinInfluenceData.influenceCount > 4) {
+        this.ensureWebGLVertexIndexAttribute('skinning');
       }
       this.dispatchEvent('primitive_changed', prim);
     }
@@ -409,6 +416,55 @@ export class Mesh extends MeshBase implements BatchDrawable {
       RenderBundleWrapper.drawableChanged(this);
     }
   }
+  /** Sets additional per-vertex skinning influences packed in a texture. */
+  setSkinInfluenceData(data: Nullable<SkinInfluenceData>) {
+    if (!data) {
+      if (this._skinInfluenceData) {
+        this._skinInfluenceData.texture?.dispose();
+        this._skinInfluenceData = null;
+        this._renderBundle = {};
+        RenderBundleWrapper.drawableChanged(this);
+      }
+      return;
+    }
+    if (!this._skinInfluenceData) {
+      this._skinInfluenceData = {
+        texture: new DRef(),
+        width: 0,
+        height: 0,
+        influenceCount: 4,
+        data: new Float32Array(0)
+      };
+    }
+    this._skinInfluenceData.width = data.width;
+    this._skinInfluenceData.height = data.height;
+    this._skinInfluenceData.influenceCount = data.influenceCount;
+    this._skinInfluenceData.data = data.data.slice();
+    if (data.texture?.get()) {
+      this._skinInfluenceData.texture!.set(data.texture.get());
+    } else {
+      let tex = this._skinInfluenceData.texture?.get() ?? null;
+      if (!tex || tex.width !== data.width || tex.height !== data.height) {
+        tex = getDevice().createTexture2D('rgba32f', data.width, data.height, {
+          mipmapping: false,
+          samplerOptions: {
+            minFilter: 'nearest',
+            magFilter: 'nearest',
+            mipFilter: 'none'
+          }
+        })!;
+        this._skinInfluenceData.texture!.set(tex);
+      }
+      tex.update(data.data, 0, 0, data.width, data.height);
+    }
+    this.ensureWebGLVertexIndexAttribute('skinning');
+    this._renderBundle = {};
+    RenderBundleWrapper.drawableChanged(this);
+  }
+  /** {@inheritDoc Drawable.getSkinInfluenceData} */
+  getSkinInfluenceData() {
+    return this._skinInfluenceData;
+  }
   /**
    * Sets the texture that contains the morph target data
    * @param data - The texture that contains the morph target data
@@ -448,7 +504,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
         }
         tex.update(data.data, 0, 0, data.width, data.height);
       }
-      this.ensureWebGLMorphVertexIndexAttribute();
+      this.ensureWebGLVertexIndexAttribute('morphing');
       this.updateRenderMorphInfo(this.collectActiveMorphTargetIndices(), this._compactMorphData);
       this._renderBundle = {};
       RenderBundleWrapper.drawableChanged(this);
@@ -1079,6 +1135,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     this._primitive.dispose();
     this._material.dispose();
     this._boneMatrices.dispose();
+    this.setSkinInfluenceData(null);
     this.setMorphData(null);
     this.setRenderMorphInfo(null);
     this.setMorphInfo(null);
@@ -1093,7 +1150,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     this.invalidateBoundingVolume();
   }
   /** @internal */
-  private ensureWebGLMorphVertexIndexAttribute() {
+  private ensureWebGLVertexIndexAttribute(feature: 'morphing' | 'skinning') {
     const primitive = this._primitive.get();
     if (!primitive || getDevice().type !== 'webgl' || primitive.getVertexBuffer('texCoord7')) {
       return;
@@ -1107,6 +1164,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
       vertexIndices[i] = i;
     }
     primitive.createAndSetVertexBuffer('tex7_f32', vertexIndices);
+    console.info(`Injected texCoord7 vertex indices for WebGL ${feature} on mesh "${this.name ?? ''}"`);
   }
   /** @internal */
   private static _defaultMaterial: Nullable<MeshMaterial> = null;

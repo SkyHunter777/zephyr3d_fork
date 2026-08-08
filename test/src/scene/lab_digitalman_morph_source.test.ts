@@ -94,6 +94,8 @@ describeWithAssets('lab digitalman morph source compatibility', () => {
     const scene = new Scene();
     const mesh = new Mesh(scene);
     const morphProps: MeshProps = {
+      SkinnedBoundingInfo: sourceProps.SkinnedBoundingInfo,
+      SkinInfluenceData: sourceProps.SkinInfluenceData,
       MorphInfo: sourceProps.MorphInfo,
       MorphBoundingInfo: sourceProps.MorphBoundingInfo,
       MorphData: '',
@@ -106,6 +108,11 @@ describeWithAssets('lab digitalman morph source compatibility', () => {
     expect(mesh.getMorphSource()?.nodePath).toBe(source.nodePath);
     expect(mesh.getMorphSourceData()?.numTargets).toBe(737);
     expect(mesh.getMorphInfo()?.data[4]).toBe(0);
+    expect(mesh.skinnedBoundingInfo?.influenceCount).toBe(12);
+    expect(mesh.getSkinInfluenceData()?.influenceCount).toBe(12);
+    const serializedSkinData = Buffer.from(sourceProps.SkinInfluenceData as string, 'base64');
+    expect(mesh.getSkinInfluenceData()?.width).toBe(serializedSkinData.readUInt32LE(0));
+    expect(mesh.getSkinInfluenceData()?.height).toBe(serializedSkinData.readUInt32LE(4));
 
     mesh.setMorphWeightByIndex(0, 1);
     const renderInfo = mesh.getRenderMorphInfo();

@@ -281,6 +281,10 @@ export class ClipmapTerrain extends applyMixins(GraphNode, mixinDrawable) implem
   getMorphData() {
     return null;
   }
+  /** {@inheritDoc Drawable.getSkinInfluenceData} */
+  getSkinInfluenceData() {
+    return null;
+  }
   /**
    * {@inheritDoc Drawable.getMorphInfo}
    */

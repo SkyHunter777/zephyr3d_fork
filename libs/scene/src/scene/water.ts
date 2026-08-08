@@ -152,6 +152,10 @@ export class Water extends applyMixins(GraphNode, mixinDrawable) implements Draw
   getMorphData() {
     return null;
   }
+  /** {@inheritDoc Drawable.getSkinInfluenceData} */
+  getSkinInfluenceData() {
+    return null;
+  }
   /**
    * {@inheritDoc Drawable.getMorphInfo}
    */

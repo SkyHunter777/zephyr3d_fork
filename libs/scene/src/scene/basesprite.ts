@@ -142,6 +142,10 @@ export class BaseSprite<M extends SpriteMaterial>
   getMorphData() {
     return null;
   }
+  /** {@inheritDoc Drawable.getSkinInfluenceData} */
+  getSkinInfluenceData() {
+    return null;
+  }
   /**
    * {@inheritDoc Drawable.getMorphInfo}
    */

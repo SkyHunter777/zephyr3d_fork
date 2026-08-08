@@ -12,6 +12,7 @@ import {
   AssetScene,
   AssetSkeleton,
   getEngine,
+  getSkinInfluenceLimit,
   SharedModel,
   type AssetImageInfo,
   type AssetMaterial,
@@ -707,6 +708,7 @@ function buildSkinData(geometry: FbxGeometryData) {
 }
 
 function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPrimitiveBuildData[] {
+  const skinInfluenceLimit = Math.max(1, getSkinInfluenceLimit());
   const materialBuckets = new Map<
     number,
     {
@@ -721,6 +723,7 @@ function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPri
       rawPositions: number[];
       rawBlendIndices: number[];
       rawJointWeights: number[];
+      rawSkinInfluenceCount: number;
     }
   >();
   const geometryTransform = getGeometryTransform(model);
@@ -749,7 +752,8 @@ function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPri
         indices: [],
         rawPositions: [],
         rawBlendIndices: [],
-        rawJointWeights: []
+        rawJointWeights: [],
+        rawSkinInfluenceCount: 0
       };
       materialBuckets.set(materialIndex, bucket);
     }
@@ -833,8 +837,8 @@ function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPri
         const vertexInfluences = skinData.influences[cpIndex]
           .slice()
           .sort((a, b) => b.weight - a.weight)
-          .slice(0, 4);
-        while (vertexInfluences.length < 4) {
+          .slice(0, skinInfluenceLimit);
+        while (vertexInfluences.length < skinInfluenceLimit) {
           vertexInfluences.push({ joint: 0, weight: 0 });
         }
         let total = 0;
@@ -842,12 +846,16 @@ function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPri
           total += influence.weight;
         }
         const denom = total > 0 ? total : 1;
-        for (const influence of vertexInfluences) {
+        for (let influenceIndex = 0; influenceIndex < 4; influenceIndex++) {
+          const influence = vertexInfluences[influenceIndex] ?? { joint: 0, weight: 0 };
           bucket.blendIndices.push(influence.joint);
           bucket.blendWeights.push(influence.weight / denom);
+        }
+        for (const influence of vertexInfluences) {
           bucket.rawBlendIndices.push(influence.joint);
           bucket.rawJointWeights.push(influence.weight / denom);
         }
+        bucket.rawSkinInfluenceCount = skinInfluenceLimit;
       }
     }
     const polygonSize = polygon.length;
@@ -899,6 +907,7 @@ function buildPrimitives(geometry: FbxGeometryData, model: FbxModelData): FbxPri
         bucket.rawBlendIndices.length > 0 ? toUint16Array(new Uint16Array(bucket.rawBlendIndices)) : null,
       rawJointWeights:
         bucket.rawJointWeights.length > 0 ? toFloat32Array(new Float32Array(bucket.rawJointWeights)) : null,
+      rawSkinInfluenceCount: bucket.rawSkinInfluenceCount || undefined,
       materialIndex,
       name: materialBuckets.size > 1 ? `${geometry.name}_${materialIndex}` : geometry.name
     });
@@ -1197,6 +1206,7 @@ function createMeshData(
       rawPositions: toFloat32Array(primitiveData.rawPositions),
       rawBlendIndices: primitiveData.rawBlendIndices ? toUint16Array(primitiveData.rawBlendIndices) : null,
       rawJointWeights: primitiveData.rawJointWeights ? toFloat32Array(primitiveData.rawJointWeights) : null,
+      rawSkinInfluenceCount: primitiveData.rawSkinInfluenceCount,
       name: primitiveData.name || geometry.name,
       numTargets: 0
     };

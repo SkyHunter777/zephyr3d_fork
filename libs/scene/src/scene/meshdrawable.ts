@@ -8,6 +8,7 @@ import type {
   DrawContext,
   MorphData,
   MorphInfo,
+  SkinInfluenceData,
   PickTarget,
   Primitive,
   RenderQueue
@@ -45,6 +46,9 @@ export class ProxyDrawableBase<T extends Disposable & Drawable = Mesh> extends D
   }
   getBoneMatrices(): Nullable<Texture2D> {
     return this._host.get()?.getBoneMatrices() ?? null;
+  }
+  getSkinInfluenceData(): Nullable<SkinInfluenceData> {
+    return this._host.get()?.getSkinInfluenceData() ?? null;
   }
   getMorphData(): Nullable<MorphData> {
     return this._host.get()?.getMorphData() ?? null;
@@ -161,6 +165,9 @@ export class MeshDrawable<M extends MeshMaterial>
     return { node: this.getNode() };
   }
   getBoneMatrices(): Nullable<Texture2D> {
+    return null;
+  }
+  getSkinInfluenceData(): Nullable<SkinInfluenceData> {
     return null;
   }
   getMorphData(): Nullable<MorphData> {
