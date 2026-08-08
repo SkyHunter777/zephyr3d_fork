@@ -15,6 +15,7 @@ import {
   setActiveMorphTargetLimit,
   setSceneMeshAssetBinding,
   type AssetMeshData,
+  type AssetPrimitiveInfo,
   type AssetSubMeshData
 } from '../../../libs/scene/src';
 
@@ -37,7 +38,8 @@ jest.mock('../../../libs/scene/src/app/api', () => ({
       height,
       update: jest.fn(),
       dispose: jest.fn()
-    }))
+    })),
+    getDeviceCaps: jest.fn(() => ({ textureCaps: { maxTextureSize: 4096 } }))
   })),
   getEngine: jest.fn(() => ({
     resourceManager: mockResourceManager
@@ -215,6 +217,119 @@ describe('morph target groups', () => {
     track.applyState(mesh, state);
     expect(mesh.getMorphWeight('last')).toBe(0.625);
     expect(mesh.getMorphInfo()!.data[4 + numTargets - 1]).toBe(0.625);
+  });
+
+  test('keeps legacy embedded MorphData when MorphSourceData is absent', async () => {
+    const manager = new ResourceManager(new MemoryFS());
+    mockResourceManager = manager;
+    const scene = new Scene();
+    const mesh = new Mesh(scene);
+    mesh.setMorphData({ width: 2, height: 2, data: new Float32Array(16).fill(0.25) });
+    setMorphInfo(mesh, ['smile'], [0.5]);
+
+    const serialized = await manager.serializeObject(mesh);
+    const restored = new Mesh(scene);
+    await manager.deserializeObjectProps(restored, serialized.Object);
+
+    expect(restored.getMorphSource()).toBeNull();
+    expect(restored.getMorphSourceData()).toBeNull();
+    expect(restored.getMorphData()).not.toBeNull();
+    expect(Array.from(restored.getMorphData()!.data)).toEqual(Array(16).fill(0.25));
+  });
+
+  test('round-trips inline MorphSourceData and rebuilds its GPU texture', async () => {
+    const manager = new ResourceManager(new MemoryFS());
+    mockResourceManager = manager;
+    const scene = new Scene();
+    const mesh = new Mesh(scene);
+    setMorphInfo(mesh, ['left', 'right'], [0.25, 0.75]);
+    mesh.setMorphSourceData({
+      numTargets: 2,
+      numVertices: 2,
+      targets: {
+        0: {
+          numComponents: 3,
+          data: [new Float32Array([1, 2, 3, 4, 5, 6]), new Float32Array([7, 8, 9, 10, 11, 12])]
+        }
+      }
+    });
+
+    const serialized = await manager.serializeObject(mesh);
+    const props = serialized.Object as Record<string, string>;
+    expect(props.MorphSourceData).toBeTruthy();
+    const restored = new Mesh(scene);
+    await manager.deserializeObjectProps(restored, props);
+
+    expect(restored.getMorphSourceData()?.numTargets).toBe(2);
+    expect(restored.getMorphData()?.width).toBe(2);
+    expect(restored.getMorphWeight('right')).toBe(0.75);
+    expect(Array.from(restored.getMorphSourceData()!.targets[0]!.data[1])).toEqual([7, 8, 9, 10, 11, 12]);
+
+    const textureData = restored.getMorphData()!.data;
+    const attributeOffset = 4 + MAX_ACTIVE_MORPH_TARGETS * 2;
+    expect(restored.getRenderMorphInfo()!.data[attributeOffset]).toBe(0);
+    restored.setMorphWeightByIndex(1, 0.5);
+    expect(restored.getRenderMorphInfo()!.data[attributeOffset]).toBe(0);
+    expect(restored.getMorphData()!.data).toBe(textureData);
+  });
+
+  test('resolves a serialized MorphSource against imported model data', async () => {
+    const manager = new ResourceManager(new MemoryFS());
+    mockResourceManager = manager;
+    const sourceModel = new SharedModel();
+    const rig = new AssetHierarchyNode('rig', sourceModel);
+    const sourceNode = new AssetHierarchyNode('face', sourceModel, rig);
+    const primitive: AssetPrimitiveInfo = {
+      name: 'faceMesh',
+      vertices: {
+        position: { format: 'position_f32x3', data: new Float32Array([0, 0, 0, 1, 0, 0]) }
+      } as AssetPrimitiveInfo['vertices'],
+      indices: null,
+      indexCount: 0,
+      type: 'triangle-list',
+      boxMin: Vector3.zero(),
+      boxMax: Vector3.one()
+    };
+    const sourceSubMesh: AssetSubMeshData = {
+      name: 'faceMesh',
+      primitive,
+      material: null,
+      rawPositions: null,
+      rawBlendIndices: null,
+      rawJointWeights: null,
+      numTargets: 2,
+      targets: {
+        0: {
+          numComponents: 3,
+          data: [new Float32Array(6).fill(1), new Float32Array(6).fill(2)]
+        }
+      },
+      targetBox: [
+        new BoundingBox(Vector3.zero(), Vector3.one()),
+        new BoundingBox(Vector3.zero(), Vector3.one())
+      ]
+    };
+    sourceNode.mesh = { morphNames: ['left', 'right'], subMeshes: [sourceSubMesh] };
+    jest.spyOn(manager.assetManager, 'fetchModelData').mockResolvedValue(sourceModel);
+
+    const scene = new Scene();
+    const mesh = new Mesh(scene);
+    setMorphInfo(mesh, ['left', 'right'], [0.25, 0.75]);
+    mesh.setMorphSource({
+      sourcePath: '/assets/face.glb',
+      nodePath: 'rig/face',
+      subMeshName: 'faceMesh'
+    });
+    const serialized = await manager.serializeObject(mesh);
+    const restored = new Mesh(scene);
+    await manager.deserializeObjectProps(restored, serialized.Object);
+
+    expect(manager.assetManager.fetchModelData).toHaveBeenCalledWith('/assets/face.glb');
+    expect(restored.getMorphSourceData()?.numTargets).toBe(2);
+    expect(restored.getMorphData()).not.toBeNull();
+    expect(restored.getRenderMorphInfo()!.data[3]).toBe(2);
+    expect(restored.getMorphWeight('left')).toBe(0.25);
+    expect(restored.getMorphWeight('right')).toBe(0.75);
   });
 
   test('reads legacy raw-base64 MorphInfo and writes a versioned 1024-slot payload', async () => {

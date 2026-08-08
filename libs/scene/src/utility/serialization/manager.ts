@@ -292,7 +292,7 @@ export class ResourceManager {
         getMorphTargetGroupTrackClass(),
         getSceneNodeClass(this),
         getGraphNodeClass(),
-        getMeshClass(),
+        getMeshClass(this),
         getSpriteClass(),
         getTextSpriteClass(),
         getMSDFTextSpriteClass(),

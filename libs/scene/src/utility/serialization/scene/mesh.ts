@@ -1,7 +1,15 @@
 import { base64ToUint8Array, uint8ArrayToBase64, Vector3, mimeTypeOf } from '@zephyr3d/base';
 import { getEngine } from '../../../app/api';
+import { applyMeshMorphData, applyMeshMorphMetadata, type AssetHierarchyNode } from '../../../asset/model';
 import type { MeshMaterial } from '../../../material/meshmaterial';
-import { GraphNode, Mesh, type SceneNode } from '../../../scene';
+import {
+  GraphNode,
+  Mesh,
+  type MorphSourceDescriptor,
+  type MorphTargetSourceData,
+  type SceneNode
+} from '../../../scene';
+import type { ResourceManager } from '../manager';
 import { defineProps, type SerializableClass } from '../types';
 import { BoundingBox } from '../../bounding_volume';
 import { meshInstanceClsMap } from './common';
@@ -31,8 +39,133 @@ function deserializeBoundingBox(data: unknown): BoundingBox | null {
   return new BoundingBox(new Vector3(data.slice(0, 3)), new Vector3(data.slice(3, 6)));
 }
 
+function encodeFloat32Array(data: Float32Array): string {
+  return uint8ArrayToBase64(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+}
+
+function decodeSerializedFloat32Array(data: string): Float32Array {
+  const bytes = base64ToUint8Array(data);
+  if (bytes.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
+    throw new Error(`Invalid Float32 payload length: ${bytes.byteLength}`);
+  }
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return new Float32Array(buffer);
+}
+
+function encodeUint32Array(data: Uint32Array): string {
+  return uint8ArrayToBase64(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+}
+
+function decodeSerializedUint32Array(data: string): Uint32Array {
+  const bytes = base64ToUint8Array(data);
+  if (bytes.byteLength % Uint32Array.BYTES_PER_ELEMENT !== 0) {
+    throw new Error(`Invalid Uint32 payload length: ${bytes.byteLength}`);
+  }
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return new Uint32Array(buffer);
+}
+
+function serializeMorphSourceData(data: MorphTargetSourceData) {
+  return JSON.stringify({
+    numTargets: data.numTargets,
+    numVertices: data.numVertices,
+    targets: Object.fromEntries(
+      Object.entries(data.targets).map(([attrib, source]) => [
+        attrib,
+        {
+          numComponents: source!.numComponents,
+          data: source!.data.map((item) => encodeFloat32Array(item)),
+          indices: source!.indices?.map((item) => encodeUint32Array(item)) ?? null
+        }
+      ])
+    )
+  });
+}
+
+function deserializeMorphSourceData(data: string): MorphTargetSourceData | null {
+  try {
+    const parsed = JSON.parse(data) as {
+      numTargets?: number;
+      numVertices?: number;
+      targets?: Record<string, { numComponents: number; data?: string[]; indices?: string[] | null }>;
+    };
+    const targets: MorphTargetSourceData['targets'] = {};
+    for (const [attrib, source] of Object.entries(parsed.targets ?? {})) {
+      if (!source || !Array.isArray(source.data)) {
+        continue;
+      }
+      targets[Number(attrib)] = {
+        numComponents: source.numComponents,
+        data: source.data.map((item) => decodeSerializedFloat32Array(item)),
+        indices: source.indices ? source.indices.map((item) => decodeSerializedUint32Array(item)) : undefined
+      };
+    }
+    return {
+      numTargets: Math.max(0, Math.floor(parsed.numTargets ?? 0)),
+      numVertices: Math.max(0, Math.floor(parsed.numVertices ?? 0)),
+      targets
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeNodePath(path: string) {
+  return path.replace(/\\/g, '/').split('/').filter(Boolean).join('/');
+}
+
+function getNodePathCandidates(path: string) {
+  const normalized = normalizeNodePath(path);
+  const candidates = [normalized];
+  if (normalized.endsWith('Shape')) {
+    candidates.push(normalized.slice(0, -'Shape'.length));
+  }
+  const parts = normalized.split('/');
+  const last = parts[parts.length - 1] ?? '';
+  if (last.endsWith('Shape') && parts.length > 1) {
+    parts[parts.length - 1] = last.slice(0, -'Shape'.length);
+    candidates.push(parts.join('/'));
+    parts.pop();
+    candidates.push(parts.join('/'));
+  }
+  return candidates.filter((value, index, array) => !!value && array.indexOf(value) === index);
+}
+
+function getAssetNodePath(node: Pick<AssetHierarchyNode, 'name' | 'parent'>) {
+  const segments: string[] = [];
+  let current: Pick<AssetHierarchyNode, 'name' | 'parent'> | null | undefined = node;
+  while (current) {
+    if (current.name) {
+      segments.push(current.name);
+    }
+    current = current.parent;
+  }
+  return normalizeNodePath(segments.reverse().join('/'));
+}
+
+function resolveMorphSource(nodes: AssetHierarchyNode[], source: MorphSourceDescriptor) {
+  if (!source.nodePath || !source.subMeshName) {
+    return null;
+  }
+  for (const candidatePath of getNodePathCandidates(source.nodePath)) {
+    for (const node of nodes) {
+      const mesh = node?.mesh;
+      if (!mesh || getAssetNodePath(node) !== candidatePath) {
+        continue;
+      }
+      const subMesh = mesh.subMeshes.find((item) => item.name === source.subMeshName);
+      if (subMesh) {
+        return { node, mesh, subMesh };
+      }
+    }
+  }
+  return null;
+}
+
 /** @internal */
-export function getMeshClass(): SerializableClass {
+export function getMeshClass(manager?: ResourceManager): SerializableClass {
   return {
     ctor: Mesh,
     name: 'Mesh',
@@ -136,7 +269,7 @@ export function getMeshClass(): SerializableClass {
           },
           async get(this: Mesh, value) {
             const morphData = this.getMorphData();
-            if (morphData) {
+            if (morphData && !this.getMorphSource()) {
               const buffer = new ArrayBuffer(4 + 4 + 4 * 4 * morphData.width * morphData.height);
               const dataView = new DataView(buffer);
               dataView.setUint32(0, morphData.width, true);
@@ -158,6 +291,76 @@ export function getMeshClass(): SerializableClass {
             } else {
               this.setMorphData(null);
             }
+          }
+        },
+        {
+          name: 'MorphSource',
+          description: 'External morph-target source reference',
+          type: 'string',
+          phase: 1,
+          isHidden() {
+            return true;
+          },
+          get(this: Mesh, value) {
+            value.str[0] = this.getMorphSource() ? JSON.stringify(this.getMorphSource()) : '';
+          },
+          async set(this: Mesh, value) {
+            if (!value.str[0]) {
+              this.setMorphSource(null);
+              return;
+            }
+            const source = JSON.parse(value.str[0]) as MorphSourceDescriptor;
+            this.setMorphSource(source);
+            const resourceManager = manager ?? getEngine().resourceManager;
+            const sourceModel = await resourceManager.assetManager.fetchModelData(source.sourcePath);
+            const resolved = resolveMorphSource(sourceModel.nodes, source);
+            if (!resolved) {
+              throw new Error(
+                `Morph source not found: ${source.sourcePath}#${source.nodePath}/${source.subMeshName}`
+              );
+            }
+            const { node: sourceNode, mesh: sourceMesh, subMesh: sourceSubMesh } = resolved;
+            if (!this.getMorphInfo()) {
+              applyMeshMorphMetadata(
+                sourceSubMesh,
+                this,
+                sourceNode.weights ?? sourceMesh.morphWeights,
+                sourceMesh.morphNames
+              );
+            }
+            const expectedVertexCount = sourceSubMesh.primitive?.vertices['position']
+              ? (sourceSubMesh.primitive.vertices['position'].data.length / 3) >> 0
+              : 0;
+            if (
+              this.primitive &&
+              expectedVertexCount > 0 &&
+              this.primitive.getNumVertices() > 0 &&
+              this.primitive.getNumVertices() !== expectedVertexCount
+            ) {
+              throw new Error(
+                `Morph source vertex count mismatch: expected ${expectedVertexCount}, got ${this.primitive.getNumVertices()}`
+              );
+            }
+            applyMeshMorphData(sourceSubMesh, this);
+          }
+        },
+        {
+          name: 'MorphSourceData',
+          description: 'Serialized CPU-side morph-target source data',
+          type: 'string',
+          isHidden() {
+            return true;
+          },
+          get(this: Mesh, value) {
+            const sourceData = this.getMorphSourceData();
+            value.str[0] = sourceData && !this.getMorphSource() ? serializeMorphSourceData(sourceData) : '';
+          },
+          set(this: Mesh, value) {
+            if (!value.str[0]) {
+              this.setMorphSourceData(null);
+              return;
+            }
+            this.setMorphSourceData(deserializeMorphSourceData(value.str[0]));
           }
         },
         {

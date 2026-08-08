@@ -20,7 +20,7 @@ import type {
   VertexSemantic
 } from '@zephyr3d/device';
 import { getVertexFormatComponentCount } from '@zephyr3d/device';
-import { Mesh } from '../scene/mesh';
+import { Mesh, type MorphTargetSourceData } from '../scene/mesh';
 import { BoundingBox } from '../utility/bounding_volume';
 import type { ColliderR } from '../animation/joint_dynamics/types';
 import type { ControllerConfig } from '../animation/joint_dynamics/controller';
@@ -317,7 +317,7 @@ export interface AssetSubMeshData {
   rawJointWeights: Nullable<TypedArray>;
   name: string;
   numTargets: number;
-  targets?: Partial<Record<number, { numComponents: number; data: Float32Array[] }>>;
+  targets?: Partial<Record<number, { numComponents: number; data: Float32Array[]; indices?: Uint32Array[] }>>;
   targetBox?: BoundingBox[];
   morphAttribCount?: number;
 }
@@ -2634,6 +2634,104 @@ export class SharedModel extends Disposable {
   }
 }
 
+/**
+ * Applies morph metadata without allocating the potentially very large GPU texture.
+ * @public
+ */
+export function applyMeshMorphMetadata(
+  subMesh: AssetSubMeshData,
+  mesh: Mesh,
+  morphWeights?: Nullable<number[]>,
+  morphNames?: Nullable<string[]>
+) {
+  const declaredTargets = Math.max(0, Math.floor(subMesh.numTargets));
+  if (declaredTargets === 0 || !subMesh.targets || !subMesh.targetBox || !subMesh.primitive) {
+    return;
+  }
+  const numTargets = Math.min(declaredTargets, MAX_MORPH_TARGETS);
+  if (numTargets !== declaredTargets) {
+    console.warn(
+      `Morph target count truncated from ${declaredTargets} to ${numTargets} for mesh "${subMesh.name ?? mesh.name ?? ''}"`
+    );
+  }
+  const positionInfo = subMesh.primitive.vertices['position'];
+  const numVertices = positionInfo
+    ? (positionInfo.data.length / getVertexFormatComponentCount(positionInfo.format)) >> 0
+    : 0;
+  const weightsAndOffsets = new Float32Array(4 + MAX_MORPH_TARGETS + MAX_MORPH_ATTRIBUTES);
+  for (let index = 0; index < numTargets; index++) {
+    weightsAndOffsets[4 + index] = morphWeights?.[index] ?? 0;
+  }
+  weightsAndOffsets[0] = Math.ceil(Math.sqrt(numVertices * Object.keys(subMesh.targets).length * numTargets));
+  weightsAndOffsets[1] = weightsAndOffsets[0];
+  weightsAndOffsets[2] = numVertices;
+  weightsAndOffsets[3] = numTargets;
+  let offset = 0;
+  for (let attrib = 0; attrib < MAX_MORPH_ATTRIBUTES; attrib++) {
+    const info = subMesh.targets[attrib];
+    if (!info) {
+      weightsAndOffsets[4 + MAX_MORPH_TARGETS + attrib] = -1;
+      continue;
+    }
+    if (info.data.length < numTargets) {
+      console.error(`Invalid morph target data`);
+      return;
+    }
+    weightsAndOffsets[4 + MAX_MORPH_TARGETS + attrib] = offset >> 2;
+    offset += numVertices * 4 * numTargets;
+  }
+  const names: Record<string, number> = {};
+  for (let index = 0; index < numTargets; index++) {
+    names[morphNames?.[index] ?? `Target${index}`] = index;
+  }
+  mesh.setMorphInfo({ data: weightsAndOffsets, names });
+  const meshBoundingBox = mesh.getBoundingVolume()?.toAABB();
+  if (meshBoundingBox && subMesh.targetBox.length >= numTargets) {
+    mesh.setMorphBoundingInfo({
+      targetBoxes: subMesh.targetBox.slice(0, numTargets),
+      originBox: new BoundingBox(meshBoundingBox)
+    });
+  }
+}
+
+/** Creates CPU-side morph source data from an imported submesh. @public */
+export function createMorphSourceDataFromSubMesh(subMesh: AssetSubMeshData): Nullable<MorphTargetSourceData> {
+  const numTargets = Math.min(Math.max(0, Math.floor(subMesh.numTargets)), MAX_MORPH_TARGETS);
+  if (numTargets === 0 || !subMesh.targets || !subMesh.primitive) {
+    return null;
+  }
+  const positionInfo = subMesh.primitive.vertices['position'];
+  const numVertices = positionInfo
+    ? (positionInfo.data.length / getVertexFormatComponentCount(positionInfo.format)) >> 0
+    : 0;
+  const targets: MorphTargetSourceData['targets'] = {};
+  for (const [attribKey, info] of Object.entries(subMesh.targets)) {
+    const attrib = Number(attribKey);
+    if (!info || !Number.isInteger(attrib) || attrib < 0 || attrib >= MAX_MORPH_ATTRIBUTES) {
+      continue;
+    }
+    if (info.data.length < numTargets) {
+      console.error(`Invalid morph target data`);
+      return null;
+    }
+    targets[attrib] = {
+      numComponents: info.numComponents,
+      data: info.data.slice(0, numTargets),
+      indices: info.indices?.slice(0, numTargets)
+    };
+  }
+  return { numTargets, numVertices, targets };
+}
+
+/** Applies CPU-side morph source data and lets Mesh choose a full or compact GPU texture. @public */
+export function applyMeshMorphData(subMesh: AssetSubMeshData, mesh: Mesh) {
+  const sourceData = createMorphSourceDataFromSubMesh(subMesh);
+  mesh.setMorphSourceData(sourceData);
+  if (!sourceData) {
+    mesh.setMorphData(null);
+  }
+}
+
 /** @internal */
 function processMorphData(
   subMesh: AssetSubMeshData,
@@ -2641,72 +2739,11 @@ function processMorphData(
   morphWeights?: Nullable<number[]>,
   morphNames?: Nullable<string[]>
 ) {
-  const device = getDevice();
-  const numTargets = subMesh.numTargets;
-  if (numTargets === 0) {
+  if (subMesh.numTargets === 0) {
     return;
   }
-  const attributes = Object.getOwnPropertyNames(subMesh.targets);
-  const positionInfo = subMesh.primitive!.vertices['position'];
-  const numVertices = positionInfo
-    ? (positionInfo.data.length / getVertexFormatComponentCount(positionInfo.format)) >> 0
-    : 0;
-  const weightsAndOffsets = new Float32Array(4 + MAX_MORPH_TARGETS + MAX_MORPH_ATTRIBUTES);
-  for (let i = 0; i < numTargets; i++) {
-    weightsAndOffsets[4 + i] = morphWeights?.[i] ?? 0;
-  }
-  const textureSize = Math.ceil(Math.sqrt(numVertices * attributes.length * numTargets));
-  if (textureSize > device.getDeviceCaps().textureCaps.maxTextureSize) {
-    // TODO: reduce morph attributes
-    throw new Error(`Morph target data too large`);
-  }
-  weightsAndOffsets[0] = textureSize;
-  weightsAndOffsets[1] = textureSize;
-  weightsAndOffsets[2] = numVertices;
-  weightsAndOffsets[3] = numTargets;
-  let offset = 0;
-  const textureData = new Float32Array(textureSize * textureSize * 4);
-  for (let attrib = 0; attrib < MAX_MORPH_ATTRIBUTES; attrib++) {
-    const index = attributes.indexOf(String(attrib));
-    if (index < 0) {
-      weightsAndOffsets[4 + MAX_MORPH_TARGETS + attrib] = -1;
-      continue;
-    }
-    weightsAndOffsets[4 + MAX_MORPH_TARGETS + attrib] = offset >> 2;
-    const info = subMesh.targets![attrib]!;
-    if (info.data.length !== numTargets) {
-      console.error(`Invalid morph target data`);
-      return;
-    }
-    for (let t = 0; t < numTargets; t++) {
-      const data = info.data[t];
-      for (let i = 0; i < numVertices; i++) {
-        for (let j = 0; j < 4; j++) {
-          textureData[offset++] = j < info.numComponents ? data[i * info.numComponents + j] : 1;
-        }
-      }
-    }
-  }
-  const morphBoundingBox = new BoundingBox();
-  calculateMorphBoundingBox(
-    morphBoundingBox,
-    subMesh.targetBox!,
-    weightsAndOffsets.subarray(4, 4 + MAX_MORPH_TARGETS),
-    numTargets
-  );
-  const meshAABB = mesh.getBoundingVolume()!.toAABB();
-  morphBoundingBox.minPoint.addBy(meshAABB.minPoint);
-  morphBoundingBox.maxPoint.addBy(meshAABB.maxPoint);
-
-  const names: Record<string, number> = {};
-  for (let i = 0; i < numTargets; i++) {
-    const name = morphNames?.[i] ?? `Target${i}`;
-    names[name] = i;
-  }
-  mesh.setMorphData({ width: textureSize, height: textureSize, data: textureData });
-  mesh.setMorphInfo({ data: weightsAndOffsets, names });
-  mesh.setMorphBoundingInfo({ targetBoxes: subMesh.targetBox!, originBox: new BoundingBox(meshAABB) });
-  mesh.setAnimatedBoundingBox(morphBoundingBox);
+  applyMeshMorphMetadata(subMesh, mesh, morphWeights, morphNames);
+  applyMeshMorphData(subMesh, mesh);
 }
 
 /** @internal */
@@ -2715,31 +2752,10 @@ function getAssetMeshMorphTargetCount(mesh: AssetMeshData): number {
   for (const subMesh of mesh.subMeshes) {
     count = Math.max(count, subMesh.numTargets);
   }
-  return count;
+  return Math.min(count, MAX_MORPH_TARGETS);
 }
 
 /** @internal */
 function getAssetMeshMorphTargetName(mesh: AssetMeshData, index: number): string {
   return mesh.morphNames?.[index] ?? `Target${index}`;
-}
-
-/** @internal */
-function calculateMorphBoundingBox(
-  morphBoundingBox: BoundingBox,
-  keyframeBoundingBox: BoundingBox[],
-  weights: Float32Array,
-  numTargets: number
-) {
-  morphBoundingBox.minPoint.setXYZ(0, 0, 0);
-  morphBoundingBox.maxPoint.setXYZ(0, 0, 0);
-  for (let i = 0; i < numTargets; i++) {
-    const weight = weights[i];
-    const keyframeBox = keyframeBoundingBox[i];
-    morphBoundingBox.minPoint.x += keyframeBox.minPoint.x * weight;
-    morphBoundingBox.minPoint.y += keyframeBox.minPoint.y * weight;
-    morphBoundingBox.minPoint.z += keyframeBox.minPoint.z * weight;
-    morphBoundingBox.maxPoint.x += keyframeBox.maxPoint.x * weight;
-    morphBoundingBox.maxPoint.y += keyframeBox.maxPoint.y * weight;
-    morphBoundingBox.maxPoint.z += keyframeBox.maxPoint.z * weight;
-  }
 }
