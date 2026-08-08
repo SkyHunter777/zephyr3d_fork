@@ -7,6 +7,7 @@ import {
   MToonMaterial,
   ParticleMaterial,
   PBRBluePrintMaterial,
+  PBRBluePrintMaterialInstance,
   PBRMetallicRoughnessMaterial,
   PBRSpecularGlossinessMaterial,
   SkinMaterial,
@@ -1742,6 +1743,64 @@ export function getPBRBluePrintMaterialClass(): SerializableClass[] {
       }
     },
     getMeshMaterialInstanceUniformsClass(PBRBluePrintMaterial)
+  ];
+}
+
+/** @internal */
+export function getPBRBluePrintMaterialInstanceClass(): SerializableClass[] {
+  return [
+    {
+      ctor: PBRBluePrintMaterialInstance,
+      parent: PBRBluePrintMaterial,
+      name: 'PBRBluePrintMaterialInstance',
+      getProps() {
+        return defineProps([
+          {
+            name: 'SubsurfaceMeanFreePathColor',
+            description: 'Per-instance mean-free-path color override for lab blueprint materials',
+            type: 'rgb',
+            get(this: PBRBluePrintMaterialInstance, value) {
+              const color = this.subsurfaceProfile?.meanFreePathColor ?? Vector3.one();
+              value.num[0] = color.x;
+              value.num[1] = color.y;
+              value.num[2] = color.z;
+            },
+            set(this: PBRBluePrintMaterialInstance, value) {
+              this.setBlueprintInstanceSubsurfaceProfileValue(
+                'SubsurfaceMeanFreePathColor',
+                'meanFreePathColor',
+                new Vector3(value.num[0], value.num[1], value.num[2])
+              );
+            },
+            isPersistent(this: PBRBluePrintMaterialInstance) {
+              return this.isMaterialPropertyOverridden('SubsurfaceMeanFreePathColor');
+            }
+          },
+          {
+            name: 'SubsurfaceTransmissionTintColor',
+            description: 'Per-instance transmission tint override for lab blueprint materials',
+            type: 'rgb',
+            get(this: PBRBluePrintMaterialInstance, value) {
+              const color = this.subsurfaceProfile?.transmissionTintColor ?? Vector3.one();
+              value.num[0] = color.x;
+              value.num[1] = color.y;
+              value.num[2] = color.z;
+            },
+            set(this: PBRBluePrintMaterialInstance, value) {
+              this.setBlueprintInstanceSubsurfaceProfileValue(
+                'SubsurfaceTransmissionTintColor',
+                'transmissionTintColor',
+                new Vector3(value.num[0], value.num[1], value.num[2])
+              );
+            },
+            isPersistent(this: PBRBluePrintMaterialInstance) {
+              return this.isMaterialPropertyOverridden('SubsurfaceTransmissionTintColor');
+            }
+          }
+        ]);
+      }
+    },
+    getMeshMaterialInstanceUniformsClass(PBRBluePrintMaterialInstance)
   ];
 }
 

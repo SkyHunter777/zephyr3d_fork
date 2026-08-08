@@ -33,7 +33,12 @@ import type { Scene } from '../scene/scene';
 import type { AbstractTextureLoader } from './loaders/loader';
 import { TGALoader } from './loaders/image/tga_Loader';
 import { getDevice, getEngine } from '../app/api';
-import { Material, PBRBluePrintMaterial, SpriteBlueprintMaterial } from '../material';
+import {
+  Material,
+  PBRBluePrintMaterial,
+  PBRBluePrintMaterialInstance,
+  SpriteBlueprintMaterial
+} from '../material';
 import type {
   BluePrintEditorState,
   BluePrintUniformTexture,
@@ -45,6 +50,7 @@ import type {
 } from '../utility';
 import { BoundingBox } from '../utility/bounding_volume';
 import { MaterialBlueprintIR } from '../utility/blueprint/material/ir';
+import { getDefaultTexture2D } from '../utility/blueprint/material/texture';
 import type { Skeleton } from '../animation';
 import { Primitive } from '../render';
 import { FontAsset } from '../text';
@@ -785,14 +791,82 @@ export class AssetManager {
     const materials = await Promise.all(promises);
     for (let i = 0; i < materials.length; i++) {
       const m = materials[i];
-      if (m instanceof PBRBluePrintMaterial && (!filter || filter(m))) {
+      if (
+        m instanceof PBRBluePrintMaterial &&
+        !(m instanceof PBRBluePrintMaterialInstance) &&
+        (!filter || filter(m))
+      ) {
+        const content = JSON.parse(
+          (await this.readFileFromVFS(paths[i], { encoding: 'utf8' })) as string
+        ) as { type: string; props?: Record<string, unknown> };
         const data = await this.loadBluePrintMaterialData(paths[i], true);
         if (data) {
           m.fragmentIR = data.irFragment!;
           m.vertexIR = data.irVertex!;
           m.uniformValues = data.uniformValues;
           m.uniformTextures = data.uniformTextures;
+          if (content.type === 'PBRBluePrintMaterial' && content.props) {
+            await this._resourceManager.deserializeObjectProps(m, content.props);
+          }
         }
+      }
+    }
+    type InstanceReloadEntry = {
+      material: PBRBluePrintMaterialInstance;
+      path: string;
+      content: {
+        props?: Record<string, unknown>;
+        data: {
+          parent: string;
+          uniformValues?: BluePrintUniformValue[];
+          uniformTextures?: BluePrintUniformTexture[];
+        };
+      };
+    };
+    const instanceEntries: InstanceReloadEntry[] = [];
+    for (let i = 0; i < materials.length; i++) {
+      const material = materials[i];
+      if (material instanceof PBRBluePrintMaterialInstance && (!filter || filter(material))) {
+        const content = JSON.parse(
+          (await this.readFileFromVFS(paths[i], { encoding: 'utf8' })) as string
+        ) as InstanceReloadEntry['content'] & { type: string };
+        if (content.type === 'PBRBluePrintMaterialInstance' && content.data?.parent) {
+          instanceEntries.push({ material, path: paths[i], content });
+        }
+      }
+    }
+    const entriesByPath = new Map(instanceEntries.map((entry) => [entry.path, entry]));
+    const depths = new Map<InstanceReloadEntry, number>();
+    const getDepth = (entry: InstanceReloadEntry, visiting = new Set<InstanceReloadEntry>()): number => {
+      const known = depths.get(entry);
+      if (known !== undefined) {
+        return known;
+      }
+      if (visiting.has(entry)) {
+        return 0;
+      }
+      visiting.add(entry);
+      const parentEntry = entriesByPath.get(entry.content.data.parent);
+      const depth = parentEntry ? getDepth(parentEntry, visiting) + 1 : 0;
+      visiting.delete(entry);
+      depths.set(entry, depth);
+      return depth;
+    };
+    instanceEntries.sort((a, b) => getDepth(a) - getDepth(b));
+    for (const entry of instanceEntries) {
+      const { material, content } = entry;
+      const parent = await this.fetchMaterial<PBRBluePrintMaterial>(content.data.parent);
+      if (!(parent instanceof PBRBluePrintMaterial)) {
+        continue;
+      }
+      material.resetMaterialPropertyOverrides(Object.keys(content.props ?? {}));
+      material.setParentMaterial(parent, content.data.parent);
+      material.setOverrides(
+        content.data.uniformValues ?? [],
+        await this.hydrateBluePrintUniformTextures(content.data.uniformTextures ?? [])
+      );
+      if (content.props) {
+        await this._resourceManager.deserializeObjectProps(material, content.props);
       }
     }
   }
@@ -831,26 +905,7 @@ export class AssetManager {
         ...v,
         finalValue: v.value.length === 1 ? v.value[0] : new Float32Array(v.value)
       }));
-      const uniformTextures: BluePrintUniformTexture[] = [];
-      const textures = irData.uniformTextures;
-      for (const v of textures) {
-        const tex = await this.fetchTexture(v.texture, {
-          linearColorSpace: !v.sRGB,
-          overrideVFS: vfs
-        });
-        uniformTextures.push({
-          ...v,
-          finalTexture: new DRef(tex),
-          finalSampler: getDevice().createSampler({
-            addressU: v.wrapS as TextureAddressMode,
-            addressV: v.wrapT as TextureAddressMode,
-            minFilter: v.minFilter as TextureFilterMode,
-            magFilter: v.magFilter as TextureFilterMode,
-            mipFilter: v.mipFilter as TextureFilterMode
-          }),
-          params: tex ? new Vector4(tex.width, tex.height, tex.depth, tex.mipLevelCount) : Vector4.zero()
-        });
-      }
+      const uniformTextures = await this.hydrateBluePrintUniformTextures(irData.uniformTextures, vfs);
       return {
         irFragment: ir?.['fragment'] ?? null,
         irVertex: ir?.['vertex'] ?? null,
@@ -882,6 +937,7 @@ export class AssetManager {
       const content = JSON.parse(data) as { type: string; props: any; data: any };
       ASSERT(
         content.type === 'PBRBluePrintMaterial' ||
+          content.type === 'PBRBluePrintMaterialInstance' ||
           content.type === 'SpriteBluePrintMaterial' ||
           content.type === 'Default',
         `Unsupported material type: ${content.type}`
@@ -903,6 +959,22 @@ export class AssetManager {
           data.uniformValues,
           data.uniformTextures
         ) as unknown as T;
+      } else if (content.type === 'PBRBluePrintMaterialInstance') {
+        const parentMaterial = await this.fetchMaterial<PBRBluePrintMaterial>(
+          content.data.parent,
+          vfs ? { overrideVFS: vfs } : undefined
+        );
+        ASSERT(
+          parentMaterial instanceof PBRBluePrintMaterial,
+          `Invalid parent blueprint material: ${String(content.data.parent)}`
+        );
+        const instance = new PBRBluePrintMaterialInstance(parentMaterial, content.data.parent);
+        instance.resetMaterialPropertyOverrides(Object.keys(content.props ?? {}));
+        instance.setOverrides(
+          content.data.uniformValues ?? [],
+          await this.hydrateBluePrintUniformTextures(content.data.uniformTextures ?? [], vfs)
+        );
+        mat = instance as unknown as T;
       } else if (content.type === 'SpriteBluePrintMaterial') {
         const data = (await this.loadBluePrintMaterialData(
           content.data as {
@@ -936,6 +1008,41 @@ export class AssetManager {
       console.error(`Load material failed: ${err}`);
       return null;
     }
+  }
+
+  private async hydrateBluePrintUniformTextures(
+    textures: BluePrintUniformTexture[],
+    vfs?: VFS
+  ): Promise<BluePrintUniformTexture[]> {
+    return Promise.all(
+      (textures ?? []).map(async (value) => {
+        let texture: Nullable<BaseTexture> = null;
+        if (value.texture) {
+          try {
+            texture = await this.fetchTexture(value.texture, {
+              linearColorSpace: !value.sRGB,
+              overrideVFS: vfs
+            });
+          } catch (err) {
+            console.warn(`Load blueprint texture failed: ${value.texture}: ${String(err)}`);
+          }
+        }
+        texture = texture ?? getDefaultTexture2D();
+        return {
+          ...value,
+          exposed: value.exposed ?? true,
+          finalTexture: new DRef(texture),
+          finalSampler: getDevice().createSampler({
+            addressU: value.wrapS as TextureAddressMode,
+            addressV: value.wrapT as TextureAddressMode,
+            minFilter: value.minFilter as TextureFilterMode,
+            magFilter: value.magFilter as TextureFilterMode,
+            mipFilter: value.mipFilter as TextureFilterMode
+          }),
+          params: new Vector4(texture.width, texture.height, texture.depth, texture.mipLevelCount)
+        };
+      })
+    );
   }
   private rebuildGraphStructure(
     nodes: Record<number, IGraphNode>,

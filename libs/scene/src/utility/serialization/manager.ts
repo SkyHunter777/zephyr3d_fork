@@ -24,6 +24,7 @@ import {
   getPBRSpecularGlossinessMaterialClass,
   getParticleMaterialClass,
   getPBRBluePrintMaterialClass,
+  getPBRBluePrintMaterialInstanceClass,
   getSpriteMaterialClass,
   getSpriteBlueprintMaterialClass,
   getStandardSpriteMaterialClass
@@ -317,6 +318,7 @@ export class ResourceManager {
         getSubsurfaceProfileClass(),
         ...getMeshMaterialClass(),
         ...getPBRBluePrintMaterialClass(),
+        ...getPBRBluePrintMaterialInstanceClass(),
         ...getSpriteBlueprintMaterialClass(),
         ...getUnlitMaterialClass(this),
         ...getMToonMaterialClass(this),
@@ -1277,6 +1279,14 @@ export class ResourceManager {
         continue;
       }
       const k = prop.name;
+      // Blueprint material assets inherit unspecified properties from their parent material.
+      // Applying the regular class default here would silently replace that inherited state.
+      if (
+        (obj as { isBlueprintMaterialInstance?: boolean }).isBlueprintMaterialInstance &&
+        !Object.prototype.hasOwnProperty.call(json, k)
+      ) {
+        continue;
+      }
       const v = json[k] ?? this.getDefaultValue(obj, prop);
       const tmpVal: RequireOptionals<PropertyValue> = {
         num: [0, 0, 0, 0],

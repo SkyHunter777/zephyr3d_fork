@@ -138,6 +138,8 @@ export interface IRUniformTexture {
  * @public
  */
 export interface BluePrintUniformTexture extends IRUniformTexture {
+  /** Whether the texture parameter is exposed to material-instance authoring tools. */
+  exposed?: boolean;
   inVertexShader: boolean;
   inFragmentShader: boolean;
   finalTexture?: Nullable<DRef<BaseTexture>>;
