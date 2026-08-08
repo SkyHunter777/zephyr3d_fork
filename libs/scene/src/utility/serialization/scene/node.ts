@@ -42,6 +42,112 @@ const geometryCacheBindings = new WeakMap<
   }
 >();
 
+function lowerFirst(value: string): string {
+  return value ? `${value[0].toLowerCase()}${value.slice(1)}` : value;
+}
+
+function unwrapLegacySerializableValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => unwrapLegacySerializableValue(item));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.ClassName === 'string' &&
+    record.Object &&
+    typeof record.Object === 'object' &&
+    !Array.isArray(record.Object)
+  ) {
+    return unwrapLegacySerializableValue(record.Object);
+  }
+  return Object.fromEntries(
+    Object.entries(record).map(([key, item]) => [lowerFirst(key), unwrapLegacySerializableValue(item)])
+  );
+}
+
+function normalizeLegacySpringGroup(value: unknown): Record<string, unknown> | null {
+  const unwrapped = unwrapLegacySerializableValue(value);
+  if (!unwrapped || typeof unwrapped !== 'object' || Array.isArray(unwrapped)) {
+    return null;
+  }
+  const group = { ...(unwrapped as Record<string, unknown>) };
+  if (!Object.prototype.hasOwnProperty.call(group, 'chainDamping') && 'damping' in group) {
+    group.chainDamping = group.damping;
+  }
+  if (!Object.prototype.hasOwnProperty.call(group, 'chainStiffness') && 'stiffness' in group) {
+    group.chainStiffness = group.stiffness;
+  }
+  if (!Object.prototype.hasOwnProperty.call(group, 'chains') && Array.isArray(group.boneChains)) {
+    group.chains = group.boneChains;
+  }
+  delete group.damping;
+  delete group.stiffness;
+  delete group.boneChains;
+  return group;
+}
+
+function normalizeLegacySpringScriptConfig(value: unknown): Record<string, unknown> | null {
+  const config = normalizeLegacySpringGroup(value);
+  if (!config) {
+    return null;
+  }
+  config.__editorPluginType ??= 'springtest';
+  if (Array.isArray(config.groups)) {
+    config.groups = config.groups
+      .map((group) => normalizeLegacySpringGroup(group))
+      .filter((group): group is Record<string, unknown> => !!group);
+  }
+  if (!Array.isArray(config.colliders)) {
+    const offset = config.colliderOffset;
+    const radius = config.colliderRadius;
+    if (Array.isArray(offset) && offset.length >= 3 && typeof radius === 'number') {
+      config.colliders = [
+        {
+          type: 'sphere',
+          enabled: true,
+          bone: '',
+          offsetX: offset[0],
+          offsetY: offset[1],
+          offsetZ: offset[2],
+          radius
+        }
+      ];
+    }
+  }
+  delete config.colliderOffset;
+  delete config.colliderRadius;
+  return config;
+}
+
+function normalizeSceneNodeProps(props: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const hasLegacyScript =
+    Object.prototype.hasOwnProperty.call(props, 'BuiltInScript') ||
+    Object.prototype.hasOwnProperty.call(props, 'SpringConfig');
+  if (!hasLegacyScript) {
+    return props as Record<string, unknown>;
+  }
+  const normalized = { ...props };
+  if (
+    !Object.prototype.hasOwnProperty.call(normalized, 'Script') &&
+    typeof normalized.BuiltInScript === 'string' &&
+    normalized.BuiltInScript
+  ) {
+    normalized.Script = normalized.BuiltInScript;
+  }
+  if (
+    !Object.prototype.hasOwnProperty.call(normalized, 'ScriptConfig') &&
+    Object.prototype.hasOwnProperty.call(normalized, 'SpringConfig')
+  ) {
+    const config = normalizeLegacySpringScriptConfig(normalized.SpringConfig);
+    if (config) {
+      normalized.ScriptConfig = config;
+    }
+  }
+  return normalized;
+}
+
 function normalizeSerializedSceneNodeData(data: DiffValue): Record<string, unknown> {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     return {
@@ -109,6 +215,7 @@ export function getSceneNodeClass(manager: ResourceManager): SerializableClass {
   return {
     ctor: SceneNode,
     name: 'SceneNode',
+    normalizeProps: normalizeSceneNodeProps,
     async createFunc(
       ctx: Scene | SceneNode,
       init?: { prefabId?: string; assetId?: string; patch?: DiffPatch }
