@@ -12,6 +12,7 @@ import type {
   RGFramebufferDesc
 } from '../../../libs/scene/src/render/rendergraph';
 import type { AbstractDevice, TimestampQueryOptions, TimestampQueryResult } from '@zephyr3d/device';
+import { BaseDevice } from '../../../libs/device/src/device';
 import { Pool } from '../../../libs/device/src/pool';
 
 // ─── Mock Allocator ──────────────────────────────────────────────────
@@ -1837,7 +1838,7 @@ describe('RenderGraphExecutor', () => {
   });
 });
 
-describe('Pool preferred transient allocation', () => {
+describe('Pool transient allocation', () => {
   test('takes the preferred matching texture instead of the stack top', () => {
     let nextId = 0;
     const device = {
@@ -1851,5 +1852,70 @@ describe('Pool preferred transient allocation', () => {
     pool.releaseTexture(second);
 
     expect(pool.fetchTemporalTexture2D(false, 'rgba8unorm', 16, 16, false, first)).toBe(first);
+  });
+
+  test('purging a free framebuffer preserves independently retained attachments', () => {
+    let nextId = 0;
+    const textureDispose = jest.fn();
+    const framebufferDispose = jest.fn();
+    const device = {
+      createTexture2D: () => ({ id: nextId++, uid: nextId, memCost: 1, dispose: textureDispose }),
+      createFrameBuffer: (colors: unknown[], depth: unknown) => ({
+        getColorAttachments: () => colors,
+        getDepthAttachment: () => depth,
+        setColorAttachmentMipLevel: jest.fn(),
+        setColorAttachmentCubeFace: jest.fn(),
+        setColorAttachmentLayer: jest.fn(),
+        dispose: framebufferDispose
+      }),
+      getGPUObjects: () => ({ stacks: new WeakMap() })
+    } as any;
+    const pool = new Pool(device, 'rendergraph-test');
+    const texture = pool.fetchTemporalTexture2D(false, 'rgba8unorm', 16, 16);
+    const framebuffer = pool.createTemporalFramebuffer(false, [texture]);
+
+    // Leave one independent history-style reference after the graph-owned
+    // framebuffer and texture references are released.
+    pool.retainTexture(texture);
+    pool.releaseFrameBuffer(framebuffer);
+    pool.releaseTexture(texture);
+
+    pool.purge();
+
+    expect(framebufferDispose).toHaveBeenCalledTimes(1);
+    expect(textureDispose).not.toHaveBeenCalled();
+
+    pool.releaseTexture(texture);
+    pool.purge();
+    expect(textureDispose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('BaseDevice resize cleanup', () => {
+  test('purges cached resources only when the normalized drawing-buffer size changes', () => {
+    const events: string[] = [];
+    const canvas = { width: 100, height: 50 };
+    const purge = jest.fn(() => events.push('purge'));
+    const handleResize = jest.fn(
+      (_cssWidth: number, _cssHeight: number, deviceWidth: number, deviceHeight: number) => {
+        events.push('resize');
+        canvas.width = deviceWidth;
+        canvas.height = deviceHeight;
+      }
+    );
+    const device = {
+      _canvas: canvas,
+      _poolMap: new Map([['default', { purge }]]),
+      _handleResize: handleResize
+    };
+    const applyResize = (BaseDevice.prototype as any)._applyResize;
+
+    applyResize.call(device, 100.4, 50.4, 100.4, 50.4);
+    expect(purge).not.toHaveBeenCalled();
+    expect(handleResize).not.toHaveBeenCalled();
+
+    applyResize.call(device, 100.6, 50.6, 100.6, 50.6);
+    expect(events).toEqual(['purge', 'resize']);
+    expect(handleResize).toHaveBeenCalledWith(100.6, 50.6, 101, 51);
   });
 });

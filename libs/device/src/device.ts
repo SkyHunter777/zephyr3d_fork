@@ -153,22 +153,10 @@ class ResizeHandler {
     const cssWidth = boxSize?.inlineSize ?? this._canvas.clientWidth;
     const cssHeight = boxSize?.blockSize ?? this._canvas.clientHeight;
 
-    // Device pixel
-    /*
-    let deviceWidth: number;
-    let deviceHeight: number;
-
-    const dpBox = (entry as any).devicePixelContentBoxSize?.[0];
-    if (dpBox) {
-      deviceWidth = dpBox.inlineSize;
-      deviceHeight = dpBox.blockSize;
-    } else {
-      deviceWidth = Math.round(cssWidth * this._dpr);
-      deviceHeight = Math.round(cssHeight * this._dpr);
-    }
-    */
-    const deviceWidth = cssWidth * this._dpr;
-    const deviceHeight = cssHeight * this._dpr;
+    // Canvas drawing-buffer dimensions are integers. Normalize here so
+    // subpixel CSS changes do not repeatedly rebuild equal-sized attachments.
+    const deviceWidth = Math.round(cssWidth * this._dpr);
+    const deviceHeight = Math.round(cssHeight * this._dpr);
 
     if (
       cssWidth === this._cssWidth &&
@@ -190,9 +178,8 @@ class ResizeHandler {
   private _handleLegacyResize = () => {
     const cssWidth = this._canvas.clientWidth;
     const cssHeight = this._canvas.clientHeight;
-    const dpr = window.devicePixelRatio || 1;
-    const deviceWidth = Math.round(cssWidth * dpr);
-    const deviceHeight = Math.round(cssHeight * dpr);
+    const deviceWidth = Math.round(cssWidth * this._dpr);
+    const deviceHeight = Math.round(cssHeight * this._dpr);
 
     if (
       cssWidth === this._cssWidth &&
@@ -901,11 +888,11 @@ export abstract class BaseDevice extends Observable<DeviceEventMap> {
       this.once(
         'resize',
         (cssWidth: number, cssHeight: number, deviceWidth: number, deviceHeight: number) => {
-          this._handleResize(cssWidth, cssHeight, deviceWidth, deviceHeight);
+          this._applyResize(cssWidth, cssHeight, deviceWidth, deviceHeight);
           this.on(
             'resize',
             (cssWidth: number, cssHeight: number, deviceWidth: number, deviceHeight: number) => {
-              this._handleResize(cssWidth, cssHeight, deviceWidth, deviceHeight);
+              this._applyResize(cssWidth, cssHeight, deviceWidth, deviceHeight);
             }
           );
           resolve();
@@ -913,6 +900,26 @@ export abstract class BaseDevice extends Observable<DeviceEventMap> {
       );
       this._resizer.init();
     });
+  }
+  /** @internal */
+  private _applyResize(
+    cssWidth: number,
+    cssHeight: number,
+    deviceWidth: number,
+    deviceHeight: number
+  ) {
+    const normalizedWidth = Math.max(0, Math.round(deviceWidth));
+    const normalizedHeight = Math.max(0, Math.round(deviceHeight));
+    if (this._canvas.width === normalizedWidth && this._canvas.height === normalizedHeight) {
+      return;
+    }
+
+    // Pool entries are keyed by exact dimensions. During interactive resize,
+    // nearly every frame has a unique size and is therefore not reusable. Trim
+    // those free resources before allocating the next size to keep WebGPU peak
+    // memory bounded and avoid an out-of-memory device loss.
+    this._poolMap.forEach((pool) => pool.purge());
+    this._handleResize(cssWidth, cssHeight, normalizedWidth, normalizedHeight);
   }
   private updateFrameInfo() {
     this._frameInfo.drawCalls = 0;

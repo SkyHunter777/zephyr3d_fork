@@ -10,7 +10,8 @@ import {
   SkeletonRig,
   SkinBinding,
   HumanoidBodyRig,
-  HumanoidHandRig
+  HumanoidHandRig,
+  BoundingBox
 } from '@zephyr3d/scene';
 
 jest.mock('@zephyr3d/scene/app/api', () => ({
@@ -195,6 +196,37 @@ function setHumanoidLateralBindPose(joints: SceneNode[], mirrored = false, forwa
 }
 
 describe('SkeletonRig and SkinBinding', () => {
+  test('computes conservative skinned bounds from the undeformed mesh bounds', () => {
+    const scene = new Scene();
+    const model = appendNode(scene.rootNode, 'model');
+    const root = appendNode(model, 'root');
+    const movingJoint = appendNode(root, 'moving');
+    movingJoint.position.setXYZ(10, 0, 0);
+
+    const joints = [root, movingJoint];
+    const binding = new SkinBinding(new SkeletonRig(joints, bindPose(joints)), inverseBind(joints));
+    const sampledBounds = {
+      influenceCount: 1,
+      boundingVertexBlendIndices: new Float32Array(6),
+      boundingVertexJointWeights: new Float32Array(6).fill(1),
+      boundingVertices: Array.from({ length: 6 }, () => Vector3.zero()),
+      boundingBox: new BoundingBox()
+    };
+
+    (binding as any).computeBoundingBox(sampledBounds, Matrix4x4.identity());
+    expect(sampledBounds.boundingBox.maxPoint.x).toBeCloseTo(0);
+
+    (binding as any).computeBoundingBox(
+      sampledBounds,
+      Matrix4x4.identity(),
+      new BoundingBox(new Vector3(-1, -1, -1), new Vector3(1, 1, 1))
+    );
+
+    expect(sampledBounds.boundingBox.minPoint.x).toBeCloseTo(-1);
+    expect(sampledBounds.boundingBox.maxPoint.x).toBeCloseTo(11);
+    expect(sampledBounds.boundingBox.containsPoint(new Vector3(10, 0, 0))).toBe(true);
+  });
+
   test('updates shared rig modifiers once while preserving multiple skin bindings', () => {
     const scene = new Scene();
     const model = appendNode(scene.rootNode, 'model');

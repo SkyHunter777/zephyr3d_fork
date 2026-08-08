@@ -397,7 +397,9 @@ export class Pool {
       const list = this._freeFramebuffers[k];
       if (list) {
         for (const fb of this._freeFramebuffers[k]) {
-          this.internalDisposeFrameBuffer(fb);
+          // Attachment references are released when the framebuffer enters the
+          // free list. Releasing them again here can drop an independent
+          // retained reference (for example, a render-graph history texture).
           fb.dispose();
         }
       }

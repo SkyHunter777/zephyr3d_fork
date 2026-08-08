@@ -1027,8 +1027,10 @@ export class Mesh extends MeshBase implements BatchDrawable {
     return bbox;
   }
   /** @internal */
-  private refreshAnimatedBoundingBox() {
-    this.setAnimatedBoundingBox(this.resolveAnimatedBoundingBox(this.calculateMorphBoundingBox()));
+  private refreshAnimatedBoundingBox(
+    morphBoundingBox: Nullable<BoundingBox> = this.calculateMorphBoundingBox()
+  ) {
+    this.setAnimatedBoundingBox(this.resolveAnimatedBoundingBox(morphBoundingBox));
   }
   /** @internal */
   private updateMorphState() {
@@ -1052,8 +1054,17 @@ export class Mesh extends MeshBase implements BatchDrawable {
     const binding = this._skinBindingName && this.findSkinBindingById(this._skinBindingName);
     if (binding) {
       this.setBoneMatrices(binding.jointTexture);
-      binding.computeBoundingBox(this._skinnedBoundingInfo!, this.invWorldMatrix);
-      this.refreshAnimatedBoundingBox();
+      const morphBoundingBox = this.calculateMorphBoundingBox();
+      const primitiveBoundingBox = this._primitive.get()?.getBoundingVolume()?.toAABB() ?? null;
+      const sourceBoundingBox = morphBoundingBox
+        ? (primitiveBoundingBox?.clone().union(morphBoundingBox) ?? morphBoundingBox)
+        : primitiveBoundingBox;
+      binding.computeBoundingBox(
+        this._skinnedBoundingInfo!,
+        this.invWorldMatrix,
+        sourceBoundingBox ?? undefined
+      );
+      this.refreshAnimatedBoundingBox(morphBoundingBox);
     } else {
       this.setBoneMatrices(null);
       this.refreshAnimatedBoundingBox();

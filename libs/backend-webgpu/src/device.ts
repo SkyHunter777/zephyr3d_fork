@@ -247,7 +247,7 @@ export class WebGPUDevice extends BaseDevice {
       console.info(` - ${feature}`);
     }
     this.device.lost.then((info) => {
-      console.error(`WebGPU device was lost: ${info.message}`);
+      console.error(`WebGPU device was lost (${info.reason}): ${info.message}`);
       this._canRender = false;
     });
     this._emptyBindGroup = this.device.createBindGroup({

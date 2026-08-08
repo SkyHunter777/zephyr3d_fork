@@ -1,4 +1,4 @@
-import { DRef, randomUUID, DWeakRef } from '@zephyr3d/base';
+import { AABB, DRef, randomUUID, DWeakRef } from '@zephyr3d/base';
 import type { Nullable, TypedArray } from '@zephyr3d/base';
 import { Quaternion } from '@zephyr3d/base';
 import { Disposable, Matrix4x4, Vector3, nextPowerOf2 } from '@zephyr3d/base';
@@ -101,6 +101,8 @@ export interface SkinnedBoundingBox {
 
 const tmpV0 = new Vector3();
 const tmpV1 = new Vector3();
+const tmpM0 = new Matrix4x4();
+const tmpBBox = new AABB();
 
 /**
  * Humanoid joint mapping
@@ -616,19 +618,41 @@ export class SkinBinding extends Disposable {
     this._playing = false;
   }
   /**
-   * Compute the animated bounding box for a single mesh using its representative vertices.
+   * Compute the animated bounding box for a single mesh.
    *
-   * For each representative vertex:
-   * - Blends the vertex by up to 4 joint matrices using provided weights.
-   * - Transforms to the mesh's local space using `invWorldMatrix`.
-   * - Expands the bounding box.
+   * When the undeformed mesh bounds are available, this transforms those bounds by every
+   * joint palette matrix and unions the results. This is deliberately conservative: every
+   * source vertex is inside the source bounds, and a normalized linear skinning result is a
+   * convex combination of its joint-transformed positions. Unlike the legacy six-vertex
+   * sampling path, the result therefore cannot miss a vertex that becomes an extremum after
+   * the pose changes.
+   *
+   * The representative-vertex path remains as a fallback for callers that do not have source
+   * mesh bounds.
    *
    * @param info - Precomputed bounding data (representative vertices, indices, weights).
    * @param invWorldMatrix - Mesh inverse world matrix to convert to model/local space.
+   * @param sourceBoundingBox - Optional undeformed mesh-local bounds used for conservative bounds.
    * @internal
    */
-  computeBoundingBox(info: SkinnedBoundingBox, invWorldMatrix: Matrix4x4) {
+  computeBoundingBox(info: SkinnedBoundingBox, invWorldMatrix: Matrix4x4, sourceBoundingBox?: AABB) {
     info.boundingBox.beginExtend();
+    if (sourceBoundingBox?.isValid()) {
+      const matrixOffset = this._jointOffsets[0] - 1;
+      for (let i = 0; i < this.joints.length; i++) {
+        const matrix = this._jointMatrices[i + matrixOffset];
+        if (!matrix) {
+          continue;
+        }
+        Matrix4x4.multiplyAffine(invWorldMatrix, matrix, tmpM0);
+        AABB.transform(sourceBoundingBox, tmpM0, tmpBBox);
+        info.boundingBox.union(tmpBBox);
+      }
+      if (info.boundingBox.isValid()) {
+        return;
+      }
+      info.boundingBox.beginExtend();
+    }
     const influenceCount = Math.max(1, info.influenceCount ?? 4);
     for (let i = 0; i < info.boundingVertices.length; i++) {
       tmpV0.setXYZ(0, 0, 0);
