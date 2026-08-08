@@ -854,9 +854,18 @@ export class SceneNode
     const prefabNode = this.getPrefabNode() ?? this;
     let sk: Nullable<DRef<SkinBinding>> = null;
     prefabNode.iterate((node) => {
-      sk = node.animationSet.skeletons.find((s) => s.get()!.persistentId === id) ?? null;
+      sk = node.animationSet.skeletons.find((s) => s.get()?.persistentId === id) ?? null;
       return !!sk;
     });
+    // Runtime attachments (wardrobe parts, spring-driven accessories, etc.) keep
+    // their own prefab scope while using a binding owned by an outer character.
+    // Prefer the local prefab above to disambiguate duplicated prefab IDs, then
+    // walk the owning hierarchy for a runtime binding registered on an ancestor.
+    let owner = prefabNode.parent;
+    while (!sk && owner) {
+      sk = owner.animationSet.skeletons.find((s) => s.get()?.persistentId === id) ?? null;
+      owner = owner.parent;
+    }
     // avoid ts2339 compilation error (maybe a typescript bug?)
     return (sk as Nullable<DRef<SkinBinding>>)?.get() ?? null;
   }
@@ -869,9 +878,14 @@ export class SceneNode
     const prefabNode = this.getPrefabNode() ?? this;
     let rig: Nullable<DRef<SkeletonRig>> = null;
     prefabNode.iterate((node) => {
-      rig = node.animationSet.rigs.find((s) => s.get()!.persistentId === id) ?? null;
+      rig = node.animationSet.rigs.find((s) => s.get()?.persistentId === id) ?? null;
       return !!rig;
     });
+    let owner = prefabNode.parent;
+    while (!rig && owner) {
+      rig = owner.animationSet.rigs.find((s) => s.get()?.persistentId === id) ?? null;
+      owner = owner.parent;
+    }
     return (rig as Nullable<DRef<SkeletonRig>>)?.get() ?? null;
   }
   /**

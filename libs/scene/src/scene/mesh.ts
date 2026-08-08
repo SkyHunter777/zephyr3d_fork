@@ -171,6 +171,8 @@ export class Mesh extends MeshBase implements BatchDrawable {
   protected _castShadow: boolean;
   /** @internal */
   protected _skinnedBoundingInfo: Nullable<SkinnedBoundingBox>;
+  /** @internal Conservative runtime bounds for skinned meshes without precomputed samples. */
+  protected readonly _fallbackSkinnedBoundingInfo: SkinnedBoundingBox;
   /** @internal */
   protected _animatedBoundingBox: Nullable<BoundingBox>;
   /** @internal */
@@ -229,6 +231,13 @@ export class Mesh extends MeshBase implements BatchDrawable {
     this._material = new DRef();
     this._castShadow = true;
     this._skinnedBoundingInfo = null;
+    this._fallbackSkinnedBoundingInfo = {
+      influenceCount: 1,
+      boundingVertexBlendIndices: new Float32Array(0),
+      boundingVertexJointWeights: new Float32Array(0),
+      boundingVertices: [],
+      boundingBox: new BoundingBox()
+    };
     this._animatedBoundingBox = null;
     this._boneMatrices = new DRef();
     this._skinInfluenceData = null;
@@ -843,11 +852,17 @@ export class Mesh extends MeshBase implements BatchDrawable {
     this.setRenderMorphInfo({ data, names: this._morphInfo.names });
   }
   /** @internal */
-  resolveAnimatedBoundingBox(morphBoundingBox?: Nullable<BoundingBox>) {
-    const skinnedBoundingBox =
-      this._boneMatrices.get() && this._skinnedBoundingInfo?.boundingBox?.isValid()
-        ? this._skinnedBoundingInfo.boundingBox
-        : null;
+  resolveAnimatedBoundingBox(
+    morphBoundingBox?: Nullable<BoundingBox>,
+    skinnedBoundingBoxOverride?: Nullable<BoundingBox>
+  ) {
+    const skinnedBoundingBox = this._boneMatrices.get()
+      ? skinnedBoundingBoxOverride?.isValid()
+        ? skinnedBoundingBoxOverride
+        : this._skinnedBoundingInfo?.boundingBox?.isValid()
+          ? this._skinnedBoundingInfo.boundingBox
+          : null
+      : null;
     if (skinnedBoundingBox && morphBoundingBox) {
       return skinnedBoundingBox.clone().union(morphBoundingBox) as BoundingBox;
     }
@@ -1028,9 +1043,12 @@ export class Mesh extends MeshBase implements BatchDrawable {
   }
   /** @internal */
   private refreshAnimatedBoundingBox(
-    morphBoundingBox: Nullable<BoundingBox> = this.calculateMorphBoundingBox()
+    morphBoundingBox: Nullable<BoundingBox> = this.calculateMorphBoundingBox(),
+    skinnedBoundingBoxOverride?: Nullable<BoundingBox>
   ) {
-    this.setAnimatedBoundingBox(this.resolveAnimatedBoundingBox(morphBoundingBox));
+    this.setAnimatedBoundingBox(
+      this.resolveAnimatedBoundingBox(morphBoundingBox, skinnedBoundingBoxOverride)
+    );
   }
   /** @internal */
   private updateMorphState() {
@@ -1059,12 +1077,12 @@ export class Mesh extends MeshBase implements BatchDrawable {
       const sourceBoundingBox = morphBoundingBox
         ? (primitiveBoundingBox?.clone().union(morphBoundingBox) ?? morphBoundingBox)
         : primitiveBoundingBox;
-      binding.computeBoundingBox(
-        this._skinnedBoundingInfo!,
-        this.invWorldMatrix,
-        sourceBoundingBox ?? undefined
+      const boundingInfo = this._skinnedBoundingInfo ?? this._fallbackSkinnedBoundingInfo;
+      binding.computeBoundingBox(boundingInfo, this.invWorldMatrix, sourceBoundingBox ?? undefined);
+      this.refreshAnimatedBoundingBox(
+        morphBoundingBox,
+        this._skinnedBoundingInfo ? undefined : boundingInfo.boundingBox
       );
-      this.refreshAnimatedBoundingBox(morphBoundingBox);
     } else {
       this.setBoneMatrices(null);
       this.refreshAnimatedBoundingBox();

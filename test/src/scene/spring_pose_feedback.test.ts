@@ -105,3 +105,28 @@ describe.each(systemFactories)('%s input pose tracking', (_name, createSystem) =
     }
   });
 });
+
+describe('MultiChainSpringSystem time step validation', () => {
+  test('does not poison an XPBD chain when the frame delta is zero', () => {
+    const fixture = createChainFixture((chain) => {
+      const system = new MultiChainSpringSystem({
+        enableInertialForces: false,
+        solver: 'xpbd'
+      });
+      system.addChain(chain);
+      return system;
+    });
+    try {
+      fixture.system.update(0);
+      fixture.system.applyToNodes(1);
+
+      for (const particle of fixture.chain.particles) {
+        expect(Array.from(particle.position).every(Number.isFinite)).toBe(true);
+        expect(Array.from(particle.prevPosition).every(Number.isFinite)).toBe(true);
+      }
+      expect(Array.from(fixture.root.rotation).every(Number.isFinite)).toBe(true);
+    } finally {
+      fixture.scene.dispose();
+    }
+  });
+});

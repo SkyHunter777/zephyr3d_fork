@@ -198,7 +198,10 @@ export class MultiChainSpringSystem {
    */
   update(deltaTime: number): void {
     this._nodePoseTracker.restoreInputPose();
-    const dt = Math.min(deltaTime, 0.033);
+    const dt = Math.min(Math.max(Number(deltaTime) || 0, 0), 0.033);
+    if (dt <= 0) {
+      return;
+    }
 
     // Save all particle positions before updating
     if (this._enableInertialForces) {

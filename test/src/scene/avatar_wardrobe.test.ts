@@ -117,6 +117,7 @@ describe('AvatarWardrobe', () => {
     const avatarRig = createNamedRig(avatarRoot, ['Root', 'Spine']);
     avatarRoot.animationSet.rigs.push(new DRef(avatarRig));
     const outfit = createSkinnedOutfit(outfitRoot, ['Root', 'Spine']);
+    outfitRoot.prefabId = '/assets/outfit.zprefab';
 
     const wardrobe = AvatarWardrobe.from(avatarRoot);
     const instance = await wardrobe.equip(outfitRoot, {
@@ -135,6 +136,9 @@ describe('AvatarWardrobe', () => {
     );
     expect(outfitRoot.animationSet.skeletons).toHaveLength(0);
     expect(outfitRoot.animationSet.rigs).toHaveLength(0);
+    expect(outfit.mesh.findSkinBindingById(outfit.mesh.skinBindingName)).toBe(instance.skinBindings[0]);
+    expect(() => outfit.mesh.update(1, 1 / 60, 1 / 60)).not.toThrow();
+    expect(outfit.mesh.getBoneMatrices()).toBe(instance.skinBindings[0].jointTexture);
   });
 
   test('hides body regions for a slot and restores them on unequip', async () => {
