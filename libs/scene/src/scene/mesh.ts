@@ -24,10 +24,11 @@ import {
 import type { Scene } from './scene';
 import { BoundingBox, type BoundingVolume } from '../utility/bounding_volume';
 import {
+  getActiveMorphTargetLimit,
   MAX_MORPH_ATTRIBUTES,
   MAX_MORPH_TARGETS,
+  MORPH_ACTIVE_WEIGHTS_VECTOR_COUNT,
   MORPH_ATTRIBUTE_VECTOR_COUNT,
-  MORPH_WEIGHTS_VECTOR_COUNT,
   QUEUE_OPAQUE
 } from '../values';
 import { mixinDrawable } from '../render/drawable_mixin';
@@ -59,6 +60,10 @@ const LEGACY_MORPH_TARGET_CAPACITY = 256;
 const LEGACY_MORPH_INFO_DATA_LENGTH =
   MORPH_INFO_HEADER_LENGTH + LEGACY_MORPH_TARGET_CAPACITY + MAX_MORPH_ATTRIBUTES;
 const MORPH_INFO_DATA_LENGTH = MORPH_INFO_HEADER_LENGTH + MAX_MORPH_TARGETS + MAX_MORPH_ATTRIBUTES;
+const MORPH_RENDER_WEIGHT_CAPACITY = MORPH_ACTIVE_WEIGHTS_VECTOR_COUNT * 4;
+const MORPH_RENDER_INDEX_OFFSET = MORPH_INFO_HEADER_LENGTH + MORPH_RENDER_WEIGHT_CAPACITY;
+const MORPH_RENDER_ATTRIBUTE_OFFSET = MORPH_RENDER_INDEX_OFFSET + MORPH_RENDER_WEIGHT_CAPACITY;
+const MORPH_RENDER_INFO_DATA_LENGTH = MORPH_RENDER_ATTRIBUTE_OFFSET + MAX_MORPH_ATTRIBUTES;
 
 /**
  * Converts legacy and current morph-info payloads to the runtime layout.
@@ -108,6 +113,25 @@ function normalizeMorphInfoData(data: MorphInfo['data']) {
   return { data: normalized, declaredCount, supportedCount };
 }
 
+function createRenderMorphInfoBuffer(data: Float32Array<ArrayBuffer>) {
+  const bufferType = new PBStructTypeInfo('dummy', 'std140', [
+    {
+      name: ShaderHelper.getMorphInfoUniformName(),
+      type: new PBArrayTypeInfo(
+        new PBPrimitiveTypeInfo(PBPrimitiveType.F32VEC4),
+        1 + MORPH_ACTIVE_WEIGHTS_VECTOR_COUNT * 2 + MORPH_ATTRIBUTE_VECTOR_COUNT
+      )
+    }
+  ]);
+  return getDevice().createStructuredBuffer(
+    bufferType,
+    {
+      usage: 'uniform'
+    },
+    data
+  );
+}
+
 const MeshBase = castObservable(applyMixins(GraphNode, mixinDrawable))<{
   primitive_changed: [primitive: Nullable<Primitive>];
   material_changed: [material: Nullable<MeshMaterial>];
@@ -137,7 +161,15 @@ export class Mesh extends MeshBase implements BatchDrawable {
   /** @internal */
   protected _morphInfo: Nullable<MorphInfo>;
   /** @internal */
+  protected _renderMorphInfo: Nullable<MorphInfo>;
+  /** @internal */
   protected _morphBoundingInfo: Nullable<MorphBoundingInfo>;
+  /** @internal */
+  protected _activeMorphTargetIndices: Uint32Array<ArrayBuffer>;
+  /** @internal */
+  protected _activeMorphCandidates: { index: number; weight: number }[];
+  /** @internal */
+  protected _renderMorphTargetLimit: number;
   /** @internal */
   protected _morphDirty: boolean;
   /** @internal */
@@ -172,7 +204,11 @@ export class Mesh extends MeshBase implements BatchDrawable {
     this._boneMatrices = new DRef();
     this._morphData = null;
     this._morphInfo = null;
+    this._renderMorphInfo = null;
     this._morphBoundingInfo = null;
+    this._activeMorphTargetIndices = new Uint32Array(0);
+    this._activeMorphCandidates = [];
+    this._renderMorphTargetLimit = -1;
     this._morphDirty = false;
     this._instanceHash = null;
     this._pickTarget = { node: this };
@@ -269,6 +305,9 @@ export class Mesh extends MeshBase implements BatchDrawable {
       this.invalidateBoundingVolume();
       RenderBundleWrapper.drawableChanged(this);
       this._primitiveChangeTag = null;
+      if (this._morphData) {
+        this.ensureWebGLMorphVertexIndexAttribute();
+      }
       this.dispatchEvent('primitive_changed', prim);
     }
   }
@@ -348,8 +387,9 @@ export class Mesh extends MeshBase implements BatchDrawable {
   setMorphData(data: Nullable<MorphData>) {
     if (!data) {
       if (this._morphData) {
-        this._morphData?.texture?.dispose();
+        this._morphData.texture?.dispose();
         this._morphData = null;
+        this.setRenderMorphInfo(null);
         this._renderBundle = {};
         RenderBundleWrapper.drawableChanged(this);
       }
@@ -365,17 +405,22 @@ export class Mesh extends MeshBase implements BatchDrawable {
       if (data.texture?.get()) {
         this._morphData.texture!.set(data.texture.get());
       } else {
-        const tex = getDevice().createTexture2D('rgba32f', data.width, data.height, {
-          mipmapping: false,
-          samplerOptions: {
-            minFilter: 'nearest',
-            magFilter: 'nearest',
-            mipFilter: 'none'
-          }
-        })!;
+        let tex = this._morphData.texture!.get();
+        if (!tex || tex.width !== data.width || tex.height !== data.height) {
+          tex = getDevice().createTexture2D('rgba32f', data.width, data.height, {
+            mipmapping: false,
+            samplerOptions: {
+              minFilter: 'nearest',
+              magFilter: 'nearest',
+              mipFilter: 'none'
+            }
+          })!;
+          this._morphData.texture!.set(tex);
+        }
         tex.update(data.data, 0, 0, data.width, data.height);
-        this._morphData.texture!.set(tex);
       }
+      this.ensureWebGLMorphVertexIndexAttribute();
+      this.updateRenderMorphInfo();
       this._renderBundle = {};
       RenderBundleWrapper.drawableChanged(this);
     }
@@ -402,15 +447,13 @@ export class Mesh extends MeshBase implements BatchDrawable {
       if (this._morphInfo) {
         this._morphInfo.buffer?.dispose();
         this._morphInfo = null;
-        this._renderBundle = {};
-        RenderBundleWrapper.drawableChanged(this);
       }
+      this.setMorphData(null);
+      this.setRenderMorphInfo(null);
+      this._activeMorphTargetIndices = new Uint32Array(0);
+      this._renderBundle = {};
+      RenderBundleWrapper.drawableChanged(this);
     } else {
-      if (!this._morphInfo) {
-        this._morphInfo = {
-          buffer: new DRef()
-        } as MorphInfo;
-      }
       const normalized = normalizeMorphInfoData(info.data);
       if (normalized.declaredCount !== normalized.supportedCount) {
         console.warn(
@@ -423,30 +466,10 @@ export class Mesh extends MeshBase implements BatchDrawable {
           names[name] = index;
         }
       }
-      this._morphInfo.data = normalized.data;
-      this._morphInfo.names = names;
-      if (info.data.length === MORPH_INFO_DATA_LENGTH && info.buffer?.get()) {
-        this._morphInfo.buffer!.set(info.buffer.get());
-      } else {
-        const bufferType = new PBStructTypeInfo('dummy', 'std140', [
-          {
-            name: ShaderHelper.getMorphInfoUniformName(),
-            type: new PBArrayTypeInfo(
-              new PBPrimitiveTypeInfo(PBPrimitiveType.F32VEC4),
-              1 + MORPH_WEIGHTS_VECTOR_COUNT + MORPH_ATTRIBUTE_VECTOR_COUNT
-            )
-          }
-        ]);
-        const morphUniformBuffer = getDevice().createStructuredBuffer(
-          bufferType,
-          {
-            usage: 'uniform'
-          },
-          normalized.data
-        );
-        this._morphInfo.buffer!.set(morphUniformBuffer);
-      }
+      this._morphInfo?.buffer?.dispose();
+      this._morphInfo = { data: normalized.data, names };
       this._morphDirty = false;
+      this.updateRenderMorphInfo();
       this.refreshAnimatedBoundingBox();
       this._renderBundle = {};
       RenderBundleWrapper.drawableChanged(this);
@@ -457,6 +480,111 @@ export class Mesh extends MeshBase implements BatchDrawable {
    */
   getMorphInfo() {
     return this._morphInfo;
+  }
+  /** @internal */
+  getRenderMorphInfo() {
+    if (this._morphDirty) {
+      this.updateMorphState();
+    } else if (
+      this._morphInfo &&
+      this._morphData &&
+      this._renderMorphTargetLimit !== getActiveMorphTargetLimit()
+    ) {
+      this.updateRenderMorphInfo();
+    }
+    return this._renderMorphInfo;
+  }
+  /** @internal */
+  private setRenderMorphInfo(info: Nullable<MorphInfo>) {
+    if (!info) {
+      if (this._renderMorphInfo) {
+        this._renderMorphInfo.buffer?.dispose();
+        this._renderMorphInfo = null;
+      }
+      return;
+    }
+    if (!this._renderMorphInfo) {
+      this._renderMorphInfo = {
+        data: info.data,
+        names: info.names,
+        buffer: new DRef()
+      };
+    } else {
+      this._renderMorphInfo.data = info.data;
+      this._renderMorphInfo.names = info.names;
+    }
+    const buffer = this._renderMorphInfo.buffer!.get();
+    if (buffer) {
+      buffer.bufferSubData(0, info.data);
+    } else {
+      this._renderMorphInfo.buffer!.set(createRenderMorphInfoBuffer(info.data as Float32Array<ArrayBuffer>));
+    }
+  }
+  /** @internal */
+  private collectActiveMorphTargetIndices(): Uint32Array<ArrayBuffer> {
+    if (!this._morphInfo) {
+      return new Uint32Array(0);
+    }
+    const numTargets = this.getNumMorphTargets();
+    const activeLimit = Math.min(getActiveMorphTargetLimit(), MORPH_RENDER_WEIGHT_CAPACITY, numTargets);
+    const candidates = this._activeMorphCandidates;
+    let candidateCount = 0;
+    for (let index = 0; index < numTargets; index++) {
+      const weight = Number(this._morphInfo.data[MORPH_INFO_HEADER_LENGTH + index]);
+      if (weight !== 0 && Number.isFinite(weight)) {
+        const candidate = candidates[candidateCount] ?? { index, weight: 0 };
+        candidate.index = index;
+        candidate.weight = Math.abs(weight);
+        candidates[candidateCount++] = candidate;
+      }
+    }
+    candidates.length = candidateCount;
+    if (candidateCount > activeLimit) {
+      candidates.sort((a, b) => b.weight - a.weight || a.index - b.index);
+      candidateCount = activeLimit;
+    }
+    const activeIndices = new Uint32Array(candidateCount);
+    for (let i = 0; i < candidateCount; i++) {
+      activeIndices[i] = candidates[i].index;
+    }
+    activeIndices.sort();
+    return activeIndices;
+  }
+  /** @internal */
+  private updateRenderMorphInfo() {
+    if (!this._morphInfo || !this._morphData) {
+      this.setRenderMorphInfo(null);
+      this._activeMorphTargetIndices = new Uint32Array(0);
+      this._renderMorphTargetLimit = -1;
+      return;
+    }
+    const activeIndices = this.collectActiveMorphTargetIndices();
+    const data =
+      this._renderMorphInfo?.data instanceof Float32Array &&
+      this._renderMorphInfo.data.length === MORPH_RENDER_INFO_DATA_LENGTH
+        ? this._renderMorphInfo.data
+        : new Float32Array(MORPH_RENDER_INFO_DATA_LENGTH);
+    data[0] = this._morphData.width;
+    data[1] = this._morphData.height;
+    data[2] = Number(this._morphInfo.data[2]) || 0;
+    data[3] = activeIndices.length;
+    data.fill(0, MORPH_INFO_HEADER_LENGTH, MORPH_RENDER_ATTRIBUTE_OFFSET);
+    for (let slot = 0; slot < activeIndices.length; slot++) {
+      const targetIndex = activeIndices[slot];
+      data[MORPH_INFO_HEADER_LENGTH + slot] = Number(
+        this._morphInfo.data[MORPH_INFO_HEADER_LENGTH + targetIndex]
+      );
+      data[MORPH_RENDER_INDEX_OFFSET + slot] = targetIndex;
+    }
+    data.fill(-1, MORPH_RENDER_ATTRIBUTE_OFFSET);
+    for (let attrib = 0; attrib < MAX_MORPH_ATTRIBUTES; attrib++) {
+      data[MORPH_RENDER_ATTRIBUTE_OFFSET + attrib] = Number(
+        this._morphInfo.data[MORPH_INFO_HEADER_LENGTH + MAX_MORPH_TARGETS + attrib] ?? -1
+      );
+    }
+    this._activeMorphTargetIndices = activeIndices;
+    this._renderMorphTargetLimit = getActiveMorphTargetLimit();
+    this.setRenderMorphInfo({ data, names: this._morphInfo.names });
   }
   /** @internal */
   resolveAnimatedBoundingBox(morphBoundingBox?: Nullable<BoundingBox>) {
@@ -475,7 +603,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
    * @returns The number of morph targets
    */
   getNumMorphTargets(): number {
-    return this._morphInfo?.data[3] ?? 0;
+    return this._morphInfo ? Math.min(Number(this._morphInfo.data[3]) || 0, MAX_MORPH_TARGETS) : 0;
   }
   /**
    * Get the name of the morph target by index
@@ -484,7 +612,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
    * @returns The name of the morph target, or null if not found
    */
   getMorphTargetName(index: number): Nullable<string> {
-    if (this._morphInfo && index >= 0 && index < this._morphInfo.data[3]) {
+    if (this._morphInfo && index >= 0 && index < this.getNumMorphTargets()) {
       const name = Object.keys(this._morphInfo.names).find((key) => this._morphInfo!.names![key] === index);
       return name ?? null;
     }
@@ -517,9 +645,10 @@ export class Mesh extends MeshBase implements BatchDrawable {
    * @param weight - The weight of the morph target
    */
   setMorphWeightByIndex(index: number, weight: number) {
-    if (index >= 0 && index < this._morphInfo!.data[3]) {
-      if (this._morphInfo!.data[4 + index] !== weight) {
-        this._morphInfo!.data[4 + index] = weight;
+    if (index >= 0 && index < this.getNumMorphTargets()) {
+      const normalizedWeight = Math.fround(weight);
+      if (this._morphInfo!.data[4 + index] !== normalizedWeight) {
+        this._morphInfo!.data[4 + index] = normalizedWeight;
         this._morphDirty = true;
         this.refreshAnimatedBoundingBox();
         this.scene!.queueUpdateNode(this);
@@ -536,7 +665,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
    */
   getMorphWeight(name: string): number {
     const index = this._morphInfo?.names?.[name];
-    if (index !== undefined && index >= 0 && index < this._morphInfo!.data[3]) {
+    if (index !== undefined && index >= 0 && index < this.getNumMorphTargets()) {
       return this._morphInfo!.data[4 + index];
     }
     return 0;
@@ -546,9 +675,19 @@ export class Mesh extends MeshBase implements BatchDrawable {
    *
    * @param weight - The morph target weights. The length must not exceed the mesh's morph target count.
    */
-  updateMorphWeights(weight: number[]) {
-    if (this._morphInfo && weight && weight.length <= this._morphInfo.data[3]) {
-      this._morphInfo.data.set(weight, 4);
+  updateMorphWeights(weight: ArrayLike<number>) {
+    if (this._morphInfo && weight && weight.length <= this.getNumMorphTargets()) {
+      let changed = false;
+      for (let i = 0; i < weight.length; i++) {
+        const normalizedWeight = Math.fround(weight[i] ?? 0);
+        if (this._morphInfo.data[4 + i] !== normalizedWeight) {
+          this._morphInfo.data[4 + i] = normalizedWeight;
+          changed = true;
+        }
+      }
+      if (!changed) {
+        return;
+      }
       this._morphDirty = true;
       this.refreshAnimatedBoundingBox();
       this.scene!.queueUpdateNode(this);
@@ -617,7 +756,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     if (!this._morphInfo || !this._morphBoundingInfo) {
       return null;
     }
-    const numTargets = Math.min(this._morphInfo.data[3], this._morphBoundingInfo.targetBoxes.length);
+    const numTargets = Math.min(this.getNumMorphTargets(), this._morphBoundingInfo.targetBoxes.length);
     if (numTargets <= 0) {
       return null;
     }
@@ -638,7 +777,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
   /** @internal */
   private updateMorphState() {
     if (this._morphInfo && this._morphDirty) {
-      this._morphInfo.buffer!.get()!.bufferSubData(4 * 4, this._morphInfo.data, 4, this._morphInfo.data[3]);
+      this.updateRenderMorphInfo();
       this.refreshAnimatedBoundingBox();
       this._morphDirty = false;
     }
@@ -737,6 +876,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
     this._material.dispose();
     this._boneMatrices.dispose();
     this.setMorphData(null);
+    this.setRenderMorphInfo(null);
     this.setMorphInfo(null);
     this.setMorphBoundingInfo(null);
     this._renderBundle = null;
@@ -745,6 +885,22 @@ export class Mesh extends MeshBase implements BatchDrawable {
   /** @internal */
   private _onBoundingboxChange() {
     this.invalidateBoundingVolume();
+  }
+  /** @internal */
+  private ensureWebGLMorphVertexIndexAttribute() {
+    const primitive = this._primitive.get();
+    if (!primitive || getDevice().type !== 'webgl' || primitive.getVertexBuffer('texCoord7')) {
+      return;
+    }
+    const numVertices = primitive.getNumVertices();
+    if (numVertices <= 0) {
+      return;
+    }
+    const vertexIndices = new Float32Array(numVertices);
+    for (let i = 0; i < numVertices; i++) {
+      vertexIndices[i] = i;
+    }
+    primitive.createAndSetVertexBuffer('tex7_f32', vertexIndices);
   }
   /** @internal */
   private static _defaultMaterial: Nullable<MeshMaterial> = null;

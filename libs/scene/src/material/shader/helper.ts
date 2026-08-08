@@ -12,10 +12,10 @@ import type { DrawContext } from '../../render/drawable';
 import {
   MaterialVaryingFlags,
   MORPH_ATTRIBUTE_VECTOR_COUNT,
+  MORPH_ACTIVE_WEIGHTS_VECTOR_COUNT,
   MORPH_TARGET_NORMAL,
   MORPH_TARGET_POSITION,
   MORPH_TARGET_TANGENT,
-  MORPH_WEIGHTS_VECTOR_COUNT,
   RENDER_PASS_TYPE_DEPTH,
   RENDER_PASS_TYPE_LIGHT,
   RENDER_PASS_TYPE_OBJECT_COLOR,
@@ -477,7 +477,7 @@ export class ShaderHelper {
       this.$l.numTargets = this.metaData.w;
       this.$l.value = pb.vec4(0);
       if (isWebGL1) {
-        this.$for(pb.int('i'), 0, MORPH_WEIGHTS_VECTOR_COUNT, function () {
+        this.$for(pb.int('i'), 0, MORPH_ACTIVE_WEIGHTS_VECTOR_COUNT, function () {
           this.$for(pb.int('j'), 0, 4, function () {
             this.$l.index = pb.add(pb.mul(this.i, 4), this.j);
             this.$if(pb.greaterThanEqual(this.index, this.numTargets), function () {
@@ -485,8 +485,11 @@ export class ShaderHelper {
             });
             this.$l.weight = morphInfo.at(pb.add(1, this.i)).at(this.j);
             this.$if(pb.notEqual(this.weight, 0), function () {
+              this.$l.targetIndex = pb.int(
+                morphInfo.at(pb.add(1 + MORPH_ACTIVE_WEIGHTS_VECTOR_COUNT, this.i)).at(this.j)
+              );
               this.$l.pixelIndex = pb.float(
-                pb.add(this.offset, pb.mul(this.index, this.numVertices), this.vertexIndex)
+                pb.add(this.offset, pb.mul(this.targetIndex, this.numVertices), this.vertexIndex)
               );
               this.$l.xIndex = pb.mod(this.pixelIndex, this.texWidth);
               this.$l.yIndex = pb.floor(pb.div(this.pixelIndex, this.texWidth));
@@ -507,8 +510,11 @@ export class ShaderHelper {
           this.$l.j = pb.compAnd(this.t, 3);
           this.$l.weight = morphInfo.at(pb.add(1, this.i)).at(this.j);
           this.$if(pb.notEqual(this.weight, 0), function () {
+            this.$l.targetIndex = pb.int(
+              morphInfo.at(pb.add(1 + MORPH_ACTIVE_WEIGHTS_VECTOR_COUNT, this.i)).at(this.j)
+            );
             this.$l.pixelIndex = pb.float(
-              pb.add(this.offset, pb.mul(this.t, this.numVertices), this.vertexIndex)
+              pb.add(this.offset, pb.mul(this.targetIndex, this.numVertices), this.vertexIndex)
             );
             this.$l.xIndex = pb.mod(this.pixelIndex, this.texWidth);
             this.$l.yIndex = pb.floor(pb.div(this.pixelIndex, this.texWidth));
@@ -525,7 +531,7 @@ export class ShaderHelper {
       }
       this.$return(this.value);
     });
-    const pos = 1 + MORPH_WEIGHTS_VECTOR_COUNT + (attrib >> 2);
+    const pos = 1 + MORPH_ACTIVE_WEIGHTS_VECTOR_COUNT * 2 + (attrib >> 2);
     const comp = attrib & 3;
     const offset = scope[this.getMorphInfoUniformName()][pos][comp];
     return scope[funcName](pb.int(offset)) as PBShaderExp;
@@ -840,7 +846,7 @@ export class ShaderHelper {
     if (morphing) {
       scope[UNIFORM_NAME_MORPH_DATA] = pb.tex2D().uniform(1).sampleType('unfilterable-float');
       scope[UNIFORM_NAME_MORPH_INFO] =
-        pb.vec4[1 + MORPH_WEIGHTS_VECTOR_COUNT + MORPH_ATTRIBUTE_VECTOR_COUNT]().uniformBuffer(1);
+        pb.vec4[1 + MORPH_ACTIVE_WEIGHTS_VECTOR_COUNT * 2 + MORPH_ATTRIBUTE_VECTOR_COUNT]().uniformBuffer(1);
     }
   }
   /** @internal */

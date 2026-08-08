@@ -109,6 +109,48 @@ export const MAX_MORPH_TARGETS = 1024;
 export const MORPH_WEIGHTS_VECTOR_COUNT = (MAX_MORPH_TARGETS + 3) >> 2;
 /** @public */
 export const MORPH_ATTRIBUTE_VECTOR_COUNT = (MAX_MORPH_ATTRIBUTES + 3) >> 2;
+/**
+ * Maximum number of morph targets evaluated by a draw call.
+ *
+ * Morph resources may contain up to {@link MAX_MORPH_TARGETS} entries. The active limit is
+ * deliberately smaller so the render uniform layout remains viable on WebGL devices.
+ * @public
+ */
+export const MAX_ACTIVE_MORPH_TARGETS = 64;
+/** @public */
+export const DEFAULT_ACTIVE_MORPH_TARGET_LIMIT = MAX_ACTIVE_MORPH_TARGETS;
+/** @public */
+export const MORPH_ACTIVE_WEIGHTS_VECTOR_COUNT = (MAX_ACTIVE_MORPH_TARGETS + 3) >> 2;
+
+let activeMorphTargetLimit = DEFAULT_ACTIVE_MORPH_TARGET_LIMIT;
+
+/**
+ * Normalizes the per-draw active morph-target limit without changing the resource capacity.
+ * @public
+ */
+export function normalizeActiveMorphTargetLimit(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_ACTIVE_MORPH_TARGET_LIMIT;
+  }
+  return Math.min(MAX_ACTIVE_MORPH_TARGETS, Math.max(1, Math.trunc(value)));
+}
+
+/** Returns the configured per-draw active morph-target limit. @public */
+export function getActiveMorphTargetLimit(): number {
+  return activeMorphTargetLimit;
+}
+
+/**
+ * Sets the per-draw active morph-target limit.
+ *
+ * The setting only controls target selection for rendering. All imported names and weights up
+ * to {@link MAX_MORPH_TARGETS} remain available and serializable.
+ * @public
+ */
+export function setActiveMorphTargetLimit(value: number | null | undefined): number {
+  activeMorphTargetLimit = normalizeActiveMorphTargetLimit(value);
+  return activeMorphTargetLimit;
+}
 
 /** @public */
 export const MAX_TERRAIN_MIPMAP_LEVELS = 64;

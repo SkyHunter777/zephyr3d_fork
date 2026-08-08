@@ -52,6 +52,11 @@ export class ProxyDrawableBase<T extends Disposable & Drawable = Mesh> extends D
   getMorphInfo(): Nullable<MorphInfo> {
     return this._host.get()?.getMorphInfo() ?? null;
   }
+  /** @internal */
+  getRenderMorphInfo(): Nullable<MorphInfo> {
+    const host = this._host.get() as Nullable<Drawable & { getRenderMorphInfo?: () => Nullable<MorphInfo> }>;
+    return host?.getRenderMorphInfo?.() ?? host?.getMorphInfo() ?? null;
+  }
   getSortDistance(camera: Camera): number {
     return this._host.get()?.getSortDistance(camera) ?? 0;
   }
@@ -162,6 +167,10 @@ export class MeshDrawable<M extends MeshMaterial>
     return null;
   }
   getMorphInfo(): Nullable<MorphInfo> {
+    return null;
+  }
+  /** @internal */
+  getRenderMorphInfo(): Nullable<MorphInfo> {
     return null;
   }
   /**

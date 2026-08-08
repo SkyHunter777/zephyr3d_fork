@@ -245,8 +245,11 @@ export function mixinDrawable<
         drawableBindGroup.setValue(ShaderHelper.getBoneTextureSizeUniformName(), boneTextureSize);
       }
       if (ctx.materialFlags & MaterialVaryingFlags.MORPH_ANIMATION) {
-        const morphData = (this as unknown as Mesh).getMorphData()!;
-        const morphInfo = (this as unknown as Mesh).getMorphInfo()!;
+        const drawable = this as unknown as Mesh & {
+          getRenderMorphInfo?: () => ReturnType<Mesh['getRenderMorphInfo']>;
+        };
+        const morphData = drawable.getMorphData()!;
+        const morphInfo = drawable.getRenderMorphInfo?.() ?? drawable.getMorphInfo()!;
         drawableBindGroup.setTexture(ShaderHelper.getMorphDataUniformName(), morphData.texture!.get()!);
         drawableBindGroup.setBuffer(ShaderHelper.getMorphInfoUniformName(), morphInfo.buffer!.get()!);
       }

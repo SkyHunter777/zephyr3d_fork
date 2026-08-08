@@ -1,14 +1,18 @@
-import { MemoryFS, uint8ArrayToBase64, Vector3 } from '@zephyr3d/base';
+import { Interpolator, MemoryFS, uint8ArrayToBase64, Vector3 } from '@zephyr3d/base';
 import {
   AssetHierarchyNode,
   BoundingBox,
+  DEFAULT_ACTIVE_MORPH_TARGET_LIMIT,
+  MAX_ACTIVE_MORPH_TARGETS,
   MAX_MORPH_ATTRIBUTES,
   MAX_MORPH_TARGETS,
   Mesh,
+  MorphTargetTrack,
   ResourceManager,
   Scene,
   SceneNode,
   SharedModel,
+  setActiveMorphTargetLimit,
   setSceneMeshAssetBinding,
   type AssetMeshData,
   type AssetSubMeshData
@@ -26,6 +30,12 @@ jest.mock('../../../libs/scene/src/app/api', () => ({
     },
     createStructuredBuffer: jest.fn(() => ({
       bufferSubData: jest.fn(),
+      dispose: jest.fn()
+    })),
+    createTexture2D: jest.fn((_format, width, height) => ({
+      width,
+      height,
+      update: jest.fn(),
       dispose: jest.fn()
     }))
   })),
@@ -78,6 +88,10 @@ function expectBoundingBox(box: BoundingBox | null, min: number[], max: number[]
 }
 
 describe('morph target groups', () => {
+  afterEach(() => {
+    setActiveMorphTargetLimit(DEFAULT_ACTIVE_MORPH_TARGET_LIMIT);
+  });
+
   test('normalizes legacy 256-slot MorphInfo and relocates attribute offsets', () => {
     const scene = new Scene();
     const mesh = new Mesh(scene);
@@ -117,6 +131,90 @@ describe('morph target groups', () => {
     expect(normalized.data[4 + 736]).toBe(0.625);
     expect(normalized.data[4 + MAX_MORPH_TARGETS]).toBe(9876);
     expect(normalized.names).toEqual({ last: 736 });
+  });
+
+  test('builds compact render morph info without truncating lab resource weights', () => {
+    const scene = new Scene();
+    const mesh = new Mesh(scene);
+    const data = new Float32Array(4 + MAX_MORPH_TARGETS + MAX_MORPH_ATTRIBUTES);
+    data.set([32, 32, 100, 737], 0);
+    data[4 + 2] = 0.125;
+    data[4 + 300] = 0.75;
+    data[4 + 736] = -0.5;
+    data.fill(-1, 4 + MAX_MORPH_TARGETS);
+    data[4 + MAX_MORPH_TARGETS] = 123;
+
+    mesh.setMorphData({ width: 32, height: 32, data: new Float32Array(32 * 32 * 4) });
+    mesh.setMorphInfo({ data, names: { low: 2, middle: 300, high: 736 } });
+
+    const renderData = mesh.getRenderMorphInfo()!.data;
+    const renderIndexOffset = 4 + MAX_ACTIVE_MORPH_TARGETS;
+    const renderAttributeOffset = renderIndexOffset + MAX_ACTIVE_MORPH_TARGETS;
+    expect(renderData).toHaveLength(4 + MAX_ACTIVE_MORPH_TARGETS * 2 + MAX_MORPH_ATTRIBUTES);
+    expect(Array.from(renderData.slice(0, 7))).toEqual([32, 32, 100, 3, 0.125, 0.75, -0.5]);
+    expect(Array.from(renderData.slice(renderIndexOffset, renderIndexOffset + 3))).toEqual([2, 300, 736]);
+    expect(renderData[renderAttributeOffset]).toBe(123);
+    expect(mesh.getMorphInfo()!.data[4 + 736]).toBe(-0.5);
+
+    mesh.setMorphWeightByIndex(736, 0);
+    expect(mesh.getRenderMorphInfo()!.data[3]).toBe(2);
+    expect(
+      Array.from(mesh.getRenderMorphInfo()!.data.slice(renderIndexOffset, renderIndexOffset + 2))
+    ).toEqual([2, 300]);
+  });
+
+  test('selects strongest active targets while preserving every resource-side weight', () => {
+    setActiveMorphTargetLimit(3);
+    const scene = new Scene();
+    const mesh = new Mesh(scene);
+    const data = new Float32Array(4 + MAX_MORPH_TARGETS + MAX_MORPH_ATTRIBUTES);
+    data.set([8, 8, 1, 6, 1, 5, 3, 4, 2, 6], 0);
+    data.fill(-1, 4 + MAX_MORPH_TARGETS);
+
+    mesh.setMorphData({ width: 8, height: 8, data: new Float32Array(8 * 8 * 4) });
+    mesh.setMorphInfo({
+      data,
+      names: Object.fromEntries(Array.from({ length: 6 }, (_, index) => [`Target${index}`, index]))
+    });
+
+    const renderData = mesh.getRenderMorphInfo()!.data;
+    const renderIndexOffset = 4 + MAX_ACTIVE_MORPH_TARGETS;
+    expect(renderData[3]).toBe(3);
+    expect(Array.from(renderData.slice(4, 7))).toEqual([5, 4, 6]);
+    expect(Array.from(renderData.slice(renderIndexOffset, renderIndexOffset + 3))).toEqual([1, 3, 5]);
+    expect(Array.from(mesh.getMorphInfo()!.data.slice(4, 10))).toEqual([1, 5, 3, 4, 2, 6]);
+
+    setActiveMorphTargetLimit(2);
+    const reducedRenderData = mesh.getRenderMorphInfo()!.data;
+    expect(reducedRenderData[3]).toBe(2);
+    expect(Array.from(reducedRenderData.slice(4, 6))).toEqual([5, 6]);
+    expect(Array.from(reducedRenderData.slice(renderIndexOffset, renderIndexOffset + 2))).toEqual([1, 5]);
+  });
+
+  test('routes large MorphTargetTrack updates through the full resource-side weight array', () => {
+    const numTargets = 737;
+    const scene = new Scene();
+    const mesh = new Mesh(scene);
+    const data = new Float32Array(4 + MAX_MORPH_TARGETS + MAX_MORPH_ATTRIBUTES);
+    data[3] = numTargets;
+    data.fill(-1, 4 + MAX_MORPH_TARGETS);
+    mesh.setMorphInfo({ data, names: { last: numTargets - 1 } });
+
+    const outputs = new Float32Array(numTargets);
+    outputs[numTargets - 1] = 0.625;
+    const interpolator = new Interpolator('step', null, new Float32Array([0]), outputs);
+    const targetBoxes = Array.from(
+      { length: numTargets },
+      () => new BoundingBox(Vector3.zero(), Vector3.zero())
+    );
+    const originBox = new BoundingBox(Vector3.zero(), Vector3.one());
+    const track = new MorphTargetTrack(interpolator, undefined, targetBoxes, originBox);
+    const state = track.calculateState(mesh, 0);
+
+    expect(state.weights).toHaveLength(numTargets);
+    track.applyState(mesh, state);
+    expect(mesh.getMorphWeight('last')).toBe(0.625);
+    expect(mesh.getMorphInfo()!.data[4 + numTargets - 1]).toBe(0.625);
   });
 
   test('reads legacy raw-base64 MorphInfo and writes a versioned 1024-slot payload', async () => {
