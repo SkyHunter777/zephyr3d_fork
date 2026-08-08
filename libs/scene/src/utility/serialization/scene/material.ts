@@ -32,6 +32,24 @@ type PBRMaterial = PBRMetallicRoughnessMaterial | PBRSpecularGlossinessMaterial;
 type LitPropTypes = LambertMaterial | BlinnMaterial | SkinMaterial | PBRMaterial;
 type UnlitPropTypes = UnlitMaterial | LitPropTypes;
 
+function normalizePBRMaterialProps(props: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  if (!Object.prototype.hasOwnProperty.call(props, 'ClearCoatFactor')) {
+    return props as Record<string, unknown>;
+  }
+  const factor = props.ClearCoatFactor;
+  if (typeof factor !== 'number' || !Number.isFinite(factor)) {
+    return props as Record<string, unknown>;
+  }
+  const normalized = { ...props };
+  if (!Object.prototype.hasOwnProperty.call(normalized, 'ClearCoatIntensity')) {
+    normalized.ClearCoatIntensity = factor;
+  }
+  if (!Object.prototype.hasOwnProperty.call(normalized, 'ClearCoat')) {
+    normalized.ClearCoat = factor > 0;
+  }
+  return normalized;
+}
+
 function createBlueprintOutputHiddenPredicate(_outputs: readonly PBRBlueprintOutputName[]) {
   return function (this: any) {
     return this instanceof PBRBluePrintMaterial;
@@ -2069,6 +2087,7 @@ export function getPBRMetallicRoughnessMaterialClass(manager: ResourceManager): 
       ctor: PBRMetallicRoughnessMaterial,
       parent: MeshMaterial,
       name: 'PBRMetallicRoughnessMaterial',
+      normalizeProps: normalizePBRMaterialProps,
       getProps() {
         return defineProps([
           {
@@ -2300,6 +2319,7 @@ export function getPBRSpecularGlossinessMaterialClass(manager: ResourceManager):
       ctor: PBRSpecularGlossinessMaterial,
       name: 'PBRSpecularGlossinessMaterial',
       parent: MeshMaterial,
+      normalizeProps: normalizePBRMaterialProps,
       getProps() {
         return defineProps([
           {

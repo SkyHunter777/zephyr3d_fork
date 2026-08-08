@@ -1254,6 +1254,7 @@ export class ResourceManager {
     cls: SerializableClass,
     json: Record<string, unknown>
   ) {
+    json = cls.normalizeProps?.(json) ?? json;
     const props = (this.getPropertiesByClass(cls) ?? []).sort((a, b) => (a.phase ?? 0) - (b.phase ?? 0));
     let currentPhase: number | undefined = undefined;
     const promises: Promise<void>[] = [];

@@ -315,6 +315,16 @@ export type SerializableClass = {
    */
   getInitParams?: (obj: any, flags: { saveProps: boolean }) => any;
   /**
+   * Normalizes serialized properties before this class applies its accessors.
+   *
+   * This hook is intended for read-only schema migrations. Implementations should
+   * preserve current fields and return a new object when a migration is needed.
+   *
+   * @param props - Serialized property map supplied by the asset.
+   * @returns The property map to deserialize for this class.
+   */
+  normalizeProps?: (props: Readonly<Record<string, unknown>>) => Record<string, unknown>;
+  /**
    * Enumerates property accessors for this class.
    *
    * The returned list defines the full set of serializable/editor-visible properties.
