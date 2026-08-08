@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "assetsRootEnvironmentVariable": "ZEPHYR3D_LAB_ASSETS_DIR",
+  "defaultRelativeAssetsRoot": "../lab/digitalman/assets",
+  "cases": [
+    {
+      "name": "head rig source-reference stress case",
+      "prefab": "test/bbb/headRig_whole.zprefab",
+      "morphInfoFloatLength": 1036,
+      "morphMeshCount": 5,
+      "maxTargetCount": 737,
+      "dataMode": "source-reference"
+    },
+    {
+      "name": "big male face",
+      "prefab": "prefabs/character/BigElectricPeople/male/face/base_male_B.zprefab",
+      "morphInfoFloatLength": 1036,
+      "morphMeshCount": 8,
+      "maxTargetCount": 55,
+      "dataMode": "source-reference",
+      "skinInfluenceCount": 12
+    },
+    {
+      "name": "big female face",
+      "prefab": "prefabs/character/BigElectricPeople/female/face/base_female_B.zprefab",
+      "morphInfoFloatLength": 1036,
+      "morphMeshCount": 8,
+      "maxTargetCount": 55,
+      "dataMode": "source-reference",
+      "skinInfluenceCount": 12
+    },
+    {
+      "name": "little male face",
+      "prefab": "prefabs/character/LittleElectricPeople/male/face/Little_male_A.zprefab",
+      "morphInfoFloatLength": 1036,
+      "morphMeshCount": 7,
+      "maxTargetCount": 52,
+      "dataMode": "source-reference",
+      "skinInfluenceCount": 12
+    },
+    {
+      "name": "legacy big male body",
+      "prefab": "prefabs/character/BigElectricPeople/male/body/body_male_A.zprefab",
+      "morphInfoFloatLength": 268,
+      "morphMeshCount": 10,
+      "maxTargetCount": 52,
+      "dataMode": "embedded"
+    },
+    {
+      "name": "legacy little male body",
+      "prefab": "prefabs/character/LittleElectricPeople/male/body/body_male_A.zprefab",
+      "morphInfoFloatLength": 268,
+      "morphMeshCount": 7,
+      "maxTargetCount": 52,
+      "dataMode": "embedded"
+    }
+  ]
+}

@@ -6,6 +6,19 @@ import { defineProps, type SerializableClass } from '../types';
 import { BoundingBox } from '../../bounding_volume';
 import { meshInstanceClsMap } from './common';
 import { JSONData } from '../json';
+import { MAX_MORPH_TARGETS } from '../../../values';
+
+const MORPH_INFO_SERIALIZATION_VERSION = 2;
+
+function decodeFloat32Array(value: string): Float32Array<ArrayBuffer> {
+  const bytes = base64ToUint8Array(value);
+  if (bytes.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
+    throw new Error(`Invalid Float32 payload length: ${bytes.byteLength}`);
+  }
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return new Float32Array(buffer);
+}
 
 function serializeBoundingBox(box: BoundingBox): number[] {
   return [...box.minPoint, ...box.maxPoint];
@@ -191,26 +204,38 @@ export function getMeshClass(): SerializableClass {
                 morphInfo.data.byteOffset,
                 morphInfo.data.byteLength
               );
-              value.str[0] = JSON.stringify({ data: uint8ArrayToBase64(data), names: morphInfo.names });
+              value.str[0] = JSON.stringify({
+                version: MORPH_INFO_SERIALIZATION_VERSION,
+                weightCapacity: MAX_MORPH_TARGETS,
+                data: uint8ArrayToBase64(data),
+                names: morphInfo.names
+              });
             } else {
               value.str[0] = '';
             }
           },
           set(this: Mesh, value) {
             if (value.str[0]) {
+              let data: Float32Array<ArrayBuffer>;
+              let names: Record<string, number>;
               try {
                 const info = JSON.parse(value.str[0]);
-                const data = new Float32Array(base64ToUint8Array(info.data).buffer);
-                const names = info.names;
-                this.setMorphInfo({ data, names });
+                if (!info || typeof info !== 'object' || typeof info.data !== 'string') {
+                  throw new Error('Invalid serialized MorphInfo object');
+                }
+                data = decodeFloat32Array(info.data);
+                names = info.names && typeof info.names === 'object' ? info.names : {};
               } catch {
-                const data = new Float32Array(base64ToUint8Array(value.str[0]).buffer);
-                const names: Record<string, number> = {};
+                if (value.str[0].trimStart().startsWith('{')) {
+                  throw new Error('Invalid serialized MorphInfo JSON');
+                }
+                data = decodeFloat32Array(value.str[0]);
+                names = {};
                 for (let i = 0; i < data[3]; i++) {
                   names[`Target${i}`] = i;
                 }
-                this.setMorphInfo({ data, names });
               }
+              this.setMorphInfo({ data, names });
             } else {
               this.setMorphInfo(null);
             }

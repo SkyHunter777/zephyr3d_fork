@@ -104,7 +104,7 @@ export const MORPH_TARGET_TEX3 = 7;
 /** @public */
 export const MAX_MORPH_ATTRIBUTES = 8;
 /** @public */
-export const MAX_MORPH_TARGETS = 256;
+export const MAX_MORPH_TARGETS = 1024;
 /** @public */
 export const MORPH_WEIGHTS_VECTOR_COUNT = (MAX_MORPH_TARGETS + 3) >> 2;
 /** @public */

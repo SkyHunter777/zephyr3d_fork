@@ -23,7 +23,13 @@ import {
 } from '@zephyr3d/device';
 import type { Scene } from './scene';
 import { BoundingBox, type BoundingVolume } from '../utility/bounding_volume';
-import { MORPH_ATTRIBUTE_VECTOR_COUNT, MORPH_WEIGHTS_VECTOR_COUNT, QUEUE_OPAQUE } from '../values';
+import {
+  MAX_MORPH_ATTRIBUTES,
+  MAX_MORPH_TARGETS,
+  MORPH_ATTRIBUTE_VECTOR_COUNT,
+  MORPH_WEIGHTS_VECTOR_COUNT,
+  QUEUE_OPAQUE
+} from '../values';
 import { mixinDrawable } from '../render/drawable_mixin';
 import { RenderBundleWrapper } from '../render/renderbundle_wrapper';
 import type { SceneNode } from './scene_node';
@@ -46,6 +52,60 @@ export type MeshUpdateCallback = (frameId: number, elapsedInSeconds: number, del
 export interface MorphBoundingInfo {
   targetBoxes: BoundingBox[];
   originBox: BoundingBox;
+}
+
+const MORPH_INFO_HEADER_LENGTH = 4;
+const LEGACY_MORPH_TARGET_CAPACITY = 256;
+const LEGACY_MORPH_INFO_DATA_LENGTH =
+  MORPH_INFO_HEADER_LENGTH + LEGACY_MORPH_TARGET_CAPACITY + MAX_MORPH_ATTRIBUTES;
+const MORPH_INFO_DATA_LENGTH = MORPH_INFO_HEADER_LENGTH + MAX_MORPH_TARGETS + MAX_MORPH_ATTRIBUTES;
+
+/**
+ * Converts legacy and current morph-info payloads to the runtime layout.
+ *
+ * Attribute offsets live after the source payload's weight capacity, so they must be
+ * relocated instead of copying an older payload as one contiguous array.
+ */
+function normalizeMorphInfoData(data: MorphInfo['data']) {
+  const normalized = new Float32Array(MORPH_INFO_DATA_LENGTH);
+  normalized.fill(-1, MORPH_INFO_HEADER_LENGTH + MAX_MORPH_TARGETS);
+
+  const declaredCount = Math.max(0, Math.floor(Number(data[3]) || 0));
+  const canonicalWeightCapacity =
+    data.length === LEGACY_MORPH_INFO_DATA_LENGTH
+      ? LEGACY_MORPH_TARGET_CAPACITY
+      : data.length === MORPH_INFO_DATA_LENGTH
+        ? MAX_MORPH_TARGETS
+        : null;
+  const hasAttributeOffsets =
+    canonicalWeightCapacity !== null ||
+    data.length >= MORPH_INFO_HEADER_LENGTH + declaredCount + MAX_MORPH_ATTRIBUTES;
+  const sourceWeightCapacity = Math.max(
+    0,
+    canonicalWeightCapacity ??
+      (hasAttributeOffsets
+        ? data.length - MORPH_INFO_HEADER_LENGTH - MAX_MORPH_ATTRIBUTES
+        : data.length - MORPH_INFO_HEADER_LENGTH)
+  );
+  const supportedCount = Math.min(declaredCount, sourceWeightCapacity, MAX_MORPH_TARGETS);
+
+  for (let i = 0; i < Math.min(MORPH_INFO_HEADER_LENGTH - 1, data.length); i++) {
+    normalized[i] = Number(data[i]);
+  }
+  normalized[3] = supportedCount;
+  for (let i = 0; i < supportedCount; i++) {
+    normalized[MORPH_INFO_HEADER_LENGTH + i] = Number(data[MORPH_INFO_HEADER_LENGTH + i]);
+  }
+  if (hasAttributeOffsets) {
+    const sourceAttributeOffset = MORPH_INFO_HEADER_LENGTH + sourceWeightCapacity;
+    for (let i = 0; i < MAX_MORPH_ATTRIBUTES; i++) {
+      normalized[MORPH_INFO_HEADER_LENGTH + MAX_MORPH_TARGETS + i] = Number(
+        data[sourceAttributeOffset + i] ?? -1
+      );
+    }
+  }
+
+  return { data: normalized, declaredCount, supportedCount };
 }
 
 const MeshBase = castObservable(applyMixins(GraphNode, mixinDrawable))<{
@@ -351,9 +411,21 @@ export class Mesh extends MeshBase implements BatchDrawable {
           buffer: new DRef()
         } as MorphInfo;
       }
-      this._morphInfo.data = info.data.slice();
-      this._morphInfo.names = { ...info.names };
-      if (info.buffer?.get()) {
+      const normalized = normalizeMorphInfoData(info.data);
+      if (normalized.declaredCount !== normalized.supportedCount) {
+        console.warn(
+          `Morph target count truncated from ${normalized.declaredCount} to ${normalized.supportedCount} to fit the runtime buffer layout`
+        );
+      }
+      const names: Record<string, number> = {};
+      for (const [name, index] of Object.entries(info.names ?? {})) {
+        if (Number.isInteger(index) && index >= 0 && index < normalized.supportedCount) {
+          names[name] = index;
+        }
+      }
+      this._morphInfo.data = normalized.data;
+      this._morphInfo.names = names;
+      if (info.data.length === MORPH_INFO_DATA_LENGTH && info.buffer?.get()) {
         this._morphInfo.buffer!.set(info.buffer.get());
       } else {
         const bufferType = new PBStructTypeInfo('dummy', 'std140', [
@@ -370,7 +442,7 @@ export class Mesh extends MeshBase implements BatchDrawable {
           {
             usage: 'uniform'
           },
-          info.data
+          normalized.data
         );
         this._morphInfo.buffer!.set(morphUniformBuffer);
       }

@@ -1,7 +1,9 @@
-import { MemoryFS, Vector3 } from '@zephyr3d/base';
+import { MemoryFS, uint8ArrayToBase64, Vector3 } from '@zephyr3d/base';
 import {
   AssetHierarchyNode,
   BoundingBox,
+  MAX_MORPH_ATTRIBUTES,
+  MAX_MORPH_TARGETS,
   Mesh,
   ResourceManager,
   Scene,
@@ -76,6 +78,74 @@ function expectBoundingBox(box: BoundingBox | null, min: number[], max: number[]
 }
 
 describe('morph target groups', () => {
+  test('normalizes legacy 256-slot MorphInfo and relocates attribute offsets', () => {
+    const scene = new Scene();
+    const mesh = new Mesh(scene);
+    const legacyCapacity = 256;
+    const legacy = new Float32Array(4 + legacyCapacity + MAX_MORPH_ATTRIBUTES);
+    legacy.set([32, 16, 128, 2], 0);
+    legacy[4] = 0.25;
+    legacy[5] = 0.75;
+    legacy.fill(-1, 4 + legacyCapacity);
+    legacy[4 + legacyCapacity] = 123;
+
+    mesh.setMorphInfo({ data: legacy, names: { smile: 0, blink: 1, invalid: 256 } });
+
+    const normalized = mesh.getMorphInfo()!;
+    expect(normalized.data).toHaveLength(4 + MAX_MORPH_TARGETS + MAX_MORPH_ATTRIBUTES);
+    expect(Array.from(normalized.data.slice(0, 6))).toEqual([32, 16, 128, 2, 0.25, 0.75]);
+    expect(normalized.data[4 + MAX_MORPH_TARGETS]).toBe(123);
+    expect(Array.from(normalized.data.slice(4 + MAX_MORPH_TARGETS + 1))).toEqual(
+      Array(MAX_MORPH_ATTRIBUTES - 1).fill(-1)
+    );
+    expect(normalized.names).toEqual({ smile: 0, blink: 1 });
+  });
+
+  test('preserves lab 1024-slot MorphInfo above the legacy target limit', () => {
+    const scene = new Scene();
+    const mesh = new Mesh(scene);
+    const data = new Float32Array(4 + MAX_MORPH_TARGETS + MAX_MORPH_ATTRIBUTES);
+    data.set([256, 256, 1024, 737], 0);
+    data[4 + 736] = 0.625;
+    data.fill(-1, 4 + MAX_MORPH_TARGETS);
+    data[4 + MAX_MORPH_TARGETS] = 9876;
+
+    mesh.setMorphInfo({ data, names: { last: 736, invalid: MAX_MORPH_TARGETS } });
+
+    const normalized = mesh.getMorphInfo()!;
+    expect(mesh.getNumMorphTargets()).toBe(737);
+    expect(normalized.data[4 + 736]).toBe(0.625);
+    expect(normalized.data[4 + MAX_MORPH_TARGETS]).toBe(9876);
+    expect(normalized.names).toEqual({ last: 736 });
+  });
+
+  test('reads legacy raw-base64 MorphInfo and writes a versioned 1024-slot payload', async () => {
+    const legacyCapacity = 256;
+    const legacy = new Float32Array(4 + legacyCapacity + MAX_MORPH_ATTRIBUTES);
+    legacy.set([16, 16, 64, 1], 0);
+    legacy[4] = 0.5;
+    legacy.fill(-1, 4 + legacyCapacity);
+    legacy[4 + legacyCapacity] = 42;
+    const manager = new ResourceManager(new MemoryFS());
+    mockResourceManager = manager;
+    const scene = new Scene();
+    const mesh = new Mesh(scene);
+
+    await manager.deserializeObjectProps(mesh, {
+      MorphInfo: uint8ArrayToBase64(new Uint8Array(legacy.buffer))
+    });
+    const serialized = await manager.serializeObject(mesh);
+    const payload = JSON.parse((serialized.Object as Record<string, string>).MorphInfo);
+
+    expect(mesh.getMorphTargetName(0)).toBe('Target0');
+    expect(mesh.getMorphInfo()!.data[4 + MAX_MORPH_TARGETS]).toBe(42);
+    expect(payload.version).toBe(2);
+    expect(payload.weightCapacity).toBe(MAX_MORPH_TARGETS);
+    expect(Buffer.from(payload.data, 'base64').byteLength).toBe(
+      (4 + MAX_MORPH_TARGETS + MAX_MORPH_ATTRIBUTES) * Float32Array.BYTES_PER_ELEMENT
+    );
+  });
+
   test('builds SharedModel morph target groups by target name', () => {
     const model = new SharedModel();
     const face = new AssetHierarchyNode('face', model);
