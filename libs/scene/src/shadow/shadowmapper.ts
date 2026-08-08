@@ -26,7 +26,7 @@ import { Camera } from '../camera/camera';
 import { SSM } from './ssm';
 import { ESM } from './esm';
 import { VSM } from './vsm';
-import type { PCFPD } from './pcf_pd';
+import { PCFPD } from './pcf_pd';
 import { PCFOPT } from './pcf_opt';
 import { PCSS } from './pcss';
 import type { PointLight, PunctualLight, RectLight, SpotLight } from '../scene/light';
@@ -1297,7 +1297,9 @@ export class ShadowMapper extends Disposable {
       const esm = this._impl as ESM;
       esm.blur = this._esmBlur;
       esm.logSpace = this._esmLogSpace;
-    } else if (mode === 'pcf' || mode === 'pcf-opt' || mode === 'pcf-pd') {
+    } else if (mode === 'pcf-pd') {
+      this._impl = new PCFPD(this._pdSampleCount, this._pdSampleRadius);
+    } else if (mode === 'pcf' || mode === 'pcf-opt') {
       this._impl = new PCFOPT(this._pcfKernelSize);
     } else if (mode === 'pcss') {
       this._impl = new PCSS(

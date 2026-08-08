@@ -291,6 +291,46 @@ export function getPunctualLightClass(): SerializableClass {
           }
         },
         {
+          name: 'PCFSampleCount',
+          description: 'Sample count for the deprecated Poisson-disc PCF shadow mode',
+          type: 'int',
+          phase: 2,
+          options: {
+            minValue: 1,
+            maxValue: 64
+          },
+          default: 24,
+          get(this: PunctualLight, value) {
+            value.num[0] = this.shadow.pdSampleCount;
+          },
+          set(this: PunctualLight, value) {
+            this.shadow.pdSampleCount = value.num[0];
+          },
+          isValid(this: PunctualLight) {
+            return !!this.castShadow && this.shadow.mode === 'pcf-pd';
+          }
+        },
+        {
+          name: 'PCFSampleRadius',
+          description: 'Sample radius for the deprecated Poisson-disc PCF shadow mode',
+          type: 'float',
+          phase: 2,
+          options: {
+            minValue: 0,
+            maxValue: 64
+          },
+          default: 3,
+          get(this: PunctualLight, value) {
+            value.num[0] = this.shadow.pdSampleRadius;
+          },
+          set(this: PunctualLight, value) {
+            this.shadow.pdSampleRadius = value.num[0];
+          },
+          isValid(this: PunctualLight) {
+            return !!this.castShadow && this.shadow.mode === 'pcf-pd';
+          }
+        },
+        {
           name: 'PCSSLightRadius',
           description: 'Light radius for PCSS shadow',
           type: 'float',
