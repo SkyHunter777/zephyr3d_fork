@@ -10,6 +10,14 @@ import type { DrawContext } from '../render';
 import { LIGHT_TYPE_POINT, MaterialVaryingFlags, RENDER_PASS_TYPE_LIGHT } from '../values';
 
 /**
+ * HDR range packed into the SkinSSS side buffer when the render graph falls
+ * back to an 8-bit format. The material divides the scatter irradiance by this
+ * factor on write and {@link SkinSSS} multiplies it back after the blur.
+ * @public
+ */
+export const SKIN_SSS_LDR_ENCODE_RANGE = 4;
+
+/**
  * Stylized realtime skin material.
  *
  * @remarks
@@ -20,7 +28,9 @@ import { LIGHT_TYPE_POINT, MaterialVaryingFlags, RENDER_PASS_TYPE_LIGHT } from '
  * side buffer in screen space and adds it back over the opaque color, letting light bleed into
  * the dark side of the terminator for a soft character-skin look.
  *
- * The optional `subsurfaceTexture` uses R as skin mask and G as local softness.
+ * The optional `subsurfaceTexture` uses R as skin mask, G as local softness and B as thickness
+ * for the back-lit transmission term (thin regions such as ears and nostrils glow when lit from
+ * behind; enable it by setting {@link SkinMaterial.transmissionStrength}).
  *
  * @public
  */
@@ -37,6 +47,8 @@ export class SkinMaterial
   private _scatterWrap: number;
   private _scatterStrength: number;
   private readonly _scatterColor: Vector4;
+  private _transmissionStrength: number;
+  private _transmissionPower: number;
 
   constructor() {
     super();
@@ -47,6 +59,8 @@ export class SkinMaterial
     this._scatterWrap = 0.65;
     this._scatterStrength = 1.5;
     this._scatterColor = new Vector4(1, 0.42, 0.28, 1);
+    this._transmissionStrength = 0;
+    this._transmissionPower = 4;
     this.useFeature(SkinMaterial.FEATURE_VERTEX_NORMAL, true);
   }
 
@@ -72,6 +86,8 @@ export class SkinMaterial
     this.scatterWrap = other.scatterWrap;
     this.scatterStrength = other.scatterStrength;
     this.scatterColor = other.scatterColor;
+    this.transmissionStrength = other.transmissionStrength;
+    this.transmissionPower = other.transmissionPower;
   }
 
   /** true if vertex normal attribute presents */
@@ -162,6 +178,33 @@ export class SkinMaterial
     }
   }
 
+  /**
+   * Strength of the back-lit transmission term. Requires a `subsurfaceTexture`
+   * with thickness in the B channel; 0 (the default) disables transmission.
+   */
+  get transmissionStrength() {
+    return this._transmissionStrength;
+  }
+  set transmissionStrength(val) {
+    const next = Math.max(0, val ?? 0);
+    if (next !== this._transmissionStrength) {
+      this._transmissionStrength = next;
+      this.uniformChanged();
+    }
+  }
+
+  /** Exponent of the back-lit transmission falloff. Higher values tighten the glow. */
+  get transmissionPower() {
+    return this._transmissionPower;
+  }
+  set transmissionPower(val) {
+    const next = Math.max(1, val ?? 1);
+    if (next !== this._transmissionPower) {
+      this._transmissionPower = next;
+      this.uniformChanged();
+    }
+  }
+
   /** Warm tint for the blurred skin lighting contribution. */
   get scatterColor(): Immutable<Vector4> {
     return this._scatterColor;
@@ -212,6 +255,13 @@ export class SkinMaterial
         scope.zSkinScatterWrap = pb.float().uniform(2);
         scope.zSkinScatterStrength = pb.float().uniform(2);
         scope.zSkinScatterColor = pb.vec4().uniform(2);
+        // Encodes HDR scatter irradiance into the SkinSSS buffer range when the
+        // render graph falls back to rgba8unorm (see getSSSLightingTextureFormat).
+        scope.zSkinScatterEncodeScale = pb.float().uniform(2);
+        if (this.subsurfaceTexture) {
+          scope.zSkinTransmissionStrength = pb.float().uniform(2);
+          scope.zSkinTransmissionPower = pb.float().uniform(2);
+        }
       }
       scope.$l.albedo = this.calculateAlbedoColor(scope);
       if (this.vertexColor) {
@@ -230,10 +280,12 @@ export class SkinMaterial
         scope.$l.roughness = pb.sqrt(pb.div(2, pb.add(scope.zSkinShininess, 2)));
         scope.$l.skinMask = pb.float(1);
         scope.$l.skinSoftness = pb.float(0);
+        scope.$l.skinThickness = pb.float(0);
         if (this.subsurfaceTexture) {
           scope.$l.subsurfaceTexel = this.sampleSubsurfaceTexture(scope);
           scope.skinMask = pb.clamp(scope.subsurfaceTexel.r, 0, 1);
           scope.skinSoftness = pb.clamp(scope.subsurfaceTexel.g, 0, 1);
+          scope.skinThickness = pb.clamp(scope.subsurfaceTexel.b, 0, 1);
         }
         scope.$l.diffuseLighting = pb.vec3(0);
         scope.$l.scatterLighting = pb.vec3(0);
@@ -350,6 +402,24 @@ export class SkinMaterial
               1 / Math.PI
             )
           );
+          if (that.subsurfaceTexture) {
+            // Back-lit transmission: thin regions (B channel of the subsurface
+            // texture) glow when the light faces the camera through the
+            // surface. shadowFade already releases the shadow term on the
+            // back-facing side, so the glow is not killed by self shadowing.
+            this.$l.transmission = pb.mul(
+              pb.pow(
+                pb.clamp(pb.dot(pb.neg(this.lightDir), this.viewVec), 0, 1),
+                this.zSkinTransmissionPower
+              ),
+              this.skinThickness,
+              this.zSkinTransmissionStrength
+            );
+            this.scatterLighting = pb.add(
+              this.scatterLighting,
+              pb.mul(this.diffuseLightColor, this.transmission, this.diffuseScale, 1 / Math.PI)
+            );
+          }
           // Normalized Blinn with Schlick Fresnel (skin F0 = 0.028). Specular
           // keeps the unfaded shadow term and hard NoL masking.
           this.$l.specNormalization = pb.div(pb.add(this.pointShininess, 8), 8 * Math.PI);
@@ -378,7 +448,7 @@ export class SkinMaterial
           scope.zSkinScatterStrength,
           pb.add(0.75, pb.mul(scope.skinSoftness, 0.45))
         );
-        scope.$l.skinSSS = pb.vec4(scope.scatterTerm, scope.skinMask);
+        scope.$l.skinSSS = pb.vec4(pb.mul(scope.scatterTerm, scope.zSkinScatterEncodeScale), scope.skinMask);
         if (
           this.drawContext.materialFlags &
           (MaterialVaryingFlags.SCENE_STORE_ROUGHNESS | MaterialVaryingFlags.SCENE_STORE_NORMAL)
@@ -433,6 +503,12 @@ export class SkinMaterial
       bindGroup.setValue('zSkinScatterWrap', this._scatterWrap);
       bindGroup.setValue('zSkinScatterStrength', this._scatterStrength);
       bindGroup.setValue('zSkinScatterColor', this._scatterColor);
+      const ldrSkinSSS = ctx.SkinSSSTexture && ctx.SkinSSSTexture.format === 'rgba8unorm';
+      bindGroup.setValue('zSkinScatterEncodeScale', ldrSkinSSS ? 1 / SKIN_SSS_LDR_ENCODE_RANGE : 1);
+      if (this.subsurfaceTexture) {
+        bindGroup.setValue('zSkinTransmissionStrength', this._transmissionStrength);
+        bindGroup.setValue('zSkinTransmissionPower', this._transmissionPower);
+      }
     }
   }
 }
