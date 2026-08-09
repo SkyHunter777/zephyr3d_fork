@@ -31,6 +31,7 @@ export class SpringNodePoseTracker {
       if (rotationsMatch(node.rotation, state.appliedRotation)) {
         node.rotation.set(state.inputRotation);
       } else {
+        // Animation, mocap, IK or another upstream system supplied a new pose.
         state.inputRotation.set(node.rotation);
       }
     }
