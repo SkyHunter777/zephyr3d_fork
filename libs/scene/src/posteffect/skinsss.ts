@@ -11,9 +11,10 @@ import { AbstractPostEffect, PostEffectLayer } from './posteffect';
  *
  * @remarks
  * This is intentionally separate from the profile-based {@link SSS} pass. It follows the simpler
- * depth-aware blur used by many character renderers: a skin material writes a lighting multiplier
- * into a side buffer, then this pass performs a fixed 9x9 depth-aware blur and composites it back
- * over the opaque color.
+ * depth-aware blur used by many character renderers: a skin material writes an additive scatter
+ * irradiance term into a side buffer, then this pass performs a fixed 9x9 depth-aware blur and
+ * adds the blurred term back over the opaque color. Because the composite is additive, scattered
+ * light bleeds into regions where the base lighting is dark (the far side of the terminator).
  *
  * @public
  */
@@ -45,7 +46,7 @@ export class SkinSSS extends AbstractPostEffect {
     this._strength = Math.max(0, val ?? 0);
   }
 
-  /** Bias subtracted from the blurred skin mask before compositing. */
+  /** Skin mask coverage threshold. Scattering fades in as the blurred mask coverage exceeds this. */
   get opacity() {
     return this._opacity;
   }
@@ -171,8 +172,10 @@ export class SkinSSS extends AbstractPostEffect {
                   pb.vec2(1)
                 );
                 this.$l.skinSample = pb.textureSampleLevel(this.skinTex, this.sampleUV, 0);
+                // Non-skin pixels contribute nothing; their zero alpha also
+                // lowers the coverage used to gate the composite below.
                 this.$if(pb.lessThanEqual(this.skinSample.a, 1e-4), function () {
-                  this.skinSample = pb.vec4(0, 0, 0, this.opacity);
+                  this.skinSample = pb.vec4(0);
                 });
                 this.$l.sampleDepth01 = this.readDepth01(this.sampleUV);
                 this.$l.sampleDepth = pb.max(pb.mul(this.sampleDepth01, this.cameraNearFar.y), 1e-4);
@@ -198,17 +201,14 @@ export class SkinSSS extends AbstractPostEffect {
             });
             this.$if(pb.greaterThan(this.weightSum, 1e-4), function () {
               this.$l.blurredSkin = pb.div(this.sum, this.weightSum);
-              this.$l.alphaDelta = pb.sub(this.blurredSkin.a, this.opacity);
-              this.$l.referenceLit = pb.mul(
-                this.baseColor.rgb,
-                pb.add(
-                  pb.vec3(pb.sub(1, this.alphaDelta)),
-                  pb.mul(this.blurredSkin.rgb, pb.max(pb.sub(1, this.opacity), 0), this.colorBoost)
-                )
-              );
+              // Additive composite: the blurred scatter irradiance is added on
+              // top of the base lighting so light bleeds into dark regions.
+              // Coverage gating keeps nearby non-skin pixels (collars, hair)
+              // from being tinted by neighboring skin samples.
+              this.$l.coverage = pb.smoothStep(this.opacity, pb.add(this.opacity, 0.35), this.blurredSkin.a);
               this.result = pb.add(
                 this.baseColor.rgb,
-                pb.mul(pb.sub(this.referenceLit, this.baseColor.rgb), this.strength)
+                pb.mul(this.blurredSkin.rgb, this.colorBoost, this.coverage, this.strength)
               );
             });
           });

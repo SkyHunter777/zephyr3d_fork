@@ -14,9 +14,11 @@ import { LIGHT_TYPE_POINT, MaterialVaryingFlags, RENDER_PASS_TYPE_LIGHT } from '
  *
  * @remarks
  * This material is designed for the {@link SkinSSS} post effect. It renders a regular lit color,
- * and when `camera.skinSSS` is enabled it also writes a skin lighting multiplier into the
- * `SkinSSSTexture` MRT. The post effect blurs that side buffer in screen space to create a soft
- * character-skin look similar to simple game/anime skin renderers.
+ * and when `camera.skinSSS` is enabled it also writes an additive scatter irradiance term into the
+ * `SkinSSSTexture` MRT. The scatter term is the difference between a wide wrapped diffuse and the
+ * visible diffuse, so it concentrates around the lighting terminator. The post effect blurs that
+ * side buffer in screen space and adds it back over the opaque color, letting light bleed into
+ * the dark side of the terminator for a soft character-skin look.
  *
  * The optional `subsurfaceTexture` uses R as skin mask and G as local softness.
  *
@@ -39,11 +41,11 @@ export class SkinMaterial
   constructor() {
     super();
     this._shininess = 72;
-    this._specularStrength = 0.22;
+    this._specularStrength = 1;
     this._diffuseWrap = 0.28;
     this._diffuseSoftness = 0.45;
     this._scatterWrap = 0.65;
-    this._scatterStrength = 0.7;
+    this._scatterStrength = 1.5;
     this._scatterColor = new Vector4(1, 0.42, 0.28, 1);
     this.useFeature(SkinMaterial.FEATURE_VERTEX_NORMAL, true);
   }
@@ -236,18 +238,24 @@ export class SkinMaterial
         scope.$l.diffuseLighting = pb.vec3(0);
         scope.$l.scatterLighting = pb.vec3(0);
         scope.$l.specularLighting = pb.vec3(0);
+        scope.$l.NoV = pb.clamp(pb.dot(scope.normal, scope.viewVec), 0, 1);
         if (this.needCalculateEnvLight() && baseLightPass) {
           scope.$l.envDiffuse = this.getEnvLightIrradiance(scope, scope.normal);
           scope.diffuseLighting = pb.add(scope.diffuseLighting, scope.envDiffuse);
+          // Ambient light is nearly directionless, so it carries almost no
+          // terminator information. Feed only a small fraction into the scatter
+          // buffer to avoid tinting the whole face uniformly.
           scope.scatterLighting = pb.add(
             scope.scatterLighting,
-            pb.mul(scope.envDiffuse, pb.add(0.7, pb.mul(scope.skinSoftness, 0.45)))
+            pb.mul(scope.envDiffuse, pb.mul(0.15, pb.add(1, scope.skinSoftness)))
           );
           scope.$l.reflectVec = this.calculateReflectionVector(scope, scope.normal, scope.viewVec);
+          scope.$l.envFresnel = pb.add(0.028, pb.mul(0.972, pb.pow(pb.sub(1, scope.NoV), 5)));
           scope.specularLighting = pb.add(
             scope.specularLighting,
             pb.mul(
               this.getEnvLightRadiance(scope, scope.reflectVec, scope.roughness),
+              scope.envFresnel,
               scope.zSkinSpecularStrength
             )
           );
@@ -297,15 +305,25 @@ export class SkinMaterial
           this.$l.shadowTerm = shadow
             ? that.calculateShadow(this, this.$inputs.worldPos, pb.max(this.NoL, 1e-5))
             : pb.float(1);
-          this.$l.lightColor = pb.mul(colorIntensity.rgb, colorIntensity.a, this.lightAtten, this.shadowTerm);
+          // Fade the shadow toward 1 around the terminator so wrapped lighting
+          // is not hard-clipped by the shadow map (which would reintroduce the
+          // sharp cut that the wrap is meant to remove).
+          this.$l.shadowFade = pb.mix(
+            pb.float(1),
+            this.shadowTerm,
+            pb.smoothStep(pb.neg(this.zSkinScatterWrap), 0.15, this.rawNoL)
+          );
+          this.$l.lightColor = pb.mul(colorIntensity.rgb, colorIntensity.a, this.lightAtten);
+          this.$l.diffuseLightColor = pb.mul(this.lightColor, this.shadowFade);
           this.$l.halfVec = pb.normalize(pb.add(this.viewVec, this.lightDir));
           this.$l.NoH = pb.clamp(pb.dot(this.normal, this.halfVec), 0, 1);
+          this.$l.LoH = pb.clamp(pb.dot(this.lightDir, this.halfVec), 0, 1);
           this.$l.pointShininess = pb.max(
             pb.div(this.zSkinShininess, pb.add(1, pb.mul(this.sourceRadiusFactor, 32))),
             1
           );
-          this.$l.hardDiffuse = pb.mul(this.lightColor, this.NoL, this.diffuseScale, 1 / Math.PI);
-          this.$l.softDiffuse = pb.mul(this.lightColor, this.NoLWrap, this.diffuseScale, 1 / Math.PI);
+          this.$l.hardDiffuse = pb.mul(this.diffuseLightColor, this.NoL, this.diffuseScale, 1 / Math.PI);
+          this.$l.softDiffuse = pb.mul(this.diffuseLightColor, this.NoLWrap, this.diffuseScale, 1 / Math.PI);
           this.$l.softness = pb.clamp(
             pb.add(this.zSkinDiffuseSoftness, pb.mul(this.skinSoftness, 0.35)),
             0,
@@ -315,37 +333,52 @@ export class SkinMaterial
             this.diffuseLighting,
             pb.mix(this.hardDiffuse, this.softDiffuse, this.softness)
           );
+          // Difference between the wide scatter wrap and the visible diffuse:
+          // nonzero only in the transition band around the terminator, which is
+          // where the blurred red bleed should appear.
+          this.$l.scatterFalloff = pb.max(
+            pb.sub(this.NoLScatter, pb.mix(this.NoL, this.NoLWrap, this.softness)),
+            0
+          );
           this.scatterLighting = pb.add(
             this.scatterLighting,
             pb.mul(
-              this.lightColor,
-              this.NoLScatter,
-              pb.add(0.7, pb.mul(this.skinSoftness, 0.55)),
+              this.diffuseLightColor,
+              this.scatterFalloff,
+              pb.add(1, pb.mul(this.skinSoftness, 0.55)),
               this.diffuseScale,
               1 / Math.PI
             )
           );
+          // Normalized Blinn with Schlick Fresnel (skin F0 = 0.028). Specular
+          // keeps the unfaded shadow term and hard NoL masking.
+          this.$l.specNormalization = pb.div(pb.add(this.pointShininess, 8), 8 * Math.PI);
+          this.$l.specFresnel = pb.add(0.028, pb.mul(0.972, pb.pow(pb.sub(1, this.LoH), 5)));
           this.$l.specular = pb.mul(
             this.lightColor,
+            this.shadowTerm,
             pb.pow(this.NoH, this.pointShininess),
+            this.specNormalization,
+            this.specFresnel,
             this.zSkinSpecularStrength,
             this.specularScale,
-            this.NoLWrap
+            this.NoL
           );
           this.specularLighting = pb.add(this.specularLighting, this.specular);
         });
         scope.$l.litColor = pb.add(pb.mul(scope.albedo.rgb, scope.diffuseLighting), scope.specularLighting);
-        scope.$l.scatterMultiplier = pb.add(
-          baseLightPass ? pb.vec3(1) : pb.vec3(0),
-          pb.mul(
-            scope.albedo.rgb,
-            scope.scatterLighting,
-            scope.zSkinScatterColor.rgb,
-            scope.zSkinScatterStrength,
-            pb.add(0.75, pb.mul(scope.skinSoftness, 0.45))
-          )
+        // Additive scatter irradiance for the SkinSSS post effect. Base and
+        // additive light passes both write the plain term; the additive blend
+        // (RGB one/one, alpha zero/one) accumulates RGB and keeps the mask
+        // written by the base pass in alpha.
+        scope.$l.scatterTerm = pb.mul(
+          scope.albedo.rgb,
+          scope.scatterLighting,
+          scope.zSkinScatterColor.rgb,
+          scope.zSkinScatterStrength,
+          pb.add(0.75, pb.mul(scope.skinSoftness, 0.45))
         );
-        scope.$l.skinSSS = pb.vec4(scope.scatterMultiplier, scope.skinMask);
+        scope.$l.skinSSS = pb.vec4(scope.scatterTerm, scope.skinMask);
         if (
           this.drawContext.materialFlags &
           (MaterialVaryingFlags.SCENE_STORE_ROUGHNESS | MaterialVaryingFlags.SCENE_STORE_NORMAL)

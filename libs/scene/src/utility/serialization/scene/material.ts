@@ -1964,7 +1964,7 @@ export function getSkinMaterialClass(manager: ResourceManager): SerializableClas
               this.specularStrength = value.num[0];
             },
             getDefaultValue(this: SkinMaterial) {
-              return this.$isInstance ? this.coreMaterial.specularStrength : 0.22;
+              return this.$isInstance ? this.coreMaterial.specularStrength : 1;
             }
           },
           {
@@ -2044,7 +2044,7 @@ export function getSkinMaterialClass(manager: ResourceManager): SerializableClas
               this.scatterStrength = value.num[0];
             },
             getDefaultValue(this: SkinMaterial) {
-              return this.$isInstance ? this.coreMaterial.scatterStrength : 0.7;
+              return this.$isInstance ? this.coreMaterial.scatterStrength : 1.5;
             }
           },
           {

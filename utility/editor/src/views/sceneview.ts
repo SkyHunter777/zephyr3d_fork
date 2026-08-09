@@ -31,9 +31,11 @@ import {
   MSDFTextSprite,
   MSDFText,
   JointDynamicsModifier,
+  SpringModifier,
   SphereShape,
   CapsuleShape,
-  RenderGraphExecutor
+  RenderGraphExecutor,
+  SpringSystem
 } from '@zephyr3d/scene';
 import type { RGProfileResult, RGProfileScopeResult } from '@zephyr3d/scene';
 import { SceneNode } from '@zephyr3d/scene';
@@ -176,7 +178,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
   private _activePluginContributionShortcuts: boolean;
   private _springBoneGizmo: LineGizmo;
   private _springBoneColliderGizmo: ShapeGizmo;
-  private _springBone: JointDynamicsModifier;
+  private _springBone: JointDynamicsModifier | SpringModifier;
   private _propGridScrollTopFrames: number;
   private _assetPlacementLoadingCount: number;
   constructor(controller: SceneController) {
@@ -2032,7 +2034,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       this._currentEditTool.get()!.update(dt);
     }
     const inspectedObj = this._propGrid.currentObject;
-    if (inspectedObj instanceof JointDynamicsModifier) {
+    if (inspectedObj instanceof JointDynamicsModifier || inspectedObj instanceof SpringModifier) {
       this.selectSpringBone(inspectedObj);
       this.updateSpringBone(inspectedObj);
     } else {
@@ -2060,8 +2062,30 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       this._profileResult = null;
     }
   }
-  private updateSpringBone(obj: JointDynamicsModifier) {
+  private updateSpringBoneSpring(obj: SpringModifier) {
     if (!obj) {
+      return;
+    }
+    const springSystem = obj.springSystem;
+    if (!springSystem) {
+      return;
+    }
+    const chains = springSystem instanceof SpringSystem ? [springSystem.chain] : springSystem.chains;
+    const vpMatrix = this.controller.model.scene.mainCamera.viewProjectionMatrix;
+    for (let i = 0; i < chains.length; i++) {
+      const chain = chains[i];
+      const line: Vector4[] = this._springBoneGizmo.lines[i];
+      for (let i = chain.particles.length - 1; i >= 0; i--) {
+        vpMatrix.transformPoint(chain.particles[i].position, line[i]);
+      }
+    }
+  }
+  private updateSpringBone(obj: JointDynamicsModifier | SpringModifier) {
+    if (!obj) {
+      return;
+    }
+    if (obj instanceof SpringModifier) {
+      this.updateSpringBoneSpring(obj);
       return;
     }
     const system = obj.jointDynamicsSystem;
@@ -2087,7 +2111,7 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
       );
     }
   }
-  private selectSpringBone(obj: JointDynamicsModifier) {
+  private selectSpringBone(obj: JointDynamicsModifier | SpringModifier) {
     if (obj !== this._springBone) {
       this._springBone = obj;
       if (this._springBoneGizmo) {
@@ -2101,7 +2125,16 @@ export class SceneView extends BaseView<SceneModel, SceneController> {
         }
         this._springBoneColliderGizmo = null;
       }
-      if (obj) {
+      if (obj instanceof SpringModifier) {
+        const springSystem = obj.springSystem!;
+        const chains = springSystem instanceof SpringSystem ? [springSystem.chain] : springSystem.chains;
+        this._springBoneGizmo = {
+          lines: chains.map((chain) => chain.particles.map(() => new Vector4())),
+          width: 2,
+          color: new Vector4(1, 1, 0, 1)
+        };
+        this._postGizmoRenderer.addLineGizmo(this._springBoneGizmo);
+      } else if (obj instanceof JointDynamicsModifier) {
         const system = obj.jointDynamicsSystem;
         const chainConfig = system.chainConfig;
         this._springBoneGizmo = {

@@ -90,6 +90,7 @@ import {
   ConstantVec4Node
 } from '../blueprint/common/constants';
 import {
+  ChannelSDFMaskNode,
   ConstantTexture2DArrayNode,
   ConstantTexture2DNode,
   ConstantTextureCubeNode,
@@ -446,6 +447,7 @@ export class ResourceManager {
         FunctionInputNode.getSerializationCls(),
         FunctionOutputNode.getSerializationCls(),
         FunctionCallNode.getSerializationCls(this),
+        ChannelSDFMaskNode.getSerializationCls(),
         PannerNode.getSerializationCls(),
         TextureSampleNode.getSerializationCls(),
         VertexOutputNode.getSerializationCls(),

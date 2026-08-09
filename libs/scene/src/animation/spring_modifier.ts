@@ -1,6 +1,7 @@
 import { SkeletonModifier } from './skeleton_modifier';
 import type { SkeletonRig } from './skeleton';
 import type { SpringSystem } from './spring/spring_system';
+import type { MultiChainSpringSystem } from './spring/multi_chain_spring_system';
 
 /**
  * Post-processor wrapper for spring physics systems.
@@ -13,7 +14,7 @@ import type { SpringSystem } from './spring/spring_system';
  * @public
  */
 export class SpringModifier extends SkeletonModifier {
-  private _springSystem: SpringSystem;
+  private _springSystem: SpringSystem | MultiChainSpringSystem;
   private _weight: number;
   private _sourceId: string;
 
@@ -23,7 +24,7 @@ export class SpringModifier extends SkeletonModifier {
    * @param springSystem - The spring system to integrate
    * @param weight - Blend weight [0-1] (default: 1.0)
    */
-  constructor(springSystem: SpringSystem, weight: number = 1.0) {
+  constructor(springSystem: SpringSystem | MultiChainSpringSystem, weight: number = 1.0) {
     super();
     this._weight = weight;
     this._springSystem = springSystem;
@@ -33,7 +34,7 @@ export class SpringModifier extends SkeletonModifier {
   /**
    * Get the spring system.
    */
-  get springSystem(): SpringSystem {
+  get springSystem(): SpringSystem | MultiChainSpringSystem {
     return this._springSystem;
   }
 
