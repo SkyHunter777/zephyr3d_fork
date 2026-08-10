@@ -902,12 +902,7 @@ export abstract class BaseDevice extends Observable<DeviceEventMap> {
     });
   }
   /** @internal */
-  private _applyResize(
-    cssWidth: number,
-    cssHeight: number,
-    deviceWidth: number,
-    deviceHeight: number
-  ) {
+  private _applyResize(cssWidth: number, cssHeight: number, deviceWidth: number, deviceHeight: number) {
     const normalizedWidth = Math.max(0, Math.round(deviceWidth));
     const normalizedHeight = Math.max(0, Math.round(deviceHeight));
     if (this._canvas.width === normalizedWidth && this._canvas.height === normalizedHeight) {
