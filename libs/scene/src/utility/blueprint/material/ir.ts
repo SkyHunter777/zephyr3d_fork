@@ -1732,7 +1732,13 @@ class IRConstantTexture extends IRExpression {
   create(pb: ProgramBuilder): PBShaderExp {
     if (!pb.getGlobalScope()[this.name]) {
       // @ts-ignore
-      const exp = pb[this.type]().uniform(2);
+      const exp = (pb[this.type]() as PBShaderExp).uniform(2).withSampler({
+        addressU: this.addressU,
+        addressV: this.addressV,
+        minFilter: this.filterMin,
+        magFilter: this.filterMag,
+        mipFilter: this.filterMip
+      });
       exp.$autoSamplerKey = getBlueprintAutoSamplerKey({
         type: this.type,
         wrapS: this.addressU,
