@@ -294,10 +294,22 @@ export class PBRBluePrintMaterial
   fragmentShader(scope: PBFunctionScope) {
     const pb = scope.$builder;
     if (this.needFragmentColorInput()) {
-      for (const u of [...this._uniformValues, ...this._uniformTextures]) {
+      for (const u of this._uniformValues) {
         if (u.inFragmentShader) {
           // @ts-ignore dynamic shader type constructor
           pb.getGlobalScope()[u.name] = pb[u.type]().uniform(2);
+        }
+      }
+      for (const u of this._uniformTextures) {
+        if (u.inFragmentShader) {
+          // @ts-ignore dynamic shader type constructor
+          pb.getGlobalScope()[u.name] = (pb[u.type]().uniform(2) as PBShaderExp).withSampler({
+            addressU: u.wrapS as any,
+            addressV: u.wrapT as any,
+            minFilter: u.minFilter as any,
+            magFilter: u.magFilter as any,
+            mipFilter: u.mipFilter as any
+          });
         }
       }
       scope.zVertexColor = scope.$inputs.zOutDiffuse ?? pb.vec4(1);
