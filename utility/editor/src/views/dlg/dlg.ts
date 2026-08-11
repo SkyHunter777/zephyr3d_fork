@@ -21,6 +21,8 @@ import { DlgImportOptions } from './importoptionsdlg';
 import { DlgOpenFolder } from './openfolderdlg';
 import { DlgCreateProject, type CreateProjectResult } from './createprojectdlg';
 import { DlgShapeEditor } from './shapeeditordlg';
+import { ProjectService } from '../../core/services/project';
+import { DlgMaterialInstanceEditor } from './materialinstanceeditor';
 
 export class Dialog {
   public static messageBox(title: string, message: string, width?: number, height?: number) {
@@ -71,6 +73,23 @@ export class Dialog {
     width?: number,
     height?: number
   ) {
+    if (path) {
+      try {
+        if (await ProjectService.VFS.exists(path)) {
+          const stat = await ProjectService.VFS.stat(path);
+          if (stat.isFile) {
+            const content = JSON.parse(
+              (await ProjectService.VFS.readFile(path, { encoding: 'utf8' })) as string
+            ) as { type?: string };
+            if (content.type === 'PBRBluePrintMaterialInstance') {
+              return DlgMaterialInstanceEditor.editMaterialInstance(title, path, width, height);
+            }
+          }
+        }
+      } catch {
+        // Fall back to the graph editor if the file is not a material json yet.
+      }
+    }
     return DlgPBRMaterialEditor.editPBRMaterial(title, outputName, type, path, width, height);
   }
   public static async editMaterialFunction(title: string, path: string, width?: number, height?: number) {
