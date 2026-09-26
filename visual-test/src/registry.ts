@@ -6,7 +6,7 @@ import {
   hairMarschner,
   pbrMetalRoughGrid,
   skinShadow,
-  skinSss,
+  sss,
   unlitTextured
 } from './scenes/materials';
 import { pbrIbl, skyAtmosphere } from './scenes/env';
@@ -20,7 +20,22 @@ import {
   shadowPcss,
   shadowVsm
 } from './scenes/shadows';
-import { clusterManyLights, spotShadow } from './scenes/lighting';
+import {
+  clusterManyLights,
+  rectLightAutoRange,
+  rectLightBlueprint,
+  rectLightDiffuse,
+  rectLightGlossy,
+  rectLightMaterials,
+  rectLightPcssLarge,
+  rectLightPcssSmall,
+  rectLightPcssWall,
+  rectLightPhysical,
+  rectLightShadow,
+  rectLightShadowDom,
+  pointLightShadowDom,
+  spotShadow
+} from './scenes/lighting';
 import {
   waterCausticsCrest,
   waterCausticsDeepBed,
@@ -51,6 +66,16 @@ import {
   taaMultiframe
 } from './scenes/post';
 import { eyeAngled, eyeFrontal, eyePupilDilated, eyeSocketOcclusion } from './scenes/eye';
+import {
+  transmissionThicknessLadder,
+  transmissionThicknessScale,
+  transmissionThicknessSlant,
+  transmissionThicknessSphere,
+  transmissionThicknessSphereFine,
+  transmissionThicknessLadderPoint,
+  transmissionThicknessLadderRect,
+  transmissionRectBacklit
+} from './scenes/transmission-thickness';
 import {
   hairScatterOff,
   hairScatterOn,
@@ -102,6 +127,18 @@ export const SCENES: VisualScene[] = [
   // Lighting paths.
   clusterManyLights,
   spotShadow,
+  rectLightDiffuse,
+  rectLightGlossy,
+  rectLightPhysical,
+  rectLightShadow,
+  rectLightMaterials,
+  rectLightBlueprint,
+  rectLightPcssSmall,
+  rectLightPcssLarge,
+  rectLightPcssWall,
+  rectLightAutoRange,
+  rectLightShadowDom,
+  pointLightShadowDom,
   // Water: the medium, and the caustics it focuses onto what is under it.
   waterCausticsOff,
   waterCausticsOn,
@@ -133,9 +170,18 @@ export const SCENES: VisualScene[] = [
   postMotionBlurLong,
   taaMultiframe,
   // Digital-human materials.
-  skinSss,
+  sss,
   skinDiffusionJade,
   skinShadow,
+  // Light-space thickness. Computed rather than compared - see the scene file.
+  transmissionThicknessLadder,
+  transmissionThicknessScale,
+  transmissionThicknessSlant,
+  transmissionThicknessSphere,
+  transmissionThicknessSphereFine,
+  transmissionThicknessLadderPoint,
+  transmissionThicknessLadderRect,
+  transmissionRectBacklit,
   hair,
   // Strand hair: the curve import paths, from container bytes to ribbons.
   hairStrandsHelix,

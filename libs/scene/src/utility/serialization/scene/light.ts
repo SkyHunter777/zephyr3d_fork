@@ -4,6 +4,7 @@ import { defineProps, type SerializableClass } from '../types';
 import { AABB, degree2radian, radian2degree, Vector4 } from '@zephyr3d/base';
 import { SceneNode } from '../../../scene';
 import type { ShadowMode } from '../../../shadow';
+import { ShadowMapper } from '../../../shadow/shadowmapper';
 
 /** @internal */
 export function getPunctualLightClass(): SerializableClass {
@@ -48,6 +49,19 @@ export function getPunctualLightClass(): SerializableClass {
           },
           isHidden(this: BaseLight) {
             return this.scene?.lightingMode === 'physical';
+          }
+        },
+        {
+          name: 'Transmission',
+          description: 'If true, this light lights subsurface materials from behind. Requires CastShadow',
+          type: 'bool',
+          phase: 0,
+          default: false,
+          get(this: PunctualLight, value) {
+            value.bool[0] = this.transmission;
+          },
+          set(this: PunctualLight, value) {
+            this.transmission = value.bool[0];
           }
         },
         {
@@ -224,7 +238,9 @@ export function getPunctualLightClass(): SerializableClass {
           description: 'Near clip distance for shadow camera',
           type: 'float',
           phase: 1,
-          default: 1,
+          getDefaultValue(this: PunctualLight) {
+            return ShadowMapper.getDefaultNearClip(this);
+          },
           options: {
             minValue: 0.01,
             maxValue: 10
@@ -964,7 +980,7 @@ export function getRectLightClass(): SerializableClass {
         },
         {
           name: 'Range',
-          description: 'Light range in world unit',
+          description: 'How far the light reaches, in world units; 0 derives it from the brightness and size',
           type: 'float',
           default: 10,
           options: {

@@ -14,6 +14,7 @@ import { mixinTextureProps } from './texture';
 import type { IMixinAlbedoColor } from './albedocolor';
 import { mixinAlbedoColor } from './albedocolor';
 import { ShaderHelper } from '../shader/helper';
+import { defineLTCEdgeFunctions } from '../../shaders/ltc_rect';
 
 /**
  * Interface for light mixin
@@ -73,7 +74,8 @@ export type IMixinLight = {
     type: PBShaderExp,
     worldPos: PBShaderExp,
     posRange: PBShaderExp,
-    dirCutoff: PBShaderExp
+    dirCutoff: PBShaderExp,
+    extra?: PBShaderExp
   ): PBShaderExp;
   calculateShadow(
     scope: PBInsideFunctionScope,
@@ -90,7 +92,9 @@ export type IMixinLight = {
       dirCutoff: PBShaderExp,
       colorIntensity: PBShaderExp,
       extra: PBShaderExp,
-      shadow: boolean
+      shadow: boolean,
+      thickness: PBShaderExp,
+      unshadowedColorIntensity: PBShaderExp
     ) => void
   ): void;
 } & TextureMixinInstanceTypes<['normal']> &
@@ -679,6 +683,83 @@ export function mixinLight<T extends typeof MeshMaterial>(BaseCls: T) {
       const resolvedScaleOffset = physical && angleScaleOffset ? angleScaleOffset : pb.vec2(0);
       return pb.getGlobalScope()[funcName](worldPos, posRange, dirCutoff, resolvedScaleOffset);
     }
+    /**
+     * A rect light reduced to one direction and one magnitude, for BxDFs that
+     * have no area-light integration of their own.
+     *
+     * @remarks
+     * The vector form factor `F` of the rect as seen from `worldPos`, after UE5's
+     * `RectIrradianceLambert`: `dot(F, N)` is the form factor for a surface of
+     * normal `N`, exactly so while the rect is above that surface's horizon. So a
+     * BxDF that shades an ordinary light as `color * attenuation * NoL` receives
+     * the rect's true irradiance when handed direction `F / |F|` and attenuation
+     * `pi * |F|` - `pi * luminance * formFactor` is the irradiance a Lambertian
+     * emitter of that luminance delivers. Below the horizon the clamped `NoL` the
+     * BxDF applies drops the clipped part of the rect rather than integrating it,
+     * which is where this is approximate; UE5 wraps the cosine there instead.
+     *
+     * The edge term is the same fit the LTC path integrates with (it returns
+     * `theta / (2 pi sin theta)`, so the sum is already the form factor), and the
+     * range window is the LTC path's too, so a rect light reads the same through
+     * either.
+     *
+     * Returns `(direction, formFactor)`. Behind the light's plane - rect lights
+     * are one-sided - and for a degenerate rect the form factor is 0 and the
+     * direction is towards the centre.
+     *
+     * @internal
+     */
+    protected calculateRectLightVectorIrradiance(
+      scope: PBInsideFunctionScope,
+      worldPos: PBShaderExp,
+      posRange: PBShaderExp,
+      axisX: PBShaderExp,
+      axisY: PBShaderExp
+    ): PBShaderExp {
+      const pb = scope.$builder;
+      defineLTCEdgeFunctions(scope);
+      pb.func(
+        'Z_rectLightVectorIrradiance',
+        [pb.vec3('worldPos'), pb.vec4('posRange'), pb.vec3('ax'), pb.vec3('ay')],
+        function () {
+          this.$l.toCenter = pb.sub(this.posRange.xyz, this.worldPos);
+          this.$l.dist = pb.length(this.toCenter);
+          this.$l.centerDir = pb.div(this.toCenter, pb.max(this.dist, 1e-6));
+          this.$l.planeNormal = pb.cross(this.ax, this.ay);
+          // The rect emits along -(ax x ay), so a lit point lies on that side of
+          // it, where the vector back to the centre points along +(ax x ay).
+          this.$if(
+            pb.or(
+              pb.lessThan(pb.dot(this.planeNormal, this.planeNormal), 1e-12),
+              pb.lessThanEqual(pb.dot(this.planeNormal, this.toCenter), 0)
+            ),
+            function () {
+              this.$return(pb.vec4(this.centerDir, 0));
+            }
+          );
+          this.$l.v0 = pb.normalize(pb.sub(pb.sub(this.toCenter, this.ax), this.ay));
+          this.$l.v1 = pb.normalize(pb.sub(pb.add(this.toCenter, this.ax), this.ay));
+          this.$l.v2 = pb.normalize(pb.add(pb.add(this.toCenter, this.ax), this.ay));
+          this.$l.v3 = pb.normalize(pb.add(pb.sub(this.toCenter, this.ax), this.ay));
+          this.$l.F = pb.add(
+            this.Z_LTCIntegrateEdgeVec(this.v0, this.v1),
+            this.Z_LTCIntegrateEdgeVec(this.v1, this.v2),
+            this.Z_LTCIntegrateEdgeVec(this.v2, this.v3),
+            this.Z_LTCIntegrateEdgeVec(this.v3, this.v0)
+          );
+          this.$l.len = pb.length(this.F);
+          this.$if(pb.lessThan(this.len, 1e-8), function () {
+            this.$return(pb.vec4(this.centerDir, 0));
+          });
+          this.$l.falloff = pb.float(1);
+          this.$if(pb.greaterThan(this.posRange.w, 0), function () {
+            this.falloff = pb.sub(1, pb.smoothStep(pb.mul(this.posRange.w, 0.9), this.posRange.w, this.dist));
+          });
+          this.$return(pb.vec4(pb.div(this.F, this.len), pb.mul(this.len, this.falloff)));
+        }
+      );
+      return pb.getGlobalScope().Z_rectLightVectorIrradiance(worldPos, posRange, axisX, axisY);
+    }
     calculateLightAttenuation(
       scope: PBInsideFunctionScope,
       type: PBShaderExp,
@@ -688,19 +769,57 @@ export function mixinLight<T extends typeof MeshMaterial>(BaseCls: T) {
       extra?: PBShaderExp
     ) {
       const pb = scope.$builder;
-      const attenuation = scope.$choice(
-        pb.equal(type, LIGHT_TYPE_DIRECTIONAL),
-        pb.float(1),
-        scope.$choice(
-          pb.equal(type, LIGHT_TYPE_POINT),
-          this.calculatePointLightAttenuation(scope, worldPos.xyz, posRange),
-          scope.$choice(
-            pb.equal(type, LIGHT_TYPE_RECT),
-            this.calculatePointLightAttenuation(scope, worldPos.xyz, posRange),
-            this.calculateSpotLightAttenuation(scope, worldPos.xyz, posRange, dirCutoff, extra?.xy)
-          )
-        )
+      const that = this;
+      const physical = this.drawContext.scene.lightingMode === 'physical';
+      // Branches rather than a $choice, which would evaluate every light type's
+      // attenuation - the rect's vector form factor included - for every light.
+      // Named per mode because the spot light body it calls differs by mode.
+      const funcName = physical ? 'Z_calculateLightAttenuationPhysical' : 'Z_calculateLightAttenuation';
+      pb.func(
+        funcName,
+        [
+          pb.int('lightType'),
+          pb.vec3('worldPos'),
+          pb.vec4('posRange'),
+          pb.vec4('dirCutoff'),
+          pb.vec4('extra')
+        ],
+        function () {
+          this.$if(pb.equal(this.lightType, LIGHT_TYPE_DIRECTIONAL), function () {
+            this.$return(pb.float(1));
+          });
+          this.$if(pb.equal(this.lightType, LIGHT_TYPE_POINT), function () {
+            this.$return(that.calculatePointLightAttenuation(this, this.worldPos, this.posRange));
+          });
+          this.$if(pb.equal(this.lightType, LIGHT_TYPE_RECT), function () {
+            // extra.xyz carries the rect's half-height axis; see RectLight.computeUniforms.
+            this.$return(
+              pb.mul(
+                that.calculateRectLightVectorIrradiance(
+                  this,
+                  this.worldPos,
+                  this.posRange,
+                  this.dirCutoff.xyz,
+                  this.extra.xyz
+                ).w,
+                Math.PI
+              )
+            );
+          });
+          this.$return(
+            that.calculateSpotLightAttenuation(
+              this,
+              this.worldPos,
+              this.posRange,
+              this.dirCutoff,
+              this.extra.xy
+            )
+          );
+        }
       );
+      const attenuation = pb
+        .getGlobalScope()
+        [funcName](type, worldPos.xyz, posRange, dirCutoff, extra ?? pb.vec4(0)) as PBShaderExp;
       // Water caustics ride here rather than on calculateShadow(): every light
       // model already folds this value into its light colour and nothing else
       // reads it, so a vec3 return applies the caustic tint everywhere without
@@ -713,20 +832,78 @@ export function mixinLight<T extends typeof MeshMaterial>(BaseCls: T) {
         : null;
       return caustic ? pb.mul(caustic, attenuation) : attenuation;
     }
+    /**
+     * Unit vector from `worldPos` towards the light.
+     *
+     * @remarks
+     * For a rect light this is the direction of its vector form factor (see
+     * {@link calculateRectLightVectorIrradiance}), which needs the rect's second
+     * axis from `extra`. Without `extra` a rect light falls back to the direction
+     * of its centre.
+     */
     calculateLightDirection(
       scope: PBInsideFunctionScope,
       type: PBShaderExp,
       worldPos: PBShaderExp,
       posRange: PBShaderExp,
-      dirCutoff: PBShaderExp
+      dirCutoff: PBShaderExp,
+      extra?: PBShaderExp
     ) {
       const pb = scope.$builder;
-      return scope.$choice(
-        pb.equal(type, LIGHT_TYPE_DIRECTIONAL),
-        pb.neg(dirCutoff.xyz),
-        pb.normalize(pb.sub(posRange.xyz, worldPos.xyz))
+      if (!extra) {
+        return scope.$choice(
+          pb.equal(type, LIGHT_TYPE_DIRECTIONAL),
+          pb.neg(dirCutoff.xyz),
+          pb.normalize(pb.sub(posRange.xyz, worldPos.xyz))
+        );
+      }
+      const that = this;
+      pb.func(
+        'Z_calculateLightDirection',
+        [
+          pb.int('lightType'),
+          pb.vec3('worldPos'),
+          pb.vec4('posRange'),
+          pb.vec4('dirCutoff'),
+          pb.vec4('extra')
+        ],
+        function () {
+          this.$if(pb.equal(this.lightType, LIGHT_TYPE_DIRECTIONAL), function () {
+            this.$return(pb.neg(this.dirCutoff.xyz));
+          });
+          this.$if(pb.equal(this.lightType, LIGHT_TYPE_RECT), function () {
+            this.$return(
+              that.calculateRectLightVectorIrradiance(
+                this,
+                this.worldPos,
+                this.posRange,
+                this.dirCutoff.xyz,
+                this.extra.xyz
+              ).xyz
+            );
+          });
+          this.$return(pb.normalize(pb.sub(this.posRange.xyz, this.worldPos)));
+        }
       );
+      return pb
+        .getGlobalScope()
+        .Z_calculateLightDirection(type, worldPos.xyz, posRange, dirCutoff, extra) as PBShaderExp;
     }
+    /**
+     * Invokes `callback` once per light affecting the fragment.
+     *
+     * @remarks
+     * On the clustered path with the screen-space shadow mask, `colorIntensity`
+     * arrives with the light's shadow already multiplied in, which is what every
+     * surface term wants. `unshadowedColorIntensity` is the same light before
+     * that: transmission is attenuated by the thickness it measures, not by the
+     * surface shadow - UE5's subsurface transmission reads the encoded optical
+     * depth as its shadow term instead - and a back-lit surface is by
+     * construction fully in its light's shadow, so the shadowed colour would
+     * zero exactly the pixels transmission exists for. On the per-light additive
+     * path the two are the same value; the callback applies that shadow itself
+     * (`shadow` is true).
+     */
     forEachLight(
       scope: PBInsideFunctionScope,
       callback: (
@@ -736,7 +913,9 @@ export function mixinLight<T extends typeof MeshMaterial>(BaseCls: T) {
         dirCutoff: PBShaderExp,
         colorIntensity: PBShaderExp,
         extra: PBShaderExp,
-        shadow: boolean
+        shadow: boolean,
+        thickness: PBShaderExp,
+        unshadowedColorIntensity: PBShaderExp
       ) => void
     ) {
       const pb = scope.$builder;
@@ -752,7 +931,22 @@ export function mixinLight<T extends typeof MeshMaterial>(BaseCls: T) {
         const extra = scope.light.extraParams ?? pb.vec4(0);
         scope.$scope(function () {
           const lightType = pb.int(extra.w);
-          callback.call(this, lightType, posRange, dirCutoff, colorIntensity, extra, true);
+          // The per-light additive path has no thickness texture: it is produced
+          // for the clustered queue only. 1 is the "no data" sentinel the
+          // thickness pass can never write, so consumers read this as "this
+          // light contributes no transmission" rather than as zero thickness —
+          // which would be the *most* transmissive reading of the encoding.
+          callback.call(
+            this,
+            lightType,
+            posRange,
+            dirCutoff,
+            colorIntensity,
+            extra,
+            true,
+            pb.float(1),
+            colorIntensity
+          );
         });
       } else {
         scope.$scope(function () {
@@ -801,12 +995,17 @@ export function mixinLight<T extends typeof MeshMaterial>(BaseCls: T) {
                       this.$l.directionCutoff = ShaderHelper.getLightDirectionAndCutoff(this, this.j);
                       this.$l.diffuseIntensity = ShaderHelper.getLightColorAndIntensity(this, this.j);
                       this.$l.extra = ShaderHelper.getLightExtra(this, this.j);
+                      this.$l.unshadowedIntensity = this.diffuseIntensity;
                       if (that.drawContext.screenSpaceShadowMask) {
                         this.$l.shadowMask = ShaderHelper.sampleShadowMask(this, this.j);
                         this.diffuseIntensity = pb.vec4(
                           pb.mul(this.diffuseIntensity.rgb, this.shadowMask),
                           this.diffuseIntensity.w
                         );
+                      }
+                      this.$l.thickness = pb.float(1);
+                      if (that.drawContext.transmissionThickness) {
+                        this.thickness = ShaderHelper.sampleTransmissionThickness(this, this.j);
                       }
                       this.$l.lightType = pb.int(this.extra.w);
                       this.$scope(function () {
@@ -817,7 +1016,9 @@ export function mixinLight<T extends typeof MeshMaterial>(BaseCls: T) {
                           this.directionCutoff,
                           this.diffuseIntensity,
                           this.extra,
-                          false
+                          false,
+                          this.thickness,
+                          this.unshadowedIntensity
                         );
                       });
                       this.$break();
@@ -835,6 +1036,7 @@ export function mixinLight<T extends typeof MeshMaterial>(BaseCls: T) {
                   this.$l.directionCutoff = ShaderHelper.getLightDirectionAndCutoff(this, this.c);
                   this.$l.diffuseIntensity = ShaderHelper.getLightColorAndIntensity(this, this.c);
                   this.$l.extra = ShaderHelper.getLightExtra(this, this.c);
+                  this.$l.unshadowedIntensity = this.diffuseIntensity;
                   if (that.drawContext.screenSpaceShadowMask) {
                     // Shadow-casting lights (buffer index <= numShadowLights) attenuate
                     // by the pre-rendered screen-space shadow mask; others return 1.0.
@@ -843,6 +1045,10 @@ export function mixinLight<T extends typeof MeshMaterial>(BaseCls: T) {
                       pb.mul(this.diffuseIntensity.rgb, this.shadowMask),
                       this.diffuseIntensity.w
                     );
+                  }
+                  this.$l.thickness = pb.float(1);
+                  if (that.drawContext.transmissionThickness) {
+                    this.thickness = ShaderHelper.sampleTransmissionThickness(this, pb.int(this.c));
                   }
                   this.$l.lightType = pb.int(this.extra.w);
                   this.$scope(function () {
@@ -853,7 +1059,9 @@ export function mixinLight<T extends typeof MeshMaterial>(BaseCls: T) {
                       this.directionCutoff,
                       this.diffuseIntensity,
                       this.extra,
-                      false
+                      false,
+                      this.thickness,
+                      this.unshadowedIntensity
                     );
                   });
                 });

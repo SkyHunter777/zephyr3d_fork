@@ -30,7 +30,7 @@ import type { PCFPD } from './pcf_pd';
 import { PCFOPT } from './pcf_opt';
 import { PCSS } from './pcss';
 import { DOM } from './dom';
-import type { PointLight, PunctualLight, RectLight, SpotLight } from '../scene/light';
+import type { PunctualLight, SpotLight } from '../scene/light';
 import type { ShadowMapPass } from '../render/shadowmap_pass';
 import type { Scene } from '../scene/scene';
 import type { ShadowImpl } from './shadow_impl';
@@ -92,6 +92,17 @@ export type ShadowMapParams = {
    * instead of recomputing shadows (e.g. the SSS combine pass).
    */
   maskOrdinal?: number;
+  /**
+   * The cube face being rendered, while a point-projection shadow map draws its
+   * casters. Lets an implementation that binds framebuffers of its own target
+   * the same face the shared one is on.
+   */
+  cubeFace?: CubeFace;
+  /**
+   * World distance that a normalized depth of 1 stands for in a point-projection
+   * shadow map, whose casters store radial distance over the light's range.
+   */
+  depthRange?: number;
 };
 
 /** @internal */
@@ -201,7 +212,7 @@ export class ShadowMapper extends Disposable {
       splitLambda: 0.5,
       depthBias: 0.003,
       normalBias: 1.5,
-      nearClip: 1
+      nearClip: ShadowMapper.getDefaultNearClip(light)
     };
     this._resourceDirty = true;
     this._shadowMode = 'pcf';
@@ -387,7 +398,9 @@ export class ShadowMapper extends Disposable {
       this.splitLambda = 0.75;
       this.depthBias = 0.005;
       this.normalBias = 2;
-      this.nearClip = 0.2;
+      // Tighter than the default for spot lights; point and rect lights are
+      // already at their close-range default.
+      this.nearClip = Math.min(0.2, ShadowMapper.getDefaultNearClip(this._light));
       this.pcfKernelSize = 5;
       this.numShadowCascades = this._light.isDirectionLight() ? 3 : 1;
       return;
@@ -398,7 +411,7 @@ export class ShadowMapper extends Disposable {
     this.splitLambda = 0.6;
     this.depthBias = 0.0035;
     this.normalBias = 1.5;
-    this.nearClip = 1;
+    this.nearClip = ShadowMapper.getDefaultNearClip(this._light);
     this.pcfKernelSize = 3;
     this.numShadowCascades = this._light.isDirectionLight() ? 4 : 1;
   }
@@ -450,7 +463,13 @@ export class ShadowMapper extends Disposable {
       }
     }
   }
-  /** Light radius for PCSS shadow, measured in shadow-map texels */
+  /**
+   * Light radius for PCSS shadow, measured in shadow-map texels.
+   *
+   * @remarks
+   * Ignored for rect lights, whose penumbra is derived from their actual size
+   * and the receiver's distance instead.
+   */
   get pcssLightRadius() {
     return this._pcssLightRadius;
   }
@@ -850,7 +869,7 @@ export class ShadowMapper extends Disposable {
     */
     shadowMapParams.shadowMapFramebuffer = ShadowMapper.fetchTemporalFramebuffer(
       true,
-      this._light.lightType,
+      shadowMapParams.lightType,
       numCascades,
       shadowMapWidth,
       shadowMapHeight,
@@ -859,6 +878,38 @@ export class ShadowMapper extends Disposable {
     );
     shadowMapParams.impl = this._impl;
     this._impl!.updateResources(shadowMapParams);
+  }
+  /**
+   * Default shadow camera near plane for a light, in world units.
+   *
+   * @remarks
+   * Anything nearer the light than this is clipped out of the shadow map, so it
+   * neither casts a shadow nor contributes a transmission thickness. Point and
+   * rect lights are routinely placed right next to what they light - a lamp over
+   * a desk, a softbox beside a face - so a 1 m near plane silently lost exactly
+   * those casters. UE5 clamps its one-pass point light shadows at a comparable
+   * `MinLightW`. Spot lights keep 1, which suits their usual throw. Directional
+   * lights do not use it.
+   *
+   * @internal
+   */
+  static getDefaultNearClip(light: PunctualLight) {
+    return light.isPointLight() || light.isRectLight() ? 0.1 : 1;
+  }
+  /**
+   * The projection a light's shadow map is rendered with, which is not always the light's own type.
+   *
+   * @remarks
+   * A rect light emits into a whole hemisphere, which no single frustum covers, so it renders a
+   * point light's cube map from its centre - UE5 does the same (`bOnePassPointLightShadow` in
+   * `FRectLightSceneProxy`). Everything downstream of the shadow map keys on this value, so the
+   * rect light inherits the cube path of every shadow implementation unchanged. Receivers behind
+   * the light's plane get no light at all, so the back half of the cube needs no masking.
+   *
+   * @internal
+   */
+  static getShadowProjectionType(light: PunctualLight) {
+    return light.isRectLight() ? LIGHT_TYPE_POINT : light.lightType;
   }
   /** @internal */
   protected createLightCameraPoint(lightCamera: Camera) {
@@ -871,7 +922,7 @@ export class ShadowMapper extends Disposable {
       Math.PI / 2,
       1,
       this._config.nearClip!,
-      Math.min(this._shadowDistance, (this._light as PointLight).positionAndRange.w)
+      Math.min(this._shadowDistance, this._light.positionAndRange.w)
     );
     lightCamera.position.set(this._light.positionAndRange.xyz());
   }
@@ -890,24 +941,6 @@ export class ShadowMapper extends Disposable {
       1,
       this._config.nearClip,
       Math.min(this._shadowDistance, spot.positionAndRange.w)
-    );
-  }
-  /** @internal */
-  protected createLightCameraRect(lightCamera: Camera) {
-    const rect = this._light as RectLight;
-    this._light.worldMatrix.decompose(null, lightCamera.rotation, lightCamera.position);
-    lightCamera.parent = this._light.scene?.rootNode ?? null;
-    lightCamera.scale.setXYZ(1, 1, 1);
-    const halfW = rect.width * 0.5;
-    const halfH = rect.height * 0.5;
-    const far = Math.min(this._shadowDistance, rect.range);
-    lightCamera.setOrtho(
-      -halfW,
-      halfW,
-      -halfH,
-      halfH,
-      this._config.nearClip,
-      Math.max(this._config.nearClip + 0.001, far)
     );
   }
   /** @internal */
@@ -1087,6 +1120,8 @@ export class ShadowMapper extends Disposable {
       // Pooled objects retain last frame's ordinal; clear it so it is only set
       // again by ShadowMaskRenderer for lights actually written to the mask.
       params.maskOrdinal = undefined;
+      params.cubeFace = undefined;
+      params.depthRange = undefined;
       return params;
     } else {
       return {
@@ -1188,7 +1223,15 @@ export class ShadowMapper extends Disposable {
     }
     const shadowMapParams = ShadowMapper.fetchShadowMapParams();
     shadowMapParams.impl = this._impl;
-    shadowMapParams.lightType = this.light.lightType;
+    shadowMapParams.lightType = ShadowMapper.getShadowProjectionType(this.light);
+    if (this._impl instanceof PCSS) {
+      // A rect light's penumbra follows its size: the radius of the disc of
+      // equal area, in world units. Refreshed every frame so resizing the
+      // light is picked up without touching the shadow settings.
+      this._impl.physicalLightRadius = this._light.isRectLight()
+        ? Math.sqrt((this._light.width * this._light.height) / Math.PI)
+        : 0;
+    }
     shadowMapParams.numShadowCascades =
       shadowMapParams.lightType === LIGHT_TYPE_DIRECTIONAL && this._impl!.supportsCascades()
         ? (this._config.numCascades ?? 1)
@@ -1235,7 +1278,7 @@ export class ShadowMapper extends Disposable {
       this._light.isDirectionLight() && directionalShadowRegion?.isValid()
         ? directionalShadowRegion
         : scene.boundingBox;
-    if (this._light.isPointLight()) {
+    if (shadowMapParams.lightType === LIGHT_TYPE_POINT) {
       const shadowMapRenderCamera = ShadowMapper.fetchCameraForScene(scene);
       this.createLightCameraPoint(shadowMapRenderCamera);
       this.calcDepthBiasParams(
@@ -1254,10 +1297,12 @@ export class ShadowMapper extends Disposable {
       );
       device.setFramebuffer(fb);
       shadowMapParams.shadowMatrices.set(Matrix4x4.transpose(shadowMapRenderCamera.viewMatrix));
+      shadowMapParams.depthRange = this._light.positionAndRange.w;
       for (const face of [CubeFace.PX, CubeFace.NX, CubeFace.PY, CubeFace.NY, CubeFace.PZ, CubeFace.NZ]) {
         shadowMapRenderCamera.lookAtCubeFace(face);
         fb.setColorAttachmentCubeFace(0, face);
         fb.setDepthAttachmentCubeFace(face);
+        shadowMapParams.cubeFace = face;
         renderGeometry(shadowMapRenderCamera);
       }
       shadowMapParams.shadowMatrices.set(Matrix4x4.identity());
@@ -1381,8 +1426,6 @@ export class ShadowMapper extends Disposable {
             snapMatrix,
             shadowMapParams.impl!.getShadowMapBorder(shadowMapParams)
           );
-        } else if (this._light.isRectLight()) {
-          this.createLightCameraRect(shadowMapRenderCamera);
         } else {
           this.createLightCameraSpot(shadowMapRenderCamera);
         }
